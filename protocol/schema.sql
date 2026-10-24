@@ -1,0 +1,201 @@
+-- ============================================================
+-- EiseChat 数据库表结构 v1（唯一来源）
+-- ============================================================
+-- 依据：docs/internal-plan.md §4.4（计划 V2.3.2）、docs/project-overview.md §11.2
+-- 配套：protocol/protocol.md（帧与字段唯一来源）
+--
+-- 约定：
+--   * 数据库：SQLite，单文件 /data/chat.db；表名与列名 snake_case
+--   * 主键：UUID 文本（小写、36 位带连字符，服务端用 Guid.NewGuid().ToString() 生成）
+--   * 时间：一律 INTEGER，存 UTC 毫秒（如 created_at、expires_at）
+--   * 布尔：INTEGER（0/1）
+--   * 枚举：TEXT + CHECK 约束（值域见各列注释）
+--   * JSON：content_json / detail_json 存 JSON 文本；text 消息为 JSON 字符串，其余为 JSON 对象
+--
+-- 运行时由服务端连接初始化（不在本文件执行）：
+--   PRAGMA journal_mode = WAL;  PRAGMA foreign_keys = ON;
+--   迁移：EF Core 启动时自动执行（server/Chat.Server/Data/Migrations），必须幂等；
+--   本文件与 EF 迁移同步维护；只允许向后兼容增量（新增表/新增可空列或带默认值列/新增索引）。
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- users：用户账号
+-- role   : user / admin（管理员）
+-- status : active / disabled（禁用后不可登录、不发消息）
+-- avatar_file_id 为便利引用（指向 files.id），不加外键以避免 users ↔ files 循环依赖；
+-- 由服务端在文件清理时维护一致性。
+-- ------------------------------------------------------------
+CREATE TABLE users (
+    id                TEXT PRIMARY KEY NOT NULL,
+    email             TEXT NOT NULL UNIQUE,
+    display_name      TEXT NOT NULL,
+    password_hash     TEXT,
+    email_verified_at INTEGER,
+    avatar_file_id    TEXT,
+    role              TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    created_at        INTEGER NOT NULL
+);
+
+-- ------------------------------------------------------------
+-- email_codes：邮箱验证码（只存哈希，不存明文）
+-- purpose : register / login
+-- ip      : 请求来源 IP（可为空，便于限流排查）
+-- ------------------------------------------------------------
+CREATE TABLE email_codes (
+    id         TEXT PRIMARY KEY NOT NULL,
+    email      TEXT NOT NULL,
+    purpose    TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
+    code_hash  TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    ip         TEXT
+);
+
+CREATE INDEX idx_email_codes_email_purpose_created_at ON email_codes (email, purpose, created_at);
+CREATE INDEX idx_email_codes_expires_at ON email_codes (expires_at);
+
+-- ------------------------------------------------------------
+-- sessions：登录会话（JWT 可撤销；jwt_id 对应 JWT 的 jti）
+-- device_id    : 客户端设备标识（同一设备重连复用）
+-- revoked_at   : 非空表示已撤销/注销
+-- ------------------------------------------------------------
+CREATE TABLE sessions (
+    id           TEXT PRIMARY KEY NOT NULL,
+    user_id      TEXT NOT NULL,
+    device_id    TEXT NOT NULL,
+    jwt_id       TEXT NOT NULL UNIQUE,
+    created_at   INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    revoked_at   INTEGER,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_sessions_user_id ON sessions (user_id);
+
+-- ------------------------------------------------------------
+-- files：上传文件元数据（二进制存磁盘 /data/files/yyyyMM/{fileId}{ext}）
+-- ------------------------------------------------------------
+CREATE TABLE files (
+    id            TEXT PRIMARY KEY NOT NULL,
+    owner_id      TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    mime          TEXT NOT NULL,
+    size          INTEGER NOT NULL CHECK (size >= 0),
+    storage_path  TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users (id)
+);
+
+CREATE INDEX idx_files_owner_id ON files (owner_id);
+
+-- ------------------------------------------------------------
+-- conversations：会话（单聊 / 群聊）
+-- type         : direct / group
+-- title        : 群标题；单聊为空（客户端用对方昵称展示）
+-- direct_key   : 单聊唯一键（两个用户 ID 排序后拼接，如 "u1:u2"）；群聊为 NULL
+-- last_seq     : 会话最新消息序号，只增不减（未读与补拉基数）
+-- last_message_id 为便利引用（指向 messages.id），不加外键以避免 conversations ↔ messages 循环依赖
+-- ------------------------------------------------------------
+CREATE TABLE conversations (
+    id              TEXT PRIMARY KEY NOT NULL,
+    type            TEXT NOT NULL CHECK (type IN ('direct', 'group')),
+    title           TEXT,
+    direct_key      TEXT UNIQUE,
+    created_by      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    last_seq        INTEGER NOT NULL DEFAULT 0,
+    last_message_id TEXT,
+    CHECK ((type = 'direct' AND direct_key IS NOT NULL) OR (type = 'group' AND direct_key IS NULL)),
+    FOREIGN KEY (created_by) REFERENCES users (id)
+);
+
+CREATE INDEX idx_conversations_last_message_id ON conversations (last_message_id);
+
+-- ------------------------------------------------------------
+-- conversation_members：会话成员
+-- role          : owner / member
+-- last_read_seq : 已读游标，只增不减（未读 = 会话 last_seq − last_read_seq）
+-- ------------------------------------------------------------
+CREATE TABLE conversation_members (
+    conversation_id TEXT NOT NULL,
+    user_id         TEXT NOT NULL,
+    role            TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
+    joined_at       INTEGER NOT NULL,
+    last_read_seq   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (conversation_id, user_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_conversation_members_user_id ON conversation_members (user_id);
+
+-- ------------------------------------------------------------
+-- messages：消息
+-- seq           : 会话内严格单调 +1，服务端在事务内分配，落库后不可变
+-- client_msg_id : 客户端 UUID 幂等键，(conversation_id, client_msg_id) 唯一
+-- content_json  : 按 msg_type 解释的 JSON 文本（text 为 JSON 字符串，image/file/system 为 JSON 对象）
+-- reply_to      : 被回复消息 ID（自引用）
+-- deleted_at    : 预留（v1 不做撤回，恒为 NULL；P2 撤回使用）
+-- ------------------------------------------------------------
+CREATE TABLE messages (
+    id              TEXT PRIMARY KEY NOT NULL,
+    conversation_id TEXT NOT NULL,
+    sender_id       TEXT NOT NULL,
+    client_msg_id   TEXT NOT NULL,
+    seq             INTEGER NOT NULL,
+    msg_type        TEXT NOT NULL CHECK (msg_type IN ('text', 'image', 'file', 'system')),
+    content_json    TEXT NOT NULL,
+    reply_to        TEXT,
+    created_at      INTEGER NOT NULL,
+    deleted_at      INTEGER,
+    UNIQUE (conversation_id, client_msg_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users (id),
+    FOREIGN KEY (reply_to) REFERENCES messages (id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_messages_conversation_seq ON messages (conversation_id, seq);
+CREATE INDEX idx_messages_reply_to ON messages (reply_to);
+
+-- ------------------------------------------------------------
+-- invites：注册邀请码（可配置是否需要邀请；code 为明文短码）
+-- used_by    : 使用者（已用邀请码只能使用一次）
+-- expires_at : NULL 表示不限期
+-- ------------------------------------------------------------
+CREATE TABLE invites (
+    code       TEXT PRIMARY KEY NOT NULL,
+    created_by TEXT NOT NULL,
+    used_by    TEXT,
+    expires_at INTEGER,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users (id),
+    FOREIGN KEY (used_by) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_invites_created_by ON invites (created_by);
+
+-- ------------------------------------------------------------
+-- admin_audit_logs：管理员操作审计
+-- detail_json : 操作详情 JSON（不得包含 token/密码/验证码等敏感值）
+-- ------------------------------------------------------------
+CREATE TABLE admin_audit_logs (
+    id          TEXT PRIMARY KEY NOT NULL,
+    admin_id    TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target      TEXT,
+    detail_json TEXT,
+    created_at  INTEGER NOT NULL,
+    FOREIGN KEY (admin_id) REFERENCES users (id)
+);
+
+CREATE INDEX idx_admin_audit_logs_admin_created_at ON admin_audit_logs (admin_id, created_at);
+
+-- ------------------------------------------------------------
+-- app_settings：全局配置（key/value，value 为 JSON 文本；敏感值仍放 secrets.json）
+-- ------------------------------------------------------------
+CREATE TABLE app_settings (
+    key   TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
