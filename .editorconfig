@@ -1,0 +1,22 @@
+# EiseChat 编辑器统一配置
+# 依据：AGENTS.md §4（命名/编码/换行）与 docs/project-overview.md §7.2（UTF-8、LF、C# 4 空格 / TS 2 空格）。
+# 规则：UTF-8（无 BOM）、LF 换行、文件末尾换行；默认 2 空格，C# 用 4 空格，Markdown 不限制缩进。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# C#：按 docs/project-overview.md §7.2 与 .NET 惯例使用 4 空格
+[*.cs]
+indent_size = 4
+
+# Markdown：缩进不限制；行尾空格有硬换行语义，不自动裁剪
+[*.md]
+indent_style = unset
+indent_size = unset
+trim_trailing_whitespace = false
