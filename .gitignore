@@ -1,1 +1,78 @@
-﻿/docs/test/
+# EiseChat 仓库忽略清单
+# 依据：AGENTS.md §4「不提交」+ 各技术栈标准产物。
+# 原则：构建产物、运行时数据、密钥凭据、IDE/系统临时文件一律不入库。
+# 新增依赖或工具链时，同步在此补一行，不要提交二进制大文件。
+
+# ==== 通用 / 系统 ====
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.tmp
+tmp/
+temp/
+
+# ==== 编辑器 / IDE ====
+.vscode/
+.idea/
+*.user
+*.suo
+*.tsbuildinfo
+.eslintcache
+coverage/
+
+# ==== Node / 前端 ====
+node_modules/
+dist/
+dist-ssr/
+.npm/
+.pnpm-store/
+.env
+.env.*
+!.env.example
+
+# ==== Electron ====
+.electron-builder/
+apps/desktop/release/
+
+# ==== .NET ====
+bin/
+obj/
+publish/
+TestResults/
+.vs/
+
+# ==== 运行时数据（服务端唯一事实源，只存在服务器/本机 data/） ====
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+logs/
+*.log
+*.pid
+
+# ==== 密钥与凭据（AGENTS.md §2.6：绝不进源码/提交历史） ====
+secrets.json
+secrets.*.json
+*.pfx
+*.pem
+*.key
+infra/keys/
+*.keystore
+*.jks
+key.properties
+
+# ==== Android / Capacitor 构建产物 ====
+apps/mobile/android/.gradle/
+apps/mobile/android/build/
+apps/mobile/android/app/build/
+apps/mobile/android/local.properties
+apps/mobile/android/app/src/main/assets/public/
+*.apk
+*.aab
+*.idsig
+
+# ==== 测试与临时文件（AGENTS §4/§11：测试文件统一放 docs/test/，不入库，可随时删除） ====
+/docs/test/

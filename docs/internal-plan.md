@@ -1,7 +1,7 @@
-# 内部版执行计划（V2.3）：自研轻量 IM + 可安装客户端
+# 内部版执行计划（V2.3.2）：自研轻量 IM + 可安装客户端
 
 > 变更原因（用户 m00240 + m00264 + m00289 + m00356）：**内部使用、不在网络发布；要有安装程序；不买授权；自研底层慢慢完善。** 已明确：Windows 桌面为主 + 少量 Android；**移动端先只做 Android，iPhone 仅出方案、不实现**；云服务器用 **2C4G 轻量**；峰值 **≤100 在线**；账号用**邮箱验证码**注册/登录，不用手机号；**注册不做限制**；邮箱域名白名单默认**留空 = 不限制**，做成管理员可配置项；域名已有，开发期先用占位域名。
-> 本文是唯一现行计划（V2.3），旧计划 V1.1/V2.0 已按用户要求删除。V2.3 相对 V2.2 的变化：部署参数确认（2C4G 轻量 / 占位域名 / 不限制注册 / 白名单后台可配），成本按“域名已有”修正。
+> 本文是唯一现行计划（V2.3.2），旧计划 V1.1/V2.0 已按用户要求删除。V2.3 相对 V2.2 的变化：部署参数确认（2C4G 轻量 / 占位域名 / 不限制注册 / 白名单后台可配），成本按“域名已有”修正。V2.3.1 为文档一致性修订（成本口径、去掉 Docker 表述、敏感值只出控制台、补目录架构文档），不改变需求与范围；V2.3.2 按用户要求补充工程规范（测试文件统一放 `docs/test/`、默认不跑测试、提交信息格式 `类型：[编号]-简述`、任务交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确文档分工（`README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束）），详见附录 D。
 
 ---
 
@@ -13,7 +13,7 @@
   1. **Windows 桌面安装包**：`EiseChat-Setup-x.y.z.exe`，双击安装、开始菜单/桌面快捷方式、可卸载。
   2. **Android APK**：`EiseChat-x.y.z.apk`，侧载安装（无需应用商店、无需 Google 服务）。
   3. **iPhone：本期只出方案、先不实现**（移动端本期只交付上条 Android APK）。后续若启用，首选 PWA（零成本）；原生 iOS 需 $99/年开发者账号 + Mac + 签名/审核，暂不购买。详见 §5.4。
-  4. **服务器部署**：云服务器 2C4G（Ubuntu 22.04/24.04），`install.sh` 注册 systemd + Caddy 自动 HTTPS；可选单容器 Docker。
+  4. **服务器部署**：云服务器 2C4G（Ubuntu 22.04/24.04），`install.sh` 注册 systemd + Caddy 自动 HTTPS；不使用 Docker（见 AGENTS.md 硬规则 §2.4）。
 - **账号：邮箱验证码注册/登录**（6 位数字、10 分钟有效、限流）；邮箱域名白名单**默认留空 = 不限制**、管理员后台可配；注册不限制、邀请码可选；不接短信、零短信费用；开发期可 mock 验证码。
 - **成本：软件授权 0 元。** 必须支出 = 云服务器（约 60~150 元/月）；域名已有（0 元/年）；TLS、邮件免费额度、Android 自签名、Apple 开发者（不买）均免费。合计约 **60~150 元/月**。
 - **周期：约 6~7 周 MVP**（1~2 人 + AI 辅助；邮箱验证码与云部署比纯局域网方案多约 3~5 天）。之后按 P2 清单慢慢完善。
@@ -113,7 +113,7 @@
 **注册流程**
 1. `POST /api/auth/email/send`，body `{ "email": "user@company.com", "purpose": "register" }` → 服务端校验注册策略（白名单为空则不限制；邀请码默认关闭）、限流后发送 6 位验证码（10 分钟有效，最多验 5 次）。
 2. `POST /api/auth/register`，body `{ "email", "code", "displayName", "password?" }` → 创建账号（`users.email` 唯一、记录 `email_verified_at`）→ 返回 JWT。
-3. 未配置邮件服务或开发环境：验证码只打印到服务器日志，并允许固定测试码（仅 `Development`），保证不接真实邮件也能开发。
+3. 未配置邮件服务或开发环境：验证码只输出到开发控制台（stdout，不写入日志文件），并允许固定测试码（仅 `Development`），保证不接真实邮件也能开发。
 
 **登录流程**
 - 验证码登录：`POST /api/auth/email/send`（`purpose=login`）→ `POST /api/auth/login/code` `{ "email", "code", "deviceId" }` → JWT。
@@ -198,7 +198,7 @@
 - 密码（可选）：PBKDF2-SHA256（≥100,000 次迭代，随机盐）或 Argon2id；禁止明文存储与日志输出。
 - 邮箱验证码：只存哈希；白名单为空时不限制邮箱域名，非空时只发白名单域名；同邮箱/同 IP 限流，避免成为垃圾邮件发送器。
 - JWT：HS256，密钥首次启动生成写入 `secrets.json`；有效期默认 7 天，可配置。
-- 登录防刷：同 IP + 邮箱 5 次失败锁 5 分钟；管理员初始密码首次启动随机生成并只打印一次。
+- 登录防刷：同 IP + 邮箱 5 次失败锁 5 分钟；管理员初始密码首次启动随机生成，只在控制台输出一次（不写入日志文件），登录后应立即修改。
 - 公网加固：安全组最小开放；8080 只监听 127.0.0.1；Caddy 自动 HTTPS；启用 ASP.NET 限流；可选 fail2ban；订阅系统安全更新；定期检查日志。
 - 数据：SQLite 与文件目录只在服务器；备份同步到对象存储/异机；**不做 E2EE**（内部信任模型，使用说明中明确）。
 - 日志：访问/错误/管理员操作日志，滚动保留 30 天。
@@ -293,16 +293,16 @@
 **云服务器一键部署（Ubuntu 22.04/24.04）**
 1. 安全组：只开 22（限管理员 IP）、80、443。
 2. 域名 A 记录指向服务器公网 IP；安装 Caddy，先用占位域名配置 `chat.example.com { reverse_proxy 127.0.0.1:8080 }`（真实域名后替换），自动 HTTPS。
-3. 解压 `chat-server-*.zip` 到 `/opt/eisechat-server`，数据目录 `/var/lib/eisechat`。
-4. 首次生成 `secrets.json`：JWT 密钥、随机管理员密码（只打印一次）、邮件服务配置。
+3. 解压 `chat-server-*.zip` 到 `/opt/eisechat-server`，数据目录 `/var/lib/eisechat`（内含 `chat.db` 与 `files/`，即文档中逻辑上的 `/data`）。
+4. 首次生成 `secrets.json`：JWT 密钥、SMTP 凭据等；随机管理员密码只在首次启动时输出到控制台一次（不写入日志文件，`secrets.json` 不存明文密码）。
 5. 创建 `eisechat` 系统用户；写入 `/etc/systemd/system/eisechat.service`（`Restart=always`、开机自启）。
 6. `systemctl enable --now eisechat` → 访问 `https://<域名>` 完成初始化（设置注册策略：白名单可留空、上传上限）。
 7. 配置邮件：SMTP 或邮件 API（见 §4.1），发送测试验证码到管理员邮箱。
 8. 配置备份：每日把 `chat.db` + `files/` 打包同步到对象存储/异机（见 6.4）。
 
-**Windows（可选，办公室常开电脑）**：`install.ps1` 解压到 `C:\ChatServer`、生成 secrets、`sc.exe` 注册服务、自动启动、开放防火墙端口、打印访问地址与管理员密码。
+**Windows（可选，办公室常开电脑）**：`install.ps1` 解压到 `C:\ChatServer`、生成 secrets、`sc.exe` 注册服务、自动启动、开放防火墙端口、在控制台输出访问地址与管理员密码（仅一次，不写入日志文件）。
 
-**Docker（可选）**：单容器 `docker compose up -d`，挂载 `./data:/data`，配合 Caddy 反代。
+**不使用 Docker**：按 AGENTS.md 硬规则 §2.4，服务端直接以 systemd 托管单进程可执行文件；不建 `infra/docker/`、不维护 compose 文件。
 
 **升级**：停服务 → 备份 → 替换程序文件（保留 `/var/lib/eisechat`）→ 启动 → `GET /api/health` 校验版本。
 **卸载**：移除服务与程序目录，保留数据目录（提示用户手动删除）。
@@ -339,7 +339,7 @@ server/
 │   ├── Realtime/
 │   │   ├── WsMiddleware.cs        # /ws 握手 + 连接生命周期
 │   │   ├── ConnectionManager.cs   # userId → connections（内存在线表）
-│   │   ├── Protocol.cs            # 帧 DTO + 序列化
+│   │   ├── FrameCodec.cs          # 帧编解码/序列化（DTO 在 Chat.Protocol）
 │   │   ├── MessageHub.cs          # 收帧分发：send/ack/sync/read/typing
 │   │   └── HeartbeatService.cs
 │   ├── Modules/
@@ -352,6 +352,7 @@ server/
 │   │   └── Admin/                 # 建号、禁用、审计
 │   ├── Data/                      # DbContext、迁移、种子（初始化管理员）
 │   ├── Common/                    # 配置、日志、错误处理、时间工具
+│   ├── BackgroundJobs/            # 孤儿文件清理、备份触发、统计
 │   └── wwwroot/                   # 前端构建产物 + /download 页
 ├── Chat.Server.Tests/             # xUnit：协议、seq、幂等、同步、鉴权、验证码
 └── Chat.Protocol/                 # 协议 DTO（可生成 TS 类型）
@@ -360,10 +361,10 @@ server/
 **关键实现点**
 
 - `MessageHub` 发送流程：校验成员身份 → 事务内计算 seq → 插入 messages → 更新会话 last_seq → 返回 ack → 向在线成员广播 `message.new`（重复发送由 clientMsgId 唯一约束短路）。
-- `EmailCodeService`：生成/校验 6 位验证码（只存哈希）、限流、过期；邮件发送失败记录原因并允许重发；`Development` 环境打印验证码、允许固定测试码。
+- `EmailCodeService`：生成/校验 6 位验证码（只存哈希）、限流、过期；邮件发送失败记录原因并允许重发；`Development` 环境把验证码输出到控制台（不写入日志文件）、允许固定测试码。
 - `ConnectionManager`：`ConcurrentDictionary<Guid, List<WebSocket>>`；单设备策略下新连接踢旧连接；断线不清数据（靠 seq 补拉）。
 - 后台任务：孤儿文件清理、每日备份触发、统计。
-- 配置：`appsettings.json`（端口、数据库路径、文件目录、上传上限、注册模式、允许邮箱域名、JWT 过期、备份目标）+ `secrets.json`（JWT 密钥、初始管理员密码、SMTP 凭据，首次生成）。
+- 配置：`appsettings.json`（端口、数据库路径、文件目录、上传上限、注册模式、允许邮箱域名、JWT 过期、备份目标）+ `secrets.json`（JWT 密钥、SMTP 凭据等，首次生成；不存明文密码/验证码）。
 - 日志：`logs/` 按天滚动；错误含 traceId，客户端错误提示带 traceId 便于排查。
 
 **REST 端点（v1）**
@@ -443,7 +444,7 @@ WebSocket 为消息主通道；REST 负责登录、历史兜底、文件与元�
 | 容量 | 1,000 同时在线压测目标 | 10~100 账号，峰值 ≤100 在线 |
 | 工期 | 16 周公开发布路线 | **约 6~7 周 MVP** + 持续迭代 |
 | 运维 | 多组件监控/备份/升级 | systemd 自启 + 每日备份到异机/对象存储 |
-| 成本 | 8C32G 服务器 + 合规 + 授权 | **约 90~215 元/月** |
+| 成本 | 8C32G 服务器 + 合规 + 授权 | **约 60~150 元/月**（与 §9 一致） |
 | 主要风险 | 合规、推送可达性、WASM 兼容 | **自研协议 bug、邮件送达、公网安全、Android 后台挂起、单机备份（iOS 相关风险延后到后续版本）** |
 
 ---
@@ -488,15 +489,15 @@ WebSocket 为消息主通道；REST 负责登录、历史兜底、文件与元�
 
 **M0 + M1 开工清单**
 
-1. 建立目录骨架：`apps/web`、`apps/desktop`、`apps/mobile`、`server/`、`protocol/`、`infra/`、`docs/`。
+1. 建立目录骨架（文件级清单见 `docs/project-overview.md` §7）：`apps/web`、`apps/desktop`、`apps/mobile`、`server/`、`protocol/`、`infra/`、`docs/`。
 2. 固化 `protocol/protocol.md`（本文 §4 的帧定义）+ `protocol/schema.sql`（§4.4 的 DDL）。
-3. 邮件服务：先写 `IEmailSender` 抽象 + `MockEmailSender`（验证码打印到日志），保证不接真实邮件也能开发；上线前再接 SMTP/免费 API（`infra/email` 配置与测试脚本）。
+3. 邮件服务：先写 `IEmailSender` 抽象 + `MockEmailSender`（验证码输出到控制台，不写入日志文件），保证不接真实邮件也能开发；上线前再接 SMTP/免费 API（`infra/email` 配置与测试脚本）。
 4. 服务端最小闭环：邮箱验证码注册/登录 + JWT + WebSocket + `message.send/ack` + `sync` + SQLite 迁移 + xUnit 测试。
 5. Web 最小闭环：登录/注册页 + 会话列表 + 聊天页 + 发送队列 + 补拉。
 6. 本地验证：同一台电脑起服务，两个浏览器（或隐身窗口）用两个邮箱账号互发 100 条；停止服务 1 分钟后恢复，校验消息完整、无重复、顺序正确。
 7. 并行准备：云服务器（2C4G 轻量，选定地域）+ 占位域名（先用 `chat.example.com`，真实域名后替换）+ 邮箱发件通道；M4 再接入部署与 HTTPS。
 
-**当前仓库状态**：只有文档（`docs/internal-plan.md`、`README.md`、`AGENTS.md`），尚无代码。旧计划、可行性分析与 research 技术底稿均已清理；代码按本计划新建目录。
+**当前仓库状态**：只有文档（`docs/internal-plan.md`、`docs/project-overview.md`、`README.md`、`AGENTS.md`），尚无代码。旧计划、可行性分析与 research 技术底稿均已清理；代码按 `docs/project-overview.md` §7 的目录架构新建。
 
 ---
 
@@ -541,7 +542,7 @@ POST /api/auth/register
 
 ---
 
-## 附录 B：仓库目录（V2.3 目标结构）
+## 附录 B：仓库目录（V2.3.2 目标结构，目录级）
 
 ```
 chat-platform/                      # 当前仓库根 D:\Code\EiseChat
@@ -558,12 +559,12 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 │   ├── install.sh / install.ps1    # 服务器安装（Linux 主路径）
 │   ├── caddy/Caddyfile             # HTTPS 反代
 │   ├── backup.sh / backup.ps1      # 备份与恢复
-│   ├── docker/                     # 单容器 compose（可选）
 │   └── keys/                       # Android keystore（.gitignore）
-├── tests/                          # 并发/稳定性脚本
-├── docs/                           # 本计划、协议、部署、使用说明
+├── docs/                           # 本计划、项目说明、部署/使用说明；test/ 为测试脚本（gitignore）
 └── README.md
 ```
+
+> 文件级目录（逐文件职责、依赖方向、构建产物与创建顺序）见 `docs/project-overview.md` §7；本树只到目录级。
 
 ---
 
@@ -571,9 +572,11 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| `docs/internal-plan.md` | **现行主计划（V2.3）** | 内部使用、自研、邮箱验证码、云服务器、可安装、零授权费；移动端先 Android，iPhone 仅方案；白名单后台可配、注册不限制、域名先用占位 |
-| `AGENTS.md` | 仓库根 | AI/开发代理约束：技术栈、许可与架构硬规则、协议可靠性要求、工作流与 DoD |
-| 旧计划 V1.1/V2.0、`docs/feasibility-analysis.md`、`research/*.md` | 已删除 | 按用户要求清理无用文档，只保留本计划与 README；如需追溯可从备份恢复 |
+| `README.md` | **项目介绍与入口** | 项目是什么、给谁用、规模与形态、技术栈概览、文档索引、里程碑、重要边界；**项目介绍唯一出处**，不写可执行约束 |
+| `docs/internal-plan.md` | **现行主计划（V2.3.2）** | 内部使用、自研、邮箱验证码、云服务器、可安装、零授权费；移动端先 Android，iPhone 仅方案；白名单后台可配、注册不限制、域名先用占位 |
+| `docs/project-overview.md` | **现行项目说明 + 目录架构** | 项目定位/范围/技术栈/总体架构/关键设计约定 + 文件级目录规划、模块职责与依赖方向；M0 建骨架依据（项目介绍以 `README.md` 为准，本文做展开） |
+| `AGENTS.md` | 仓库根 | **仓库级硬约束（不含项目介绍）**：技术栈、许可与架构硬规则、协议可靠性要求、工作流、测试与提交规范、DoD |
+| 旧计划 V1.1/V2.0、`docs/feasibility-analysis.md`、`research/*.md` | 已删除 | 按用户要求清理无用文档，只保留本计划、项目说明与约束文档；如需追溯可从备份恢复 |
 
 ---
 
@@ -581,6 +584,8 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| V2.3.2 | 2026-10-25 | 按 m00148 + m00204 补充工程规范与文档分工：测试文件统一放 `docs/test/`（不再建根级 `tests/` 目录）、默认不跑测试与分批最小范围、提交信息格式、交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确 `README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束；同步 `AGENTS.md` 1.4（2026-10-25 再作去重修订至 1.5：删除 `docs/test/`、git 安全、密钥与禁用依赖清单的重复条目，统一归口 §2/§11.1/§7.6，规则内容不变）与 `docs/project-overview.md` V1.2；工程规范（测试位置/默认不跑测试/测试按缺口/提交信息格式/交付说明）列为硬规则 `AGENTS.md` §2.10 |
+| V2.3.1 | 2026-10-25 | 文档一致性修订：成本口径统一为约 60~150 元/月（§10 更正）；删除「可选 Docker」表述（与 AGENTS.md 硬规则 §2.4 冲突）；管理员初始密码与开发期验证码改为「只输出到控制台、不写入日志文件」；新增 `docs/project-overview.md`（项目说明 + 文件级目录架构）；补齐 `.gitignore`；`Realtime/Protocol.cs` 改为 `FrameCodec.cs`（DTO 唯一来源在 `Chat.Protocol`） |
 | V2.3 | 2026-10-25 | 按 m00356 确认部署参数：邮箱域名白名单留空 = 不限制（管理员可配）、注册不限制、云服务器 2C4G 轻量默认、域名已有先用占位域名；删除 V1.1/V2.0 旧计划 |
 | V2.2 | 2026-10-25 | 按 m00289 收敛：iPhone 移出本期实现范围（仅保留 PWA/TestFlight 方案），移动端先只做 Android APK；里程碑、范围、风险与附录同步更新 |
 | V2.1 | 2026-10-25 | 按 m00264 细化：邮箱验证码注册/登录（替代手机号/管理员建号）、云服务器 + 域名/HTTPS 部署、iPhone 定案 PWA（后被 V2.2 取代）、成本改为按月（约 90~215 元/月）、风险补充邮件送达与公网安全 |
