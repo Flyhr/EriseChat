@@ -2,7 +2,7 @@
 
 > 本文件是仓库级硬约束，任何 AI / 开发代理在改动本仓库前必须阅读并遵守。
 > 唯一现行计划：`docs/internal-plan.md`（V2.3.2）。文档职责与优先级见 §1（项目介绍以 `README.md` 为准，项目说明与目录架构见 `docs/project-overview.md`）。
-> 本文件版本 1.5（2026-10-25），随计划变更时同步更新（1.5 为去重修订，规则内容不变）。
+> 本文件版本 1.6（2026-10-25），随计划变更时同步更新（1.6 仅按 M0 实际工程补全 §8 命令与文档状态，规则内容不变）。
 
 ## 1. 文档分工与优先级
 
@@ -91,16 +91,19 @@
 5. 交付说明（每个任务必写）：**修改文件、修改原因、验证方式、测试结果、剩余风险**；测试结果须与实际执行一致（未执行的测试不得声称通过，见 §11.2）。
 6. 未经用户明确要求，不执行 `git push`、`git reset --hard`、`git clean -fd`，以及发布、外发文件等对外动作。
 
-## 8. 常用命令（M0 建好工程后按实际补全，保持与 README 一致）
+## 8. 常用命令（M0 已建好工程，按实际脚本补全；与 README 保持一致）
 
 ```bash
-dotnet build server/Chat.Server.sln            # 服务端构建
-dotnet test server/Chat.Server.Tests           # 服务端单测
-cd apps/web && npm install && npm run dev      # Web 开发
-cd apps/web && npm run build                   # Web 构建
-npm run desktop:dev && npm run desktop:build   # Electron 开发/打包（脚本名 M0 定）
-npm run mobile:sync && cd apps/mobile/android && ./gradlew assembleRelease  # APK（实际命令以生成工程为准）
-infra/install.sh && infra/backup.sh            # 服务器安装/备份
+dotnet build server/Chat.Server.sln             # 服务端构建
+dotnet run --project server/Chat.Server         # 服务端启动（http://127.0.0.1:8080）
+dotnet test server/Chat.Server.Tests            # 服务端单测（默认不跑，见 §11）
+cd apps/web && npm install && npm run dev       # Web 开发（http://127.0.0.1:5173）
+cd apps/web && npm run build                    # Web 构建（产物 dist/，不入库）
+cd apps/desktop && npm install && npm run dev   # Electron 开发（需先启动 Web dev server）
+cd apps/desktop && npm run dist                 # NSIS 安装包（M4 验证）
+cd apps/mobile && npm install && npm run sync   # 同步 Web 产物到 Android 工程
+cd apps/mobile/android && ./gradlew assembleRelease  # APK（M5 验证，需 Android SDK/Gradle）
+infra/install.sh && infra/backup.sh             # 服务器安装/备份（M4 前创建）
 ```
 
 > 默认不执行测试命令；确需运行时按 §11.3 分批跑最小范围，超过约 2 分钟或全量/压测/e2e 先申请（§11.4）。
