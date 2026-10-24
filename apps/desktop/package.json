@@ -1,0 +1,22 @@
+{
+  "name": "eisechat-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EiseChat Windows 桌面壳（Electron：窗口/托盘/通知/打包，业务逻辑在 apps/web）",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "npm run build && electron .",
+    "build": "tsc -p electron/tsconfig.json",
+    "typecheck": "tsc -p electron/tsconfig.json --noEmit",
+    "dist": "npm run build && electron-builder --win nsis"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "~5.9.3"
+  }
+}

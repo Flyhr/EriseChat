@@ -7,6 +7,8 @@ import vue from '@vitejs/plugin-vue'
 export default defineConfig({
   plugins: [vue()],
   server: {
+    // 固定 IPv4：桌面壳（apps/desktop）开发态加载 http://127.0.0.1:5173，需与 Vite 监听地址一致。
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {
@@ -18,6 +20,9 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  preview: {
+    host: '127.0.0.1',
   },
   build: {
     outDir: 'dist',

@@ -1,0 +1,35 @@
+# EiseChat Windows 安装包配置（electron-builder；M4 实际打包，M0 先固化配置）。
+# 约束（AGENTS.md §3 / internal-plan §5.2、§6.1）：NSIS 每用户安装、免签名、产物名 EiseChat-Setup-x.y.z.exe。
+
+appId: com.eisechat.desktop
+productName: EiseChat
+copyright: Copyright © 2026 EiseChat
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - dist-electron/**
+  - package.json
+
+# 打包态加载 web 构建产物：apps/web/dist → resources/web-dist（与 electron/main.ts 一致）。
+extraResources:
+  - from: ../web/dist
+    to: web-dist
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: EiseChat-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: EiseChat

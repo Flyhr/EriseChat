@@ -35,6 +35,8 @@ dist-ssr/
 # ==== Electron ====
 .electron-builder/
 apps/desktop/release/
+# 桌面壳 TypeScript 编译输出（electron/ → dist-electron/，由 npm run build 生成）
+apps/desktop/dist-electron/
 
 # ==== .NET ====
 bin/
