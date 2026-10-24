@@ -1,0 +1,24 @@
+{
+  "name": "eisechat-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "EiseChat Web 客户端核心（Vue 3 + TypeScript + Vite + Pinia）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "pinia": "^4.1.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
+  }
+}
