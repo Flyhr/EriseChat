@@ -497,7 +497,7 @@ WebSocket 为消息主通道；REST 负责登录、历史兜底、文件与元�
 6. 本地验证：同一台电脑起服务，两个浏览器（或隐身窗口）用两个邮箱账号互发 100 条；停止服务 1 分钟后恢复，校验消息完整、无重复、顺序正确。
 7. 并行准备：云服务器（2C4G 轻量，选定地域）+ 占位域名（先用 `chat.example.com`，真实域名后替换）+ 邮箱发件通道；M4 再接入部署与 HTTPS。
 
-**当前仓库状态**：只有文档（`docs/internal-plan.md`、`docs/project-overview.md`、`README.md`、`AGENTS.md`），尚无代码。旧计划、可行性分析与 research 技术底稿均已清理；代码按 `docs/project-overview.md` §7 的目录架构新建。
+**当前仓库状态（2026-10-25，M0 进行中）**：已完成工程基础文件（`.editorconfig`、`.gitignore`）；协议 `protocol/protocol.md`（17 类帧、错误码、兼容规则）与 `protocol/schema.sql`（10 张表 DDL）；`server/` 解决方案骨架（`Chat.Protocol`、`Chat.Server`、`Chat.Server.Tests` 三工程，`dotnet build` 通过，`GET /api/health` 冒烟通过）。待完成：`apps/web`、`apps/desktop`、`apps/mobile` 骨架与 `infra/`、部署说明；M1 业务（邮箱验证码/登录、WS 帧处理、SQLite 迁移）尚未开始。旧计划、可行性分析与 research 技术底稿均已清理；代码按 `docs/project-overview.md` §7 的目录架构新建。
 
 ---
 
@@ -584,6 +584,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| —（状态同步） | 2026-10-25 | §13「当前仓库状态」按实际进度更新：工程基础文件、协议/DDL、服务端骨架与健康检查已完成，Web/桌面/移动端骨架与 M1 待接入；需求、范围与计划版本（V2.3.2）未变 |
 | V2.3.2 | 2026-10-25 | 按 m00148 + m00204 补充工程规范与文档分工：测试文件统一放 `docs/test/`（不再建根级 `tests/` 目录）、默认不跑测试与分批最小范围、提交信息格式、交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确 `README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束；同步 `AGENTS.md` 1.4（2026-10-25 再作去重修订至 1.5：删除 `docs/test/`、git 安全、密钥与禁用依赖清单的重复条目，统一归口 §2/§11.1/§7.6，规则内容不变）与 `docs/project-overview.md` V1.2；工程规范（测试位置/默认不跑测试/测试按缺口/提交信息格式/交付说明）列为硬规则 `AGENTS.md` §2.10 |
 | V2.3.1 | 2026-10-25 | 文档一致性修订：成本口径统一为约 60~150 元/月（§10 更正）；删除「可选 Docker」表述（与 AGENTS.md 硬规则 §2.4 冲突）；管理员初始密码与开发期验证码改为「只输出到控制台、不写入日志文件」；新增 `docs/project-overview.md`（项目说明 + 文件级目录架构）；补齐 `.gitignore`；`Realtime/Protocol.cs` 改为 `FrameCodec.cs`（DTO 唯一来源在 `Chat.Protocol`） |
 | V2.3 | 2026-10-25 | 按 m00356 确认部署参数：邮箱域名白名单留空 = 不限制（管理员可配）、注册不限制、云服务器 2C4G 轻量默认、域名已有先用占位域名；删除 V1.1/V2.0 旧计划 |

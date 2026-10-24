@@ -10,7 +10,7 @@
 - **给谁用**：公司/团队内部，10~100 个账号、峰值 ≤100 在线；部署在云服务器 + 域名/HTTPS；不做公网运营，不需要 ICP/等保/实名/内容审核。
 - **交付物**：Windows 安装包 `EiseChat-Setup-x.y.z.exe`、Android APK `EiseChat-x.y.z.apk`（侧载安装）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）；iPhone 仅出方案、本期不实现。
 - **技术骨架**：一套 Vue 3 前端核心复用到 Web / Windows（Electron）/ Android（Capacitor）；服务端是唯一事实源，客户端 IndexedDB 只是缓存。
-- **当前状态**：📋 计划定稿（V2.3.2）+ 目录架构已规划，部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接），可直接开始 M0/M1 编码。
+- **当前状态**：🚧 **M0 进行中** —— 工程基础配置（`.editorconfig`、`.gitignore`）、协议（[protocol/protocol.md](protocol/protocol.md)）、表结构（[protocol/schema.sql](protocol/schema.sql)）已定稿；服务端解决方案（`server/`）可构建，`GET /api/health` 冒烟通过；Web/桌面/移动端骨架与 M1 业务（登录、验证码、WS 消息）待接入。部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接）。
 - **目标周期**：约 6~7 周 MVP（Windows 安装包 + Android APK + 服务器云端部署 + 可用聊天闭环；**iPhone 不在本期**）。
 - **成本**：软件授权 0 元；云服务器约 60~150 元/月（域名已有；TLS、邮件额度、Android 签名均免费）。
 
@@ -67,6 +67,16 @@ infra/          install.sh、caddy、backup、email、keys（keystore）
 docs/           计划、协议、部署、使用说明
 ```
 
+## 快速开始（当前可运行部分）
+
+```bash
+dotnet build server/Chat.Server.sln      # 服务端构建
+dotnet run --project server/Chat.Server  # 启动服务端（默认 http://127.0.0.1:8080）
+curl http://127.0.0.1:8080/api/health    # 健康检查：status / serverTime / protocolVersion
+```
+
+> Web / 桌面 / Android 端命令在对应骨架建好后补充；完整命令清单见 [AGENTS.md](AGENTS.md) §8。
+
 ## 重要边界（内部版）
 
 - 服务器可见消息内容（不做端到端加密）；敏感信息请勿用本工具传递。
@@ -79,4 +89,4 @@ docs/           计划、协议、部署、使用说明
 ## 下一步
 
 1. 无需再确认：按主计划 §12 已定参数开工（邮箱白名单留空 = 不限制、云服务器 2C4G 轻量、占位域名 `chat.example.com`、真实域名后替换）。
-2. 开始 M0/M1：按 [docs/project-overview.md](docs/project-overview.md) §7 建仓库骨架 → 协议与 DDL → 邮箱验证码/登录 → WS 消息/同步 → Web 单聊 → 本地两浏览器互发验证。
+2. 继续 M0：按 [docs/project-overview.md](docs/project-overview.md) §7 的创建顺序补齐 `apps/web`、`apps/desktop`、`apps/mobile` 骨架与 `infra/`、部署说明；M0 收口后进入 M1（邮箱验证码/登录 → WS 消息/同步 → Web 单聊 → 本地两浏览器互发验证）。
