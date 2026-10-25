@@ -524,6 +524,8 @@ infra/install.sh && infra/backup.sh              # 服务器安装 / 备份
 | M5 | 第 5 周 | Android APK（Capacitor + 自签名） | `apps/mobile/`、`infra/keys/`（gitignore） |
 | M6 | 第 6~7 周 | 100 连接稳定性、备份恢复演练、10~20 人内测 | `docs/test/`（不入库）、`docs/usage.md`、发版检查清单 |
 
+> 实现进度（2026-10-25）：M0~M3 已完成（服务端 + Web，含群聊/图片文件/已读/typing/presence），M4/M5 未开始；详细状态见 `docs/internal-plan.md` §13。
+
 P2 待办（语音消息、搜索、撤回、多设备、群已读、自动更新、Android 前台保活）**不提前做**，先保证 v1 闭环。
 
 ---
