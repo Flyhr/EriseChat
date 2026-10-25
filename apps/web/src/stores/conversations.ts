@@ -5,6 +5,33 @@ import { conversationsApi } from '../api/conversations'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 
+/** 本地已读游标持久化 key：M2 阶段先本地记录，M3 接入 read.update 后以服务端 last_read_seq 为准。 */
+const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
+
+function readStoredReadSeq(): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(READ_SEQ_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown> | null
+    if (typeof parsed !== 'object' || parsed === null) return {}
+    const result: Record<string, number> = {}
+    for (const [conversationId, seq] of Object.entries(parsed)) {
+      if (typeof seq === 'number' && Number.isFinite(seq) && seq > 0) result[conversationId] = seq
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
+
+function persistReadSeq(map: Record<string, number>): void {
+  try {
+    window.localStorage.setItem(READ_SEQ_STORAGE_KEY, JSON.stringify(map))
+  } catch {
+    // localStorage 不可用（隐私模式等）：仅内存记录，不影响使用。
+  }
+}
+
 // 会话列表状态：按 conversationId upsert 合并（conv.updated 推送 / 本地新建共用），
 // 展示顺序由 sorted 统一计算（最近消息时间倒序，无消息按创建时间）。
 export const useConversationsStore = defineStore('conversations', () => {
@@ -12,6 +39,8 @@ export const useConversationsStore = defineStore('conversations', () => {
   const loading = ref(false)
   /** 是否已成功从服务端加载过列表（避免重复拉取；强制刷新用 load(true)）。 */
   const loaded = ref(false)
+  /** 本地已读游标：会话未读 = lastSeq − max(本地已读, 服务端 last_read_seq)。 */
+  const lastReadSeqByConversation = ref<Record<string, number>>(readStoredReadSeq())
   let unsubscribeFrame: (() => void) | null = null
 
   /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算，M3 接入已读后使用） */
@@ -36,7 +65,23 @@ export const useConversationsStore = defineStore('conversations', () => {
   function unreadOf(conversationId: string): number {
     const conversation = getById(conversationId)
     if (!conversation) return 0
-    return unreadCount(conversation.lastSeq, conversation.lastReadSeq)
+    const localRead = lastReadSeqByConversation.value[conversationId] ?? 0
+    const readSeq = Math.max(localRead, conversation.lastReadSeq ?? 0)
+    return unreadCount(conversation.lastSeq, readSeq)
+  }
+
+  /**
+   * 标记会话已读（打开会话/在会话内收到新消息时调用）：
+   * M2 暂存本地（localStorage）；M3 接入 read.update 上报服务端后改为以服务端为准。
+   */
+  function markRead(conversationId: string, seq: number): void {
+    if (!Number.isFinite(seq) || seq <= 0) return
+    if (seq <= (lastReadSeqByConversation.value[conversationId] ?? 0)) return
+    lastReadSeqByConversation.value = {
+      ...lastReadSeqByConversation.value,
+      [conversationId]: seq,
+    }
+    persistReadSeq(lastReadSeqByConversation.value)
   }
 
   /**
@@ -109,6 +154,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     applyMessage,
     getById,
     unreadOf,
+    markRead,
     load,
     createDirect,
     subscribeRealtime,

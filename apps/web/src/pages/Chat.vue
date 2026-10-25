@@ -55,6 +55,17 @@ watch(
   { immediate: true },
 )
 
+// 打开会话（或会话内收到新消息）时推进本地已读游标：未读角标随之清除。
+// M3 接入 read.update 上报服务端后，改由服务端 read.updated 驱动。
+watch(
+  () => [activeId.value, activeConversation.value?.lastSeq ?? 0] as const,
+  ([conversationId, lastSeq]) => {
+    if (!conversationId || lastSeq <= 0) return
+    conversations.markRead(conversationId, lastSeq)
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   void conversations.load()
   // 服务端推送：conv.updated 更新会话列表、message.ack/message.new 更新消息流（各自只订阅一次）。
@@ -101,6 +112,7 @@ function loadMoreMessages(): void {
           :conversation="conversation"
           :self-user-id="selfUserId"
           :active="conversation.conversationId === activeId"
+          :unread="conversation.conversationId === activeId ? 0 : conversations.unreadOf(conversation.conversationId)"
           @select="selectConversation"
         />
       </nav>

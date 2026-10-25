@@ -4,12 +4,14 @@ import type { Conversation } from '../types/frames'
 import Avatar from './Avatar.vue'
 
 // 会话列表项（纯展示，M2-04 接线）：标题（单聊显示对方昵称/群聊标题）、最后一条消息摘要、
-// 时间；未读角标暂不展示（lastReadSeq 待 M3 已读同步后才有意义）。
+// 时间、未读角标（M2-05 起本地已读游标计算；M3 接入服务端 read.* 后改用服务端未读）。
 const props = defineProps<{
   conversation: Conversation
   /** 当前登录用户 ID：用于单聊时找出对方昵称 */
   selfUserId?: string
   active?: boolean
+  /** 未读条数（0 或未传时不展示角标；会话被选中时由父组件传 0） */
+  unread?: number
 }>()
 
 const emit = defineEmits<{
@@ -72,7 +74,10 @@ function formatTime(timestamp: number): string {
       <span class="conversation-item__title">{{ title }}</span>
       <span class="conversation-item__preview">{{ preview }}</span>
     </span>
-    <span class="conversation-item__time">{{ timeText }}</span>
+    <span class="conversation-item__meta">
+      <span class="conversation-item__time">{{ timeText }}</span>
+      <span v-if="unread && unread > 0" class="conversation-item__unread">{{ unread > 99 ? '99+' : unread }}</span>
+    </span>
   </button>
 </template>
 
@@ -117,10 +122,28 @@ function formatTime(timestamp: number): string {
   white-space: nowrap;
 }
 
-.conversation-item__time {
+.conversation-item__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   align-self: flex-start;
   flex: none;
+}
+
+.conversation-item__time {
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+
+.conversation-item__unread {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
 }
 </style>
