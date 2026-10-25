@@ -7,6 +7,7 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Conversations;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
@@ -70,6 +71,31 @@ public sealed class MessageService
         ValidateContent(request);
         var replyTo = string.IsNullOrWhiteSpace(request.ReplyTo) ? null : ValidateId(request.ReplyTo, "replyTo");
 
+        // SQLite 默认延迟事务在并发写入时可能因锁升级冲突返回 SQLITE_BUSY / SQLITE_LOCKED（5/6），
+        // busy_timeout 只覆盖等待写锁的场景；此处回滚后整体重试，保证多连接并发发送仍分配到唯一 seq。
+        const int maxAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await SendOnceAsync(senderId, conversationId, clientMsgId, replyTo, request, cancellationToken);
+            }
+            catch (Exception exception) when (attempt < maxAttempts && IsSqliteBusy(exception))
+            {
+                _db.ChangeTracker.Clear();
+                await Task.Delay(25 * attempt, cancellationToken);
+            }
+        }
+    }
+
+    private async Task<MessageSendResult> SendOnceAsync(
+        string senderId,
+        string conversationId,
+        string clientMsgId,
+        string? replyTo,
+        MessageSendFrame request,
+        CancellationToken cancellationToken)
+    {
         var conversation = await EnsureMemberAsync(senderId, conversationId, cancellationToken);
 
         if (replyTo is not null)
@@ -137,6 +163,20 @@ public sealed class MessageService
 
             throw;
         }
+    }
+
+    /// <summary>判断异常链中是否包含 SQLITE_BUSY(5)/SQLITE_LOCKED(6)。</summary>
+    private static bool IsSqliteBusy(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is SqliteException { SqliteErrorCode: 5 or 6 })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
