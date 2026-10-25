@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -10,6 +10,7 @@ import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
+import { shouldAdvanceRead } from '../core/readReceipt'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -58,13 +59,34 @@ const activeLoadingHistory = computed(() =>
 )
 const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
 
+// 已读回执（M3-09）：只有停留在底部（已看到最新消息）才推进已读；
+// 单聊展示对端已读状态，群聊 v1 无已读详情（协议 §4.6）。
+/** 消息列表是否停留在底部（由 MessageList 的 near-bottom-change 驱动）。 */
+const atBottom = ref(true)
+/** 单聊对端用户 ID（群聊为空，不展示已读回执）。 */
+const peerUserId = computed(() => {
+  const conversation = activeConversation.value
+  if (!conversation || conversation.type !== 'direct') return undefined
+  return conversation.members.find((member) => member.userId !== selfUserId.value)?.userId
+})
+/** 单聊对端已上报的已读 seq（来自 read.updated；无记录时 undefined，展示「未读」）。 */
+const peerReadSeqForDisplay = computed(() =>
+  activeId.value && peerUserId.value
+    ? conversations.peerReadSeqOf(activeId.value, peerUserId.value)
+    : undefined,
+)
+
 // 切换会话：首次进入拉最新一页历史（M2-05）；已加载过直接用缓存，后续新消息由 message.new 合并。
 watch(
   activeId,
   (conversationId) => {
     showMembersPanel.value = false
+    atBottom.value = true
     if (!conversationId) return
-    void messages.loadInitial(conversationId)
+    void messages.loadInitial(conversationId).then(() => {
+      // 首次加载并滚到底后上报一次已读（M3-09）。
+      void nextTick(markActiveConversationRead)
+    })
   },
   { immediate: true },
 )
@@ -75,10 +97,22 @@ watch(
 function markActiveConversationRead(): void {
   const conversationId = activeId.value
   const lastSeq = activeConversation.value?.lastSeq ?? 0
-  if (!conversationId || lastSeq <= 0) return
-  if (document.visibilityState !== 'visible') return
-  if (activeId.value !== conversationId) return
+  const advance = shouldAdvanceRead({
+    visible: document.visibilityState === 'visible',
+    atBottom: atBottom.value,
+    loaded: activeLoaded.value,
+    conversationId,
+    lastSeq,
+    reportedSeq: conversationId ? conversations.readSeqOf(conversationId) : 0,
+  })
+  if (!advance || !conversationId) return
   conversations.markRead(conversationId, lastSeq)
+}
+
+/** 消息列表滚动/自动贴底事件：回到或停在底部时推进已读（M3-09）。 */
+function onNearBottomChange(value: boolean): void {
+  atBottom.value = value
+  if (value) markActiveConversationRead()
 }
 
 watch(
@@ -249,10 +283,14 @@ async function handleFileSelected(file: File): Promise<void> {
           :messages="activeMessages"
           :pending="activePending"
           :self-user-id="selfUserId"
+          :conversation-id="activeId"
+          :peer-read-seq="peerReadSeqForDisplay"
+          :show-read-receipt="!isGroup"
           :has-more="activeHasMore"
           :loading="activeLoadingHistory"
           @load-more="loadMoreMessages"
           @retry="retryMessage"
+          @near-bottom-change="onNearBottomChange"
         />
         <SendBox
           :uploading="uploadBusy"

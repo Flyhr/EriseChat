@@ -15,6 +15,8 @@ const props = withDefaults(
     message: Message | PendingMessage
     self?: boolean
     status?: PendingStatus
+    /** 单聊已读回执（M3-09）：仅自己发出的最新一条展示；群聊不展示。 */
+    receipt?: 'read' | 'unread'
   }>(),
   { self: false },
 )
@@ -87,6 +89,13 @@ const timeText = computed(() =>
     />
     <p v-else class="message-bubble__text">{{ contentText }}</p>
     <time class="message-bubble__time">{{ timeText }}</time>
+    <span
+      v-if="receipt"
+      class="message-bubble__receipt"
+      :class="`message-bubble__receipt--${receipt}`"
+    >
+      {{ receipt === 'read' ? '已读' : '未读' }}
+    </span>
     <span v-if="status === 'sending'" class="message-bubble__pending">发送中…</span>
     <button
       v-else-if="status === 'failed'"
@@ -152,6 +161,17 @@ const timeText = computed(() =>
   color: var(--color-text-secondary);
   font-size: 11px;
   text-align: right;
+}
+
+.message-bubble__receipt {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: right;
+}
+
+.message-bubble__receipt--read {
+  color: var(--color-primary);
 }
 
 .message-bubble__pending {

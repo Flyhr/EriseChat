@@ -5,6 +5,7 @@ import { conversationsApi } from '../api/conversations'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
+import { useAuthStore } from './auth'
 
 /** 本地已读游标持久化 key：用于页面内即时展示与服务端上报兜底；服务端 last_read_seq 是事实源（read.update）。 */
 const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
@@ -54,6 +55,11 @@ export const useConversationsStore = defineStore('conversations', () => {
   const loaded = ref(false)
   /** 本地已读游标：会话未读 = lastSeq − max(本地已读, 服务端 last_read_seq)。 */
   const lastReadSeqByConversation = ref<Record<string, number>>(readStoredReadSeq())
+  /**
+   * 单聊对端已读游标（M3-09）：conversationId → userId → 最大已读 seq，
+   * 来自服务端 read.updated（单聊只推给对方）；登出/切账号/clear 时清空。
+   */
+  const peerReadSeq = ref<Record<string, Record<string, number>>>({})
   /** 最近一次收到 removedConversationIds 的会话（Chat 页据此跳回 /chat 并提示；消费后调用 clearRemovedNotice 清空）。 */
   const lastRemovedConversationId = ref<string | null>(null)
   /** 最近一批被移出/退出的会话 ID（同一帧可能包含多个）。 */
@@ -130,6 +136,28 @@ export const useConversationsStore = defineStore('conversations', () => {
         chatWs.send({ type: 'read.update', conversationId, lastReadSeq: seq })
       }
     }
+  }
+
+  /** 记录对端已读游标（单聊回执展示用）：忽略自己，只增不减。 */
+  function handleReadUpdated(conversationId: string, userId: string, lastReadSeq: number): void {
+    if (!conversationId || !userId || !Number.isFinite(lastReadSeq)) return
+    if (userId === useAuthStore().user?.userId) return
+    const current = peerReadSeq.value[conversationId]?.[userId] ?? 0
+    if (lastReadSeq <= current) return
+    peerReadSeq.value = {
+      ...peerReadSeq.value,
+      [conversationId]: { ...peerReadSeq.value[conversationId], [userId]: lastReadSeq },
+    }
+  }
+
+  /** 读取对端已读游标（无记录返回 undefined，展示为「未读」）。 */
+  function peerReadSeqOf(conversationId: string, userId: string): number | undefined {
+    return peerReadSeq.value[conversationId]?.[userId]
+  }
+
+  /** 本地已读游标（判断是否值得再次上报，避免重复 read.update）。 */
+  function readSeqOf(conversationId: string): number {
+    return lastReadSeqByConversation.value[conversationId] ?? 0
   }
 
   /**
@@ -267,6 +295,11 @@ export const useConversationsStore = defineStore('conversations', () => {
   function subscribeRealtime(): () => void {
     if (unsubscribeFrame !== null) return unsubscribeFrame
     unsubscribeFrame = chatWs.on('frame', (frame) => {
+      // 单聊已读回执（M3-09）：服务端 read.updated 只推给对方，记录对端已读游标。
+      if (frame.type === 'read.updated') {
+        handleReadUpdated(frame.conversationId, frame.userId, frame.lastReadSeq)
+        return
+      }
       if (frame.type !== 'conv.updated') return
       if (frame.removedConversationIds && frame.removedConversationIds.length > 0) {
         handleRemovedConversations(frame.removedConversationIds)
@@ -286,6 +319,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     cacheRestored = false
     // 清除本地已读游标（含 localStorage），避免账号切换后沿用上一位用户的已读状态（M3-00）。
     lastReadSeqByConversation.value = {}
+    peerReadSeq.value = {}
     lastRemovedConversationId.value = null
     removedConversationIds.value = []
     try {
@@ -315,6 +349,8 @@ export const useConversationsStore = defineStore('conversations', () => {
     getById,
     unreadOf,
     markRead,
+    readSeqOf,
+    peerReadSeqOf,
     restoreFromCache,
     onConversationRemoved,
     handleRemovedConversations,
