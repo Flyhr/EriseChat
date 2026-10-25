@@ -1,7 +1,7 @@
 # EiseChat WebSocket 协议 v1
 
 > 本文件是**协议帧与字段的唯一来源**（`AGENTS.md` §1/§5）；表结构唯一来源为 `protocol/schema.sql`。
-> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.4）与 `docs/project-overview.md` §11.1。
+> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.5）与 `docs/project-overview.md` §11.1。
 > 版本：`protocolVersion = 1`（2026-10-25 初版）；变更必须先改本文件与计划文档，再改实现，且只允许向后兼容的增量（见 §8）。
 
 ## 1. 传输与连接
@@ -248,7 +248,7 @@ batch 对象：
 | `conversations` | array | 是 | 发生变化的 Conversation 数组；被移出/主动退出场景可为空数组 |
 | `removedConversationIds` | string[] | 否 | 当前连接用户被移出/主动退出群聊时，服务端推送该帧，`conversations` 可为空数组，`removedConversationIds` 列出被移除的会话；客户端收到后移除对应会话的本地状态（列表项、消息缓存、游标） |
 
-规则：触发场景为「新建会话、标题变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。
+规则：触发场景为「新建会话、标题变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。被移出/主动退出场景下，该用户只收到 `removedConversationIds` 帧，不再收到该会话的 `conv.updated`。
 
 群聊创建与成员管理走 REST（见计划 §7）；成功后服务端在同一事务内写一条 `msgType=system` 消息（`seq` 严格 +1），并推送 `message.new`（在线成员）与 `conv.updated`（含全体成员的最新 Conversation）；客户端对 `message.new` 按 `messageId` 去重。
 
@@ -302,6 +302,7 @@ batch 对象：
 1. 服务端校验请求者是会话成员；`0 ≤ lastReadSeq ≤ 会话当前 lastSeq`，越界回 `error`（`VALIDATION_FAILED`）。
 2. 服务端按 `max(现有 last_read_seq, 上报值)` 更新 `conversation_members.last_read_seq`，只增不减。
 3. `read.updated` 仅单聊推送给**对方成员**（不回显给上报者）；群聊 v1 不做群已读详情，只更新游标、不广播。
+4. 新成员加入（建群、被邀请、重新邀请）时，`conversation_members.last_read_seq` 初始化为**加入前的会话 lastSeq**：加入系统消息计 1 条未读，加入前的历史消息不计未读；之后仍按上面的「只增不减」与越界校验规则更新。
 
 ### 4.7 `typing` / `presence`
 
@@ -315,7 +316,7 @@ batch 对象：
 | S→C | `conversationId` | string | 是 | 会话 ID |
 | S→C | `userId` | string | 是 | 正在输入的用户 ID |
 
-规则：客户端 3 秒节流；服务端只转发给会话内其他成员，不落库；接收端 3 秒内未收到同一用户的新 `typing` 则自动清除指示。
+规则：客户端 3 秒节流；服务端只转发给会话内其他成员（群聊同样转发），跳过发送连接，不落库；服务端对「每个连接 × 每个会话」做 **1 秒节流**，超频静默丢弃、不回 `error`；接收端 3 秒内未收到同一用户的新 `typing` 则自动清除指示。
 
 `presence`（S→C）：
 
@@ -325,7 +326,7 @@ batch 对象：
 | `userId` | string | 是 | 用户 ID |
 | `online` | boolean | 是 | 是否在线 |
 
-规则：在用户认证成功（上线）与连接关闭/心跳超时（下线）时，推送给与其有共同会话的在线成员；v1 不做频繁状态刷新。
+规则：仅在该用户连接数 **0→1** 时推送 `online=true`、**1→0** 时推送 `online=false`；推送给与其有共同会话的其他在线用户（去重），不落库、不查询离线状态；客户端方向错误（如 C→S 发送 `presence`）按「忽略并记 debug」处理，不断连；v1 不做频繁状态刷新。
 
 ### 4.8 `kicked` / `error`
 
@@ -461,7 +462,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 ### 8.1 协议版本
 
-- 当前 `protocolVersion = 1`，随计划 V2.3.4 发布。
+- 当前 `protocolVersion = 1`，随计划 V2.3.5 发布。
 - 服务端在 `hello` 中下发 `protocolVersion`；客户端在 `auth` 中可带上自身版本（缺省视为 1）。
 - 版本不兼容时服务端回 `error`（`PROTOCOL_VERSION_MISMATCH`）并关闭；客户端提示升级，不进入聊天。
 
@@ -516,3 +517,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M3-01 库表增量） | 2026-10-25 | 无帧变更；messages 表新增可选 file_id（引用 files.id，用于下载鉴权与孤儿清理），protocol/schema.sql 同步；protocolVersion 仍为 1 |
 | v1（M3-03 校准） | 2026-10-25 | 明确文件消息的 fileId 归属校验、content 以 files 记录为准、messages.file_id 落库；帧格式与 protocolVersion 不变 |
 | v1（M3-04 校准） | 2026-10-25 | 新增 conv.updated.removedConversationIds；系统消息事件名 group.created/member.joined/member.left/member.removed；群聊 REST 行为与推送时序；帧格式与 protocolVersion 不变 |
+| v1（M3-05 校准） | 2026-10-25 | 明确已读语义（新成员 last_read_seq=加入前 lastSeq；只增不减、越界校验）、typing 服务端 1 秒/连接/会话节流、presence 仅在 0↔1 连接时推送、移出/退出只收 removedConversationIds；帧格式与 protocolVersion 不变 |

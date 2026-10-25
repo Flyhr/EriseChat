@@ -1,7 +1,7 @@
 # EiseChat 项目说明与目录架构（V1.2）
 
 > 本文是**面向开发的项目总览**：项目是什么、代码放哪里、模块怎么分、从哪开始写。
-> 唯一现行计划：`docs/internal-plan.md`（V2.3.4，回答"做什么、什么时候做"）；硬约束：`AGENTS.md`（回答"什么不能做"）。
+> 唯一现行计划：`docs/internal-plan.md`（V2.3.5，回答"做什么、什么时候做"）；硬约束：`AGENTS.md`（回答"什么不能做"）。
 > 优先级：`AGENTS.md` §2 硬规则 > `docs/internal-plan.md` > 本文 > 其他。本文与计划冲突时以计划为准，并回头修本文。
 > 本文版本 1.2（2026-10-25）。**M0 建工程骨架以本文 §7 的目录与文件名为准。**
 
@@ -163,7 +163,7 @@ EriseChat/
 │
 ├── docs/
 │   ├── project-overview.md                 # ← 本文
-│   ├── internal-plan.md                    # 唯一现行计划（V2.3.4）
+│   ├── internal-plan.md                    # 唯一现行计划（V2.3.5）
 │   ├── deploy.md                           # M4：部署/HTTPS/升级/备份恢复
 │   ├── usage.md                            # M6：安装使用说明（给最终用户）
 │   └── test/                               # 测试与临时脚本（gitignore，不入库；子目录需申请）

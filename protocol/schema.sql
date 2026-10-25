@@ -1,7 +1,7 @@
 -- ============================================================
 -- EiseChat 数据库表结构 v1（唯一来源）
 -- ============================================================
--- 依据：docs/internal-plan.md §4.4（计划 V2.3.4）、docs/project-overview.md §11.2
+-- 依据：docs/internal-plan.md §4.4（计划 V2.3.5）、docs/project-overview.md §11.2
 -- 配套：protocol/protocol.md（帧与字段唯一来源）
 --
 -- 约定：
