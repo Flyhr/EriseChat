@@ -32,8 +32,9 @@ export function pruneTyping(entries: readonly TypingEntry[], nowMs: number): Typ
  */
 export function typingLabelOf(conversationType: 'direct' | 'group', names: readonly string[]): string {
   const filled = names.map((name) => name.trim()).filter((name) => name.length > 0)
-  if (conversationType === 'direct') return '对方正在输入…'
+  // 无人输入时必须返回空串：单聊文案不含昵称，但也不能在没有条目时常驻显示。
   if (filled.length === 0) return ''
+  if (conversationType === 'direct') return '对方正在输入…'
   if (filled.length === 1) return `${filled[0]} 正在输入…`
   if (filled.length === 2) return `${filled[0]}、${filled[1]} 正在输入…`
   return '多人正在输入…'

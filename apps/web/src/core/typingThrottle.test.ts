@@ -56,9 +56,14 @@ describe('typing 纯逻辑', () => {
     expect(pruneTyping(entries, 9_001)).toEqual([])
   })
 
-  it('typingLabelOf：单聊固定「对方正在输入…」', () => {
+  it('typingLabelOf：单聊有人输入时固定「对方正在输入…」', () => {
     expect(typingLabelOf('direct', ['小明'])).toBe('对方正在输入…')
-    expect(typingLabelOf('direct', [])).toBe('对方正在输入…')
+  })
+
+  it('typingLabelOf：无人输入时返回空串（单聊也不常驻提示）', () => {
+    expect(typingLabelOf('direct', [])).toBe('')
+    expect(typingLabelOf('direct', ['  '])).toBe('')
+    expect(typingLabelOf('group', [])).toBe('')
   })
 
   it('typingLabelOf：群聊按人数展示昵称或「多人正在输入…」', () => {
