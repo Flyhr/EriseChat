@@ -1,9 +1,11 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import type {
+  FileContent,
   Message,
   MessageAckFrame,
   MessageSendFrame,
+  MessageSendType,
   ServerFrame,
   SyncRequestFrame,
   SyncResponseFrame,
@@ -36,8 +38,10 @@ export interface PendingMessage {
   clientMsgId: string
   conversationId: string
   senderId: string
-  msgType: 'text'
-  content: string
+  /** text / image / file（system 仅服务端生成）。 */
+  msgType: MessageSendType
+  /** 文本为字符串；图片/文件为 FileContent。 */
+  content: string | FileContent
   createdAt: number
   status: PendingStatus
   /** 已重试次数（0 = 首次发送，最多 RETRY_DELAYS_MS.length 次重试）。 */
@@ -375,7 +379,8 @@ export const useMessagesStore = defineStore('messages', () => {
       reqId: reqIdOf(pending.clientMsgId),
       clientMsgId: pending.clientMsgId,
       conversationId: pending.conversationId,
-      msgType: 'text',
+      // M3-07：图片/文件消息必须沿用原 msgType，否则服务端会按纯文本拒绝或落错类型。
+      msgType: pending.msgType,
       content: pending.content,
     }
     if (chatWs.send(frame)) {
@@ -409,20 +414,19 @@ export const useMessagesStore = defineStore('messages', () => {
     retryTimers.set(pending.clientMsgId, timer)
   }
 
-  /** 乐观发送文本消息：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
-  function sendText(conversationId: string, text: string, senderId: string): boolean {
-    const content = text.trim()
-    if (!content) return false
-    if (content.length > MAX_TEXT_LENGTH) {
-      // 输入框已有 maxlength 拦截，这里兜底防止程序化调用超长文本（M3-00 N10）。
-      console.warn(`[messages] 文本超过 ${MAX_TEXT_LENGTH} 字符上限，已拦截`)
-      return false
-    }
+  /** 乐观发送通用入口（text / image / file）：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
+  function sendContent(
+    conversationId: string,
+    msgType: MessageSendType,
+    content: string | FileContent,
+    senderId: string,
+  ): boolean {
+    if (!conversationId || !senderId) return false
     const pending: PendingMessage = {
       clientMsgId: crypto.randomUUID(),
       conversationId,
       senderId,
-      msgType: 'text',
+      msgType,
       content,
       createdAt: Date.now(),
       status: 'sending',
@@ -434,6 +438,38 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     transmit(pending)
     return true
+  }
+
+  /** 乐观发送文本消息：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
+  function sendText(conversationId: string, text: string, senderId: string): boolean {
+    const content = text.trim()
+    if (!content) return false
+    if (content.length > MAX_TEXT_LENGTH) {
+      // 输入框已有 maxlength 拦截，这里兜底防止程序化调用超长文本（M3-00 N10）。
+      console.warn(`[messages] 文本超过 ${MAX_TEXT_LENGTH} 字符上限，已拦截`)
+      return false
+    }
+    return sendContent(conversationId, 'text', content, senderId)
+  }
+
+  /** 乐观发送图片/文件消息（M3-07）：content 必须是已上传成功的 FileContent（服务端会按 files 记录再归一）。 */
+  function sendFileMessage(
+    conversationId: string,
+    msgType: 'image' | 'file',
+    content: FileContent,
+    senderId: string,
+  ): boolean {
+    if (
+      !content.fileId ||
+      !content.name ||
+      !content.mime ||
+      !Number.isFinite(content.size) ||
+      content.size <= 0
+    ) {
+      console.warn('[messages] 文件消息 content 不完整，已拦截')
+      return false
+    }
+    return sendContent(conversationId, msgType, { ...content }, senderId)
   }
 
   /** 重发失败消息：复用同一 clientMsgId（服务端幂等，不会重复落库）。 */
@@ -458,7 +494,7 @@ export const useMessagesStore = defineStore('messages', () => {
       senderId: pending.senderId,
       clientMsgId: frame.clientMsgId,
       seq: frame.seq,
-      msgType: 'text',
+      msgType: pending.msgType,
       content: pending.content,
       createdAt: frame.createdAt,
     }
@@ -600,6 +636,7 @@ export const useMessagesStore = defineStore('messages', () => {
     loadMore,
     syncAll,
     sendText,
+    sendFileMessage,
     retrySend,
     subscribeRealtime,
     clear,

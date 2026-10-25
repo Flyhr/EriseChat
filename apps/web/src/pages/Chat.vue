@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
 import MessageList from '../components/MessageList.vue'
 import SendBox from '../components/SendBox.vue'
+import { filesApi } from '../api/files'
+import { isImageFile, validateAttachment } from '../core/attachments'
+import { ApiError } from '../core/http'
+import { compressImageFile } from '../core/imageCompress'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -104,6 +108,52 @@ function loadMoreMessages(): void {
   if (!activeId.value) return
   void messages.loadMore(activeId.value)
 }
+
+// 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
+const uploadBusy = ref(false)
+const uploadError = ref<string | null>(null)
+
+async function handleFileSelected(file: File): Promise<void> {
+  const conversationId = activeId.value
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId || uploadBusy.value) return
+
+  const validation = validateAttachment(file)
+  if (!validation.ok) {
+    uploadError.value = validation.reason
+    return
+  }
+
+  uploadBusy.value = true
+  uploadError.value = null
+  try {
+    // 图片发送前压缩（最长边 1280、约 ≤300KB）；gif 由 compressImageFile 原样返回。
+    const payload = isImageFile(file) ? await compressImageFile(file) : file
+    const recheck = validateAttachment(payload)
+    if (!recheck.ok) {
+      uploadError.value = recheck.reason
+      return
+    }
+
+    const uploaded = await filesApi.upload(payload)
+    const sent = messages.sendFileMessage(
+      conversationId,
+      isImageFile(payload) ? 'image' : 'file',
+      {
+        fileId: uploaded.fileId,
+        name: uploaded.name,
+        size: uploaded.size,
+        mime: uploaded.mime,
+      },
+      senderId,
+    )
+    if (!sent) uploadError.value = '消息发送失败，请重试'
+  } catch (error) {
+    uploadError.value = error instanceof ApiError ? error.message : '文件上传失败，请重试'
+  } finally {
+    uploadBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -144,7 +194,12 @@ function loadMoreMessages(): void {
           @load-more="loadMoreMessages"
           @retry="retryMessage"
         />
-        <SendBox @send="sendMessage" />
+        <SendBox
+          :uploading="uploadBusy"
+          :upload-error="uploadError"
+          @send="sendMessage"
+          @file-selected="handleFileSelected"
+        />
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"
