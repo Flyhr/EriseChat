@@ -178,7 +178,10 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(member => member.Role)
                 .HasColumnName("role")
                 .HasConversion(LowercaseEnum<MemberRole>())
-                .HasDefaultValueSql("'member'");
+                .HasDefaultValueSql("'member'")
+                // Owner 是枚举 CLR 默认值（0），若不关闭 OnAdd 生成，EF 插入时会省略该列而落库默认值 'member'；
+                // 这里强制显式写入，保证创建者的 owner 角色正确落库（迁移 DDL 的 DEFAULT 'member' 仍保留）。
+                .ValueGeneratedNever();
             entity.Property(member => member.JoinedAt).HasColumnName("joined_at");
             entity.Property(member => member.LastReadSeq).HasColumnName("last_read_seq").HasDefaultValue(0L);
 

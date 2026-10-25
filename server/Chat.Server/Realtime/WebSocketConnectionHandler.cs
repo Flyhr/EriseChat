@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Modules.Conversations;
 using Microsoft.Extensions.Logging;
 
 namespace Chat.Server.Realtime;
@@ -232,6 +233,9 @@ public sealed class WebSocketConnectionHandler
                 case PingFrame ping:
                     await connection.SendFrameAsync(new PongFrame(ping.Ts), connectionAborted);
                     break;
+                case ConvListRequestFrame convListRequest:
+                    await HandleConvListAsync(connection, convListRequest, connectionAborted);
+                    break;
                 case AuthFrame:
                     _logger.LogDebug("WS 已认证连接重复发送 auth 帧，已忽略（连接 {ConnectionId}）", connection.ConnectionId);
                     break;
@@ -244,6 +248,28 @@ public sealed class WebSocketConnectionHandler
                     break;
             }
         }
+    }
+
+    /// <summary>conv.list（M1-07）：按当前连接用户返回会话列表，reqId 原样回传。</summary>
+    private async Task HandleConvListAsync(
+        WsConnection connection,
+        ConvListRequestFrame request,
+        CancellationToken connectionAborted)
+    {
+        if (string.IsNullOrWhiteSpace(connection.UserId))
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var conversations = scope.ServiceProvider.GetRequiredService<ConversationService>();
+        var list = await conversations.ListAsync(connection.UserId, connectionAborted);
+        await connection.SendFrameAsync(new ConvListResponseFrame(list) { ReqId = request.ReqId }, connectionAborted);
+        _logger.LogDebug(
+            "WS conv.list 返回 {ConversationCount} 个会话（连接 {ConnectionId}，reqId {ReqId}）",
+            list.Count,
+            connection.ConnectionId,
+            request.ReqId);
     }
 
     private async Task KickExistingAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)

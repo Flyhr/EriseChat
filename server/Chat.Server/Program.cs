@@ -6,6 +6,7 @@ using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
+using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -15,7 +16,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 // EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；
-// M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接）。
+// M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接；M1-07 单聊会话创建与列表）。
 // 配置来源优先级：secrets.json（可选，gitignore）> 环境变量 > appsettings.{Environment}.json > appsettings.json；
 // 端口、数据/文件目录、上传上限、注册开关、邮箱域名白名单、JWT、邮件、限流阈值均走配置。
 // 业务模块（认证、消息、WS 帧处理）从 M1 后续批次逐步接入。
@@ -31,6 +32,19 @@ builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptio
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
+
+// REST JSON 约定与 WS 帧保持一致（protocol/protocol.md §2）：camelCase、枚举小写字符串、null 字段省略，
+// 这样 Conversation 等协议 DTO 在 REST 与 WS 两处的序列化结果一致（前端按 frames.d.ts 解析）。
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    var serializer = options.SerializerOptions;
+    serializer.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    serializer.DefaultIgnoreCondition =
+        System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+    serializer.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter(
+        System.Text.Json.JsonNamingPolicy.CamelCase,
+        allowIntegerValues: false));
+});
 
 // 邮件通道：Development 用 Mock（验证码输出到控制台 stdout，不接真实邮件）；其它环境注册 SMTP 占位实现（M1-04 不真实发信）。
 if (builder.Environment.IsDevelopment())
@@ -50,6 +64,10 @@ builder.Services.AddScoped<EmailCodeService>();
 builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddSingleton<LoginAttemptLimiter>();
 builder.Services.AddScoped<AuthService>();
+
+// 会话（M1-07）：单聊创建（direct_key 唯一索引幂等去重）、列表与成员权限；变更经 WS conv.updated 推送。
+builder.Services.AddScoped<ConversationService>();
+builder.Services.AddSingleton<ConversationRealtimeNotifier>();
 
 // 实时通信（M1-06）：WS 握手/心跳/单活动连接；消息/同步等业务帧在 M1-07+ 接入。
 builder.Services.AddSingleton<ConnectionManager>();
@@ -179,6 +197,9 @@ app.UseStaticFiles();
 // 认证/用户 REST：M1-04 发码、M1-05 注册/登录/注销与当前用户资料。
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
+
+// 会话 REST（M1-07）：创建单聊、会话列表、单会话读取。
+app.MapConversationsEndpoints();
 
 // 健康检查：部署与发版检查使用（docs/project-overview.md §13.3）；db 探活执行 SELECT 1。
 app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options) =>
