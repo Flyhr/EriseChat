@@ -74,7 +74,7 @@ export function getAllRecords<T>(storeName: string): Promise<T[]> {
   return runRequest<T[]>(storeName, 'readonly', (store) => store.getAll())
 }
 
-// ===== 业务封装（缓存层，M1 接入 store 时使用） =====
+// ===== 业务封装（缓存层，M2 起由 messages store 接入） =====
 
 export function saveMessage(message: Message): Promise<void> {
   return putRecord(STORE_MESSAGES, message)

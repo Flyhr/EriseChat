@@ -1,5 +1,5 @@
 // WebSocket 连接层：状态机、心跳、重连、reqId 匹配（protocol/protocol.md §1/§2、AGENTS.md §5）。
-// 只负责连接与帧收发，不做业务分发；业务帧统一通过 'frame' 事件交给上层（M1 接入 store/sync）。
+// 只负责连接与帧收发，不做业务分发；业务帧统一通过 'frame' 事件交给上层（M2 起由 store/sync 消费）。
 // 全项目唯一连接入口：业务代码不得直接 new WebSocket（docs/project-overview.md §10）。
 
 import { config, reconnectDelayMs } from './config'
@@ -156,7 +156,7 @@ export class ChatWsClient {
     if (this.socket !== socket) return
     // 认证必须是连接后的首帧（protocol.md §1、§4.1）。
     if (!this.authToken) {
-      // TODO(M1): 登录成功后先 setAuth(token) 再 connect()；未注入时服务端会在 10s 后关闭连接。
+      // 登录成功后在路由守卫/登录页先 setAuth(token) 再 connect()（M2-03 已接入）；未注入时服务端会在 10s 后关闭连接。
       console.warn('[ws] 尚未注入 JWT，暂不发送 auth 帧')
       return
     }
@@ -331,7 +331,7 @@ export class ChatWsClient {
       this.deviceId = created
       return created
     } catch {
-      // 隐私模式等场景 localStorage 不可用时退化为固定值，M1 再评估。
+      // 隐私模式等场景 localStorage 不可用时退化为固定值，后续按需评估。
       this.deviceId = 'web-unknown'
       return this.deviceId
     }

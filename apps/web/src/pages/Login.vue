@@ -1,19 +1,165 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { authApi, type LoginResponse } from '../api/auth'
+import { ApiError } from '../core/http'
+import { chatWs } from '../core/ws'
+import { useAuthStore } from '../stores/auth'
 
-// 登录/注册页（M1 实现：邮箱验证码、可选密码、服务器地址配置；接口见 api/auth.ts）。
-const email = ref('')
-const code = ref('')
-const sending = ref(false)
+// 登录/注册页（M2-03）：验证码注册 / 验证码登录 / 密码登录三种模式。
+// 成功后统一走 applySession：写登录态 → 注入 WS 认证 → 建连 → 进聊天页（protocol.md §4.1）。
+type Mode = 'register' | 'code' | 'password'
 
-function sendEmailCode(): void {
-  // TODO(M1): 调用 authApi.sendEmailCode 并启动 60s 倒计时，错误按 ApiError.code 提示。
-  sending.value = true
+const MODE_LABELS: Record<Mode, string> = {
+  code: '验证码登录',
+  register: '注册',
+  password: '密码登录',
+}
+const modes = Object.keys(MODE_LABELS) as Mode[]
+
+/** 服务端错误码 → 中文文案（protocol.md §5；未列出的错误码用服务端 message 兜底）。 */
+const ERROR_MESSAGES: Record<string, string> = {
+  CODE_INVALID: '验证码错误，请检查后重试',
+  CODE_EXPIRED: '验证码已过期，请重新获取',
+  CODE_ATTEMPTS_EXCEEDED: '验证码错误次数过多，请重新获取',
+  EMAIL_ALREADY_REGISTERED: '该邮箱已注册，请直接登录',
+  EMAIL_RATE_LIMITED: '发送过于频繁，请稍后再试',
+  PASSWORD_INVALID: '邮箱或密码错误',
+  ACCOUNT_LOCKED: '登录失败次数过多，账号已临时锁定，请稍后再试',
+  UNAUTHORIZED: '登录状态已失效，请重新登录',
 }
 
-function login(): void {
-  // TODO(M1): 校验后调用 authApi.login，成功写入 useAuthStore().setSession 并连接聊天。
-  void login
+const router = useRouter()
+const auth = useAuthStore()
+
+const mode = ref<Mode>('code')
+const email = ref('')
+const code = ref('')
+const displayName = ref('')
+const password = ref('')
+const submitting = ref(false)
+const sending = ref(false)
+const errorMessage = ref('')
+const devCodeHint = ref('')
+const cooldown = ref(0)
+let cooldownTimer: ReturnType<typeof setInterval> | null = null
+
+const purpose = computed<'register' | 'login'>(() => (mode.value === 'register' ? 'register' : 'login'))
+const submitLabel = computed(() => (mode.value === 'register' ? '注册并登录' : '登录'))
+const canSubmit = computed(() => !submitting.value && email.value.trim().length > 0)
+const sendButtonLabel = computed(() => {
+  if (sending.value) return '发送中…'
+  if (cooldown.value > 0) return `${cooldown.value}s 后重发`
+  return '发送验证码'
+})
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) return ERROR_MESSAGES[error.code] ?? error.message
+  if (error instanceof Error && error.message) return error.message
+  return '网络异常，请稍后重试'
+}
+
+function startCooldown(seconds: number): void {
+  stopCooldown()
+  cooldown.value = seconds
+  cooldownTimer = setInterval(() => {
+    cooldown.value -= 1
+    if (cooldown.value <= 0) stopCooldown()
+  }, 1000)
+}
+
+function stopCooldown(): void {
+  if (cooldownTimer !== null) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+}
+
+onBeforeUnmount(stopCooldown)
+
+function switchMode(next: Mode): void {
+  mode.value = next
+  errorMessage.value = ''
+  devCodeHint.value = ''
+}
+
+async function sendCode(): Promise<void> {
+  if (sending.value || cooldown.value > 0) return
+  const target = email.value.trim()
+  if (!target) {
+    errorMessage.value = '请先输入邮箱'
+    return
+  }
+  sending.value = true
+  errorMessage.value = ''
+  try {
+    const result = await authApi.sendEmailCode({ email: target, purpose: purpose.value })
+    devCodeHint.value = result.devCode ?? ''
+    // 冷却时间以服务端返回为准（同邮箱 60 秒/次，AGENTS.md §6）。
+    startCooldown(result.cooldownSec > 0 ? result.cooldownSec : 60)
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error)
+  } finally {
+    sending.value = false
+  }
+}
+
+async function submit(): Promise<void> {
+  if (!canSubmit.value) return
+  const target = email.value.trim()
+  if (mode.value === 'register' && displayName.value.trim().length === 0) {
+    errorMessage.value = '请输入昵称'
+    return
+  }
+  if (mode.value !== 'password' && code.value.trim().length === 0) {
+    errorMessage.value = '请输入验证码'
+    return
+  }
+  if (mode.value !== 'code' && password.value.length === 0) {
+    errorMessage.value = '请输入密码'
+    return
+  }
+
+  submitting.value = true
+  errorMessage.value = ''
+  try {
+    let response: LoginResponse
+    if (mode.value === 'register') {
+      response = await authApi.register({
+        email: target,
+        code: code.value.trim(),
+        displayName: displayName.value.trim(),
+        password: password.value.length > 0 ? password.value : undefined,
+        deviceId: auth.deviceId,
+      })
+    } else if (mode.value === 'code') {
+      response = await authApi.loginWithCode({
+        email: target,
+        code: code.value.trim(),
+        deviceId: auth.deviceId,
+      })
+    } else {
+      response = await authApi.loginWithPassword({
+        email: target,
+        password: password.value,
+        deviceId: auth.deviceId,
+      })
+    }
+    applySession(response)
+    await router.push('/chat')
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error)
+  } finally {
+    submitting.value = false
+    stopCooldown()
+  }
+}
+
+/** 登录成功：持久化登录态 → 注入 WS 认证信息并建连（WS auth 必须是连接后首帧）。 */
+function applySession(response: LoginResponse): void {
+  auth.setSession(response.accessToken, response.user, response.expiresAt)
+  chatWs.setAuth(response.accessToken, auth.deviceId)
+  chatWs.connect()
 }
 </script>
 
@@ -21,19 +167,76 @@ function login(): void {
   <main class="login-page">
     <section class="login-card">
       <h1 class="login-card__title">EiseChat</h1>
-      <p class="login-card__subtitle">M0 骨架页面，登录流程将在 M1 接入</p>
+      <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
 
-      <form class="login-form" @submit.prevent="login">
+      <div class="login-modes" role="tablist" aria-label="登录方式">
+        <button
+          v-for="item in modes"
+          :key="item"
+          class="login-modes__item"
+          :class="{ 'login-modes__item--active': mode === item }"
+          type="button"
+          role="tab"
+          :aria-selected="mode === item"
+          @click="switchMode(item)"
+        >
+          {{ MODE_LABELS[item] }}
+        </button>
+      </div>
+
+      <form class="login-form" @submit.prevent="submit">
         <label class="login-form__field">
           <span class="login-form__label">邮箱</span>
-          <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
+          <input v-model="email" type="email" autocomplete="email" placeholder="you@company.com" />
         </label>
-        <label class="login-form__field">
+
+        <label v-if="mode === 'register'" class="login-form__field">
+          <span class="login-form__label">昵称</span>
+          <input
+            v-model="displayName"
+            type="text"
+            maxlength="32"
+            autocomplete="nickname"
+            placeholder="聊天中显示的名字"
+          />
+        </label>
+
+        <label v-if="mode !== 'password'" class="login-form__field">
           <span class="login-form__label">验证码</span>
-          <input v-model="code" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+          <div class="login-form__code-row">
+            <input v-model="code" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+            <button
+              class="login-form__send"
+              type="button"
+              :disabled="sending || cooldown > 0"
+              @click="sendCode"
+            >
+              {{ sendButtonLabel }}
+            </button>
+          </div>
         </label>
-        <button class="login-form__submit" type="submit" :disabled="sending">
-          {{ sending ? '发送中…' : '发送验证码（M1）' }}
+
+        <label v-if="mode !== 'code'" class="login-form__field">
+          <span class="login-form__label">
+            {{ mode === 'register' ? '密码（可选，设置后可用密码登录）' : '密码' }}
+          </span>
+          <input
+            v-model="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="8"
+            maxlength="128"
+            placeholder="8~128 个字符"
+          />
+        </label>
+
+        <p v-if="devCodeHint" class="login-form__hint">
+          Development 测试码：<strong>{{ devCodeHint }}</strong>（生产环境不返回）
+        </p>
+        <p v-if="errorMessage" class="login-form__error" role="alert">{{ errorMessage }}</p>
+
+        <button class="login-form__submit" type="submit" :disabled="submitting">
+          {{ submitting ? '处理中…' : submitLabel }}
         </button>
       </form>
     </section>
@@ -70,6 +273,33 @@ function login(): void {
   color: var(--color-text-secondary);
 }
 
+.login-modes {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-1);
+  background: var(--color-bg);
+  border-radius: var(--radius-sm);
+}
+
+.login-modes__item {
+  flex: 1;
+  padding: var(--space-2) var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.login-modes__item--active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
 .login-form {
   display: grid;
   gap: var(--space-4);
@@ -86,14 +316,62 @@ function login(): void {
 }
 
 .login-form input {
+  width: 100%;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   outline: none;
+  box-sizing: border-box;
 }
 
 .login-form input:focus {
   border-color: var(--color-primary);
+}
+
+.login-form__code-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.login-form__code-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.login-form__send {
+  flex: none;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.login-form__send:disabled {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.login-form__hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.login-form__error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger);
+  color: var(--color-text-inverse);
+  font-size: 13px;
 }
 
 .login-form__submit {
@@ -102,6 +380,7 @@ function login(): void {
   border-radius: var(--radius-sm);
   background: var(--color-primary);
   color: var(--color-text-inverse);
+  cursor: pointer;
 }
 
 .login-form__submit:disabled {

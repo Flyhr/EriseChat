@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { chatWs } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 
 // 路由表（docs/project-overview.md §7.2）；页面组件懒加载，减小首屏体积。
@@ -16,6 +17,15 @@ const router = createRouter({
   ],
 })
 
+/** 登录态存在但尚未建连时补建（如刷新后从 localStorage 恢复登录态直达受保护页；M2-03）。 */
+function ensureChatConnection(auth: ReturnType<typeof useAuthStore>): void {
+  if (auth.accessToken === null) return
+  if (chatWs.state === 'idle' || chatWs.state === 'closed') {
+    chatWs.setAuth(auth.accessToken, auth.deviceId)
+    chatWs.connect()
+  }
+}
+
 // 登录守卫（M2-02）：未登录访问非 /login 一律回登录页；已登录访问 /login 直接进 /chat。
 // 守卫在 app.use(pinia)/app.use(router) 后的首次导航时执行，此时 pinia 已激活。
 router.beforeEach((to) => {
@@ -26,6 +36,7 @@ router.beforeEach((to) => {
   if (auth.isLoggedIn && to.name === 'login') {
     return { name: 'chat' }
   }
+  if (auth.isLoggedIn) ensureChatConnection(auth)
   return true
 })
 

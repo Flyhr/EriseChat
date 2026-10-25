@@ -34,7 +34,7 @@ export interface RequestOptions {
   signal?: AbortSignal
 }
 
-// JWT 由 auth store 注入，避免 core 依赖 stores；M1 登录成功后调用 setAccessTokenProvider。
+// JWT 由 auth store 注入，避免 core 依赖 stores；登录成功后由 auth store 调用 setAccessTokenProvider（M2 已接入）。
 let accessTokenProvider: () => string | null = () => null
 
 export function setAccessTokenProvider(provider: () => string | null): void {
