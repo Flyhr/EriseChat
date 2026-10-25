@@ -1,7 +1,7 @@
 -- ============================================================
 -- EiseChat 数据库表结构 v1（唯一来源）
 -- ============================================================
--- 依据：docs/internal-plan.md §4.4（计划 V2.3.2）、docs/project-overview.md §11.2
+-- 依据：docs/internal-plan.md §4.4（计划 V2.3.3）、docs/project-overview.md §11.2
 -- 配套：protocol/protocol.md（帧与字段唯一来源）
 --
 -- 约定：
@@ -141,6 +141,9 @@ CREATE INDEX idx_conversation_members_user_id ON conversation_members (user_id);
 -- seq           : 会话内严格单调 +1，服务端在事务内分配，落库后不可变
 -- client_msg_id : 客户端 UUID 幂等键，(conversation_id, client_msg_id) 唯一
 -- content_json  : 按 msg_type 解释的 JSON 文本（text 为 JSON 字符串，image/file/system 为 JSON 对象）
+-- file_id       : image/file 消息引用的 files.id；text/system 为 NULL。v1 不建库级外键：
+--                 SQLite 对已有表加 FK 需整表重建，引用完整性由应用层（发送时校验文件存在与归属）保证，
+--                 孤儿清理兜底；下载鉴权与孤儿清理都依赖本列（M3-01）
 -- reply_to      : 被回复消息 ID（自引用）
 -- deleted_at    : 预留（v1 不做撤回，恒为 NULL；P2 撤回使用）
 -- ------------------------------------------------------------
@@ -152,6 +155,7 @@ CREATE TABLE messages (
     seq             INTEGER NOT NULL,
     msg_type        TEXT NOT NULL CHECK (msg_type IN ('text', 'image', 'file', 'system')),
     content_json    TEXT NOT NULL,
+    file_id         TEXT,
     reply_to        TEXT,
     created_at      INTEGER NOT NULL,
     deleted_at      INTEGER,
@@ -164,6 +168,7 @@ CREATE TABLE messages (
 CREATE INDEX idx_messages_conversation_seq ON messages (conversation_id, seq);
 CREATE INDEX idx_messages_reply_to ON messages (reply_to);
 CREATE INDEX idx_messages_sender_id ON messages (sender_id);
+CREATE INDEX idx_messages_file_id ON messages (file_id);
 
 -- ------------------------------------------------------------
 -- invites：注册邀请码（可配置是否需要邀请；code 为明文短码）

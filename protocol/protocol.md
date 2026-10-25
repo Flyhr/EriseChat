@@ -1,7 +1,7 @@
 # EiseChat WebSocket 协议 v1
 
 > 本文件是**协议帧与字段的唯一来源**（`AGENTS.md` §1/§5）；表结构唯一来源为 `protocol/schema.sql`。
-> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.2）与 `docs/project-overview.md` §11.1。
+> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.3）与 `docs/project-overview.md` §11.1。
 > 版本：`protocolVersion = 1`（2026-10-25 初版）；变更必须先改本文件与计划文档，再改实现，且只允许向后兼容的增量（见 §8）。
 
 ## 1. 传输与连接
@@ -444,6 +444,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 3. **下载**：`GET /api/files/{fileId}`，需登录且请求者必须是引用该文件的会话成员；流式返回，不暴露磁盘路径。
 4. **图片**：客户端发送前压缩（最长边 1280px、约 ≤300KB）；图片消息与文件消息共用 FileContent。
 5. **存储**：`/data/files/yyyyMM/{fileId}{ext}`（逻辑路径，实际目录见 `appsettings.json`）；孤儿文件由后台任务清理。
+6. **引用持久化**：服务端在 `messages.file_id` 保存 image/file 消息引用的文件 ID（可空支撑列，不属于帧字段），用于下载时的会话成员鉴权与孤儿文件清理；帧格式不变。
 
 示例（图片消息）：
 
@@ -455,7 +456,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 ### 8.1 协议版本
 
-- 当前 `protocolVersion = 1`，随计划 V2.3.2 发布。
+- 当前 `protocolVersion = 1`，随计划 V2.3.3 发布。
 - 服务端在 `hello` 中下发 `protocolVersion`；客户端在 `auth` 中可带上自身版本（缺省视为 1）。
 - 版本不兼容时服务端回 `error`（`PROTOCOL_VERSION_MISMATCH`）并关闭；客户端提示升级，不进入聊天。
 
@@ -507,3 +508,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 |---|---|---|
 | v1（M0-02） | 2026-10-25 | 初版：传输格式、17 个帧、错误码、三条时序、文件消息格式、兼容规则；`protocolVersion = 1` |
 | v1（M1-11 校准） | 2026-10-25 | 按 M1 实现补注（帧/字段语义未变）：纯文本消息上限 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）；`conv.list` 响应按最近消息时间倒序（无消息按创建时间）；M1 服务端已处理帧为 `auth`/`hello`/`ping`/`pong`/`message.send`/`message.ack`/`message.new`/`sync.request`/`sync.response`/`conv.list`/`conv.updated`/`kicked`/`error`，`read.update`/`read.updated`/`typing`/`presence` 保留至 M3（当前服务端按未处理帧忽略）；`protocolVersion` 仍为 `1` |
+| v1（M3-01 库表增量） | 2026-10-25 | 无帧变更；messages 表新增可选 file_id（引用 files.id，用于下载鉴权与孤儿清理），protocol/schema.sql 同步；protocolVersion 仍为 1 |

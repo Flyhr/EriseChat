@@ -1,7 +1,7 @@
-# 内部版执行计划（V2.3.2）：自研轻量 IM + 可安装客户端
+# 内部版执行计划（V2.3.3）：自研轻量 IM + 可安装客户端
 
 > 变更原因（用户 m00240 + m00264 + m00289 + m00356）：**内部使用、不在网络发布；要有安装程序；不买授权；自研底层慢慢完善。** 已明确：Windows 桌面为主 + 少量 Android；**移动端先只做 Android，iPhone 仅出方案、不实现**；云服务器用 **2C4G 轻量**；峰值 **≤100 在线**；账号用**邮箱验证码**注册/登录，不用手机号；**注册不做限制**；邮箱域名白名单默认**留空 = 不限制**，做成管理员可配置项；域名已有，开发期先用占位域名。
-> 本文是唯一现行计划（V2.3.2），旧计划 V1.1/V2.0 已按用户要求删除。V2.3 相对 V2.2 的变化：部署参数确认（2C4G 轻量 / 占位域名 / 不限制注册 / 白名单后台可配），成本按“域名已有”修正。V2.3.1 为文档一致性修订（成本口径、去掉 Docker 表述、敏感值只出控制台、补目录架构文档），不改变需求与范围；V2.3.2 按用户要求补充工程规范（测试文件统一放 `docs/test/`、默认不跑测试、提交信息格式 `类型：[编号]-简述`、任务交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确文档分工（`README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束）），详见附录 D。
+> 本文是唯一现行计划（V2.3.3），旧计划 V1.1/V2.0 已按用户要求删除。V2.3 相对 V2.2 的变化：部署参数确认（2C4G 轻量 / 占位域名 / 不限制注册 / 白名单后台可配），成本按“域名已有”修正。V2.3.1 为文档一致性修订（成本口径、去掉 Docker 表述、敏感值只出控制台、补目录架构文档），不改变需求与范围；V2.3.2 按用户要求补充工程规范（测试文件统一放 `docs/test/`、默认不跑测试、提交信息格式 `类型：[编号]-简述`、任务交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确文档分工（`README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束）），详见附录 D。V2.3.3 为 M3 库表增量（messages 增可选 file_id，支撑文件消息下载鉴权与孤儿清理），不改变需求与范围。
 
 ---
 
@@ -169,7 +169,7 @@
 | `sessions` | `id`, `user_id`, `device_id`, `jwt_id`, `created_at`, `last_seen_at`, `revoked_at?` | 会话/踢人用 |
 | `conversations` | `id`, `type`(direct/group), `title`, `direct_key?` unique, `created_by`, `created_at`, `last_seq`, `last_message_id?` | `direct_key` = 两用户 ID 排序拼接，保证单聊唯一 |
 | `conversation_members` | `conversation_id`, `user_id`, `role`(owner/member), `joined_at`, `last_read_seq` | 成员与已读游标 |
-| `messages` | `id`, `conversation_id`, `sender_id`, `client_msg_id`, `seq`, `msg_type`(text/image/file/system), `content_json`, `reply_to?`, `created_at`, `deleted_at?` | unique `(conversation_id, client_msg_id)`；index `(conversation_id, seq)` |
+| `messages` | `id`, `conversation_id`, `sender_id`, `client_msg_id`, `seq`, `msg_type`(text/image/file/system), `content_json`, `file_id?`, `reply_to?`, `created_at`, `deleted_at?` | unique `(conversation_id, client_msg_id)`；index `(conversation_id, seq)`；index `(file_id)`；不建库级外键（见 schema.sql 注释） |
 | `files` | `id`, `owner_id`, `original_name`, `mime`, `size`, `storage_path`, `created_at` | 下载时校验会话成员 |
 | `invites` | `code`, `created_by`, `used_by?`, `expires_at`, `created_at` | 邀请注册（可选） |
 | `admin_audit_logs` | `id`, `admin_id`, `action`, `target`, `detail_json`, `created_at` | 建号、禁用、备份等操作留痕 |
@@ -544,7 +544,7 @@ POST /api/auth/register
 
 ---
 
-## 附录 B：仓库目录（V2.3.2 目标结构，目录级）
+## 附录 B：仓库目录（V2.3.3 目标结构，目录级）
 
 ```
 chat-platform/                      # 当前仓库根 D:\Code\EiseChat
@@ -575,7 +575,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 | 文档 | 状态 | 说明 |
 |---|---|---|
 | `README.md` | **项目介绍与入口** | 项目是什么、给谁用、规模与形态、技术栈概览、文档索引、里程碑、重要边界；**项目介绍唯一出处**，不写可执行约束 |
-| `docs/internal-plan.md` | **现行主计划（V2.3.2）** | 内部使用、自研、邮箱验证码、云服务器、可安装、零授权费；移动端先 Android，iPhone 仅方案；白名单后台可配、注册不限制、域名先用占位 |
+| `docs/internal-plan.md` | **现行主计划（V2.3.3）** | 内部使用、自研、邮箱验证码、云服务器、可安装、零授权费；移动端先 Android，iPhone 仅方案；白名单后台可配、注册不限制、域名先用占位 |
 | `docs/project-overview.md` | **现行项目说明 + 目录架构** | 项目定位/范围/技术栈/总体架构/关键设计约定 + 文件级目录规划、模块职责与依赖方向；M0 建骨架依据（项目介绍以 `README.md` 为准，本文做展开） |
 | `AGENTS.md` | 仓库根 | **仓库级硬约束（不含项目介绍）**：技术栈、许可与架构硬规则、协议可靠性要求、工作流、测试与提交规范、DoD |
 | 旧计划 V1.1/V2.0、`docs/feasibility-analysis.md`、`research/*.md` | 已删除 | 按用户要求清理无用文档，只保留本计划、项目说明与约束文档；如需追溯可从备份恢复 |
@@ -586,6 +586,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| V2.3.3 | 2026-10-25 | M3 库表增量：messages 增可选 file_id + idx_messages_file_id（文件消息下载鉴权与孤儿清理用，不建库级外键）；protocol/protocol.md §7 与变更记录同步；需求、范围与帧格式未变 |
 | —（M2 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M2 已完成：M1 服务端 + M2 Web 端全部落地，前端 34 个 Vitest 用例、端到端脚本（100 条互发、断线补拉）与 `npm run build`/`dotnet build` 通过；`README.md` 当前状态/下一步同步；`protocol/` 无帧变更，`GET /api/users?search=` 在 §7 按实现补注；需求、范围与计划版本（V2.3.2）未变 |
 | —（M1 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M1 已完成：认证/WS/消息/补拉/单聊会话/EF 迁移与 xUnit、端到端验证全部落地；`protocol/protocol.md` 按实现补注（v1 文本消息上限 4096 字符、会话列表排序口径、M1 已实现帧范围）并在变更记录追加 v1（M1-11 校准）行；`README.md` 当前状态/下一步同步；需求、范围与计划版本（V2.3.2）未变 |
 | —（M0 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M0 已完成：协议/DDL、服务端、Web/桌面/移动端骨架全部落地并完成构建/冒烟验证，M1 业务与 `infra/`、部署说明待做；`AGENTS.md` §8 常用命令按实际工程补全（版本 1.5→1.6，规则内容不变）；`README.md` 当前状态/快速开始同步；需求、范围与计划版本（V2.3.2）未变 |
