@@ -1,6 +1,7 @@
 using System.Reflection;
 using Chat.Protocol;
 using Chat.Server.Api;
+using Chat.Server.BackgroundJobs;
 using Chat.Server.Common.Configuration;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
@@ -80,6 +81,9 @@ builder.Services.AddScoped<MessageHub>();
 // 文件（M3-02）：磁盘存储为单例（无状态，根目录固定）；上传/下载业务按请求作用域访问数据库。
 builder.Services.AddSingleton<FileStorage>();
 builder.Services.AddScoped<FileService>();
+
+// 孤儿文件清理（M3-02）：启动 30 秒后首轮，之后按 App:OrphanFileCleanupIntervalHours 轮询（默认 24 小时）。
+builder.Services.AddHostedService<OrphanFileCleanupService>();
 
 // 实时通信（M1-06）：WS 握手/心跳/单活动连接；M1-08 起接入 message.send / sync.request。
 builder.Services.AddSingleton<ConnectionManager>();

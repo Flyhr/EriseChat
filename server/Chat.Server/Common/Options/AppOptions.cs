@@ -17,6 +17,9 @@ public sealed class AppOptions
     /// <summary>单文件上传上限（字节），默认 50MB（AGENTS §6）。</summary>
     public long UploadMaxBytes { get; set; } = 50L * 1024 * 1024;
 
+    /// <summary>孤儿文件清理轮询间隔（小时），默认 24；代码内限制 1 小时~7 天（M3-02）。</summary>
+    public int OrphanFileCleanupIntervalHours { get; set; } = 24;
+
     /// <summary>是否开放注册（管理员可关闭，关闭后注册接口返回 REGISTRATION_DISABLED）。</summary>
     public bool RegistrationEnabled { get; set; } = true;
 
