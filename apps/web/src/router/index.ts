@@ -1,10 +1,13 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
 import { chatWs } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 
 // 路由表（docs/project-overview.md §7.2）；页面组件懒加载，减小首屏体积。
+// Electron 打包态由 file:// 加载 index.html：history 模式在 file 协议下无法工作（路径即文件路径），
+// 使用 hash 路由（file:///…/index.html#/login）；Web 部署仍用 history 模式保持正常 URL。
+const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:'
 const router = createRouter({
-  history: createWebHistory(),
+  history: isFileProtocol ? createWebHashHistory() : createWebHistory(),
   routes: [
     { path: '/', redirect: '/chat' },
     { path: '/login', name: 'login', component: () => import('../pages/Login.vue') },

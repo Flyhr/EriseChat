@@ -5,6 +5,9 @@ import vue from '@vitejs/plugin-vue'
 // 开发期把 /api、/ws 代理到本机服务端（Kestrel 127.0.0.1:8080）；生产环境由服务端同域提供，
 // 不需要代理（见 docs/project-overview.md §7.4：构建产物复制到 server/Chat.Server/wwwroot/）。
 export default defineConfig({
+  // 相对基路径：Electron 打包态用 file:// 加载 index.html（resources/web-dist），
+  // 绝对路径 /assets/... 会解析到 file:///assets/ 导致白屏；同域 HTTP 部署用相对路径同样正常。
+  base: './',
   plugins: [vue()],
   server: {
     // 固定 IPv4：桌面壳（apps/desktop）开发态加载 http://127.0.0.1:5173，需与 Vite 监听地址一致。
