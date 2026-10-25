@@ -129,6 +129,75 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 }
 
+/**
+ * 下载二进制内容（M3-07 文件/图片）：复用鉴权头、超时与 401 回调；
+ * 非 2xx 时按 text 解析 JSON 错误体（{code,message,traceId}）并抛 ApiError。
+ * 与 request 的区别：成功响应返回 Blob 而不是解析 JSON。
+ */
+export async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
+  const {
+    method = 'GET',
+    body,
+    query,
+    headers = {},
+    timeoutMs = config.requestTimeoutMs,
+    signal,
+  } = options
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const onExternalAbort = (): void => controller.abort()
+  signal?.addEventListener('abort', onExternalAbort, { once: true })
+
+  const finalHeaders: Record<string, string> = { ...headers }
+  const token = accessTokenProvider()
+  if (token) finalHeaders.Authorization = `Bearer ${token}`
+
+  let payload: BodyInit | undefined
+  if (body !== undefined) {
+    if (body instanceof FormData) {
+      payload = body
+    } else {
+      finalHeaders['Content-Type'] = 'application/json'
+      payload = JSON.stringify(body)
+    }
+  }
+
+  try {
+    const response = await fetch(buildUrl(path, query), {
+      method,
+      headers: finalHeaders,
+      body: payload,
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      if (response.status === 401 && unauthorizedHandler !== null && !isAuthEndpoint(path)) {
+        unauthorizedHandler()
+      }
+      let errorBody: ApiErrorBody = {}
+      try {
+        const text = await response.text()
+        if (text) errorBody = JSON.parse(text) as ApiErrorBody
+      } catch {
+        // 非 JSON 错误体（如网关页）：保留空错误体，ApiError 使用默认文案。
+      }
+      throw new ApiError(response.status, errorBody)
+    }
+
+    return await response.blob()
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('请求超时或已取消')
+    }
+    throw error instanceof Error ? error : new Error(String(error))
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onExternalAbort)
+  }
+}
+
 export const http = {
   get: <T>(path: string, options?: Omit<RequestOptions, 'method' | 'body'>): Promise<T> =>
     request<T>(path, { ...options, method: 'GET' }),

@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { setAccessTokenProvider } from '../core/http'
+import { clearBlobCache } from '../core/blobCache'
 import type { AuthUser } from '../api/auth'
 
 /** deviceId localStorage key（与 core/ws.ts 共用同一 key，保证 REST 会话与 WS auth 设备标识一致）。 */
@@ -106,6 +107,8 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null
     expiresAt.value = 0
     clearStoredSession()
+    // 退出登录/被踢/切换账号：释放鉴权图片的 blob URL，避免新账号看到上一账号内容（M3-07）。
+    clearBlobCache()
   }
 
   // core/http 通过 provider 读取 token，避免 core 反向依赖 store（project-overview.md §10）。
