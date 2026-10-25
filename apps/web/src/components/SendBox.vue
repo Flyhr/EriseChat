@@ -7,12 +7,14 @@ import { ALLOWED_EXTENSIONS } from '../core/attachments'
 // 上传、压缩、发送状态机由 pages/Chat.vue 与 stores/messages.ts 负责。
 // Enter 发送、Shift+Enter 换行；服务端文本上限 4096 字符，输入框与发送入口双重拦截（M3-00 N10）。
 // M3-07：附件按钮 → 选择文件 → emit file-selected；上传中禁用发送与再次选择。
+// M3-09：输入非空时 emit typing（由父组件按会话做 3 秒节流后发 typing 帧）。
 const emit = defineEmits<{
   send: [text: string]
   'file-selected': [file: File]
+  typing: []
 }>()
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     /** 附件上传中：禁用输入、发送与附件按钮，并显示「上传中…」。 */
     uploading?: boolean
@@ -46,6 +48,14 @@ function onFileChange(event: Event): void {
   input.value = ''
   if (file) emit('file-selected', file)
 }
+
+/** 输入变化（M3-09）：非空且未超上限时通知父组件发送 typing（父组件负责 3 秒节流）。 */
+function onInput(): void {
+  if (props.uploading) return
+  const value = text.value.trim()
+  if (value.length === 0 || value.length > MAX_TEXT_LENGTH) return
+  emit('typing')
+}
 </script>
 
 <template>
@@ -75,6 +85,7 @@ function onFileChange(event: Event): void {
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+        @input="onInput"
         @keydown.enter.exact.prevent="submit"
       />
       <span class="send-box__counter" :class="{ 'send-box__counter--limit': atLimit }">

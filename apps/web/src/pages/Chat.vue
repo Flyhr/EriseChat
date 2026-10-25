@@ -11,9 +11,12 @@ import { isImageFile, validateAttachment } from '../core/attachments'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { shouldAdvanceRead } from '../core/readReceipt'
+import { TypingThrottle } from '../core/typingThrottle'
+import { chatWs } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
+import { useTypingStore } from '../stores/typing'
 import type { Conversation } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
@@ -23,6 +26,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
 const messages = useMessagesStore()
+const typing = useTypingStore()
+/** typing 帧的客户端节流（同一会话 3 秒最多一次，protocol.md §4.7）。 */
+const typingThrottle = new TypingThrottle()
 
 const selfUserId = computed(() => auth.user?.userId ?? '')
 const activeId = computed(() =>
@@ -76,12 +82,22 @@ const peerReadSeqForDisplay = computed(() =>
     : undefined,
 )
 
+/** 当前会话「输入中」提示（M3-09）：单聊「对方正在输入…」、群聊「X 正在输入…」/多人。 */
+const typingText = computed(() => {
+  const conversation = activeConversation.value
+  if (!conversation || !activeId.value) return ''
+  const nameById = new Map(conversation.members.map((member) => [member.userId, member.displayName]))
+  return typing.typingLabel(activeId.value, conversation.type, (userId) => nameById.get(userId) ?? '')
+})
+
 // 切换会话：首次进入拉最新一页历史（M2-05）；已加载过直接用缓存，后续新消息由 message.new 合并。
 watch(
   activeId,
-  (conversationId) => {
+  (conversationId, previousId) => {
     showMembersPanel.value = false
     atBottom.value = true
+    // 离开会话即清除其「输入中」状态（M3-09，避免残留旧会话提示）。
+    if (previousId) typing.clearConversation(previousId)
     if (!conversationId) return
     void messages.loadInitial(conversationId).then(() => {
       // 首次加载并滚到底后上报一次已读（M3-09）。
@@ -141,6 +157,7 @@ onMounted(async () => {
   // 会话列表刷新与增量补拉统一由 messages store 在 authed（首次/重连成功）时触发（M3-00 B3）。
   conversations.subscribeRealtime()
   messages.subscribeRealtime()
+  typing.subscribeRealtime()
   document.addEventListener('visibilitychange', markActiveConversationRead)
   await conversations.restoreFromCache()
   await messages.restoreFromCache()
@@ -157,6 +174,14 @@ function selectConversation(conversationId: string): void {
 function sendMessage(text: string): void {
   if (!activeId.value || !selfUserId.value) return
   messages.sendText(activeId.value, text, selfUserId.value)
+}
+
+/** 输入中上报（M3-09）：客户端 3 秒节流 + 连接已认证才发送；服务端对「连接×会话」另有 1 秒静默节流。 */
+function sendTyping(): void {
+  const conversationId = activeId.value
+  if (!conversationId || chatWs.state !== 'authed') return
+  if (!typingThrottle.shouldSend(conversationId)) return
+  chatWs.send({ type: 'typing', conversationId })
 }
 
 function retryMessage(clientMsgId: string): void {
@@ -184,11 +209,14 @@ function onLeftGroup(conversationId: string): void {
 const uploadBusy = ref(false)
 const uploadError = ref<string | null>(null)
 
-// 退出登录/切换账号：关闭群成员面板并清空页内提示（面板内部状态随 v-if 卸载重置）。
+// 退出登录/切换账号：关闭群成员面板并清空页内提示（面板内部状态随 v-if 卸载重置）；
+// 同时清空「输入中」状态与节流记录，避免沿用上一位用户的数据（M3-09）。
 watch(selfUserId, () => {
   showMembersPanel.value = false
   pageNotice.value = ''
   uploadError.value = null
+  typing.clear()
+  typingThrottle.reset()
 })
 
 async function handleFileSelected(file: File): Promise<void> {
@@ -279,6 +307,7 @@ async function handleFileSelected(file: File): Promise<void> {
           </button>
         </header>
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
+        <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
         <MessageList
           :messages="activeMessages"
           :pending="activePending"
@@ -297,6 +326,7 @@ async function handleFileSelected(file: File): Promise<void> {
           :upload-error="uploadError"
           @send="sendMessage"
           @file-selected="handleFileSelected"
+          @typing="sendTyping"
         />
         <GroupMembersPanel
           v-if="showMembersPanel && activeConversation.type === 'group'"
@@ -433,5 +463,15 @@ async function handleFileSelected(file: File): Promise<void> {
   color: var(--color-text-secondary);
   font-size: 13px;
   text-align: center;
+}
+
+/* 预留固定高度，避免「输入中」提示出现/消失时消息列表明显跳动（M3-09）。 */
+.chat-page__typing {
+  margin: 0;
+  min-height: 18px;
+  padding: 0 var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
 </style>
