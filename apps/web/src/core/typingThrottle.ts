@@ -13,8 +13,8 @@ export class TypingThrottle {
     windowMs: number = TYPING_THROTTLE_MS,
   ): boolean {
     if (!conversationId) return false
-    const previous = this.lastSentAt.get(conversationId) ?? 0
-    if (nowMs - previous < windowMs) return false
+    const previous = this.lastSentAt.get(conversationId)
+    if (previous !== undefined && nowMs - previous < windowMs) return false
     this.lastSentAt.set(conversationId, nowMs)
     if (this.lastSentAt.size > MAX_TRACKED_CONVERSATIONS) {
       const cutoff = nowMs - 10 * windowMs
