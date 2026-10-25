@@ -48,7 +48,8 @@ TestResults/
 server/Chat.Server/wwwroot/
 
 # ==== 运行时数据（服务端唯一事实源，只存在服务器/本机 data/） ====
-data/
+# 仅仓库根 data/ 为运行时数据目录；服务端代码目录 server/Chat.Server/Data/ 必须入库
+/data/
 *.db
 *.db-shm
 *.db-wal

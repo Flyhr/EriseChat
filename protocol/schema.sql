@@ -16,6 +16,10 @@
 --   PRAGMA journal_mode = WAL;  PRAGMA foreign_keys = ON;
 --   迁移：EF Core 启动时自动执行（server/Chat.Server/Data/Migrations），必须幂等；
 --   本文件与 EF 迁移同步维护；只允许向后兼容增量（新增表/新增可空列或带默认值列/新增索引）。
+--
+-- 与 EF 迁移的表示差异（语义等价）：
+--   * UNIQUE 列约束在迁移中以唯一索引（IX_*）实现；
+--   * 外键列索引由 EF 外键约定生成时，本文件已显式列出、迁移以同名 idx_* 索引落地。
 -- ============================================================
 
 -- ------------------------------------------------------------
@@ -112,6 +116,7 @@ CREATE TABLE conversations (
 );
 
 CREATE INDEX idx_conversations_last_message_id ON conversations (last_message_id);
+CREATE INDEX idx_conversations_created_by ON conversations (created_by);
 
 -- ------------------------------------------------------------
 -- conversation_members：会话成员
@@ -158,6 +163,7 @@ CREATE TABLE messages (
 
 CREATE INDEX idx_messages_conversation_seq ON messages (conversation_id, seq);
 CREATE INDEX idx_messages_reply_to ON messages (reply_to);
+CREATE INDEX idx_messages_sender_id ON messages (sender_id);
 
 -- ------------------------------------------------------------
 -- invites：注册邀请码（可配置是否需要邀请；code 为明文短码）
@@ -175,6 +181,7 @@ CREATE TABLE invites (
 );
 
 CREATE INDEX idx_invites_created_by ON invites (created_by);
+CREATE INDEX idx_invites_used_by ON invites (used_by);
 
 -- ------------------------------------------------------------
 -- admin_audit_logs：管理员操作审计
