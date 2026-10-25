@@ -8,6 +8,15 @@ import type { ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types
 /** 连接状态：idle 未连接 / connecting 首次连接中 / authed 认证完成 / reconnecting 退避重连中 / closed 已关闭 */
 export type WsState = 'idle' | 'connecting' | 'authed' | 'reconnecting' | 'closed'
 
+/** 致命关闭码（protocol.md §1）：4001 被同账号新连接踢下线、4002 认证失败/超时/版本不兼容/帧格式错误。 */
+export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([4001, 4002])
+
+/** 致命关闭事件：连接不会再自动重连，调用方应清理登录态并回登录页（M3-00）。 */
+export interface FatalCloseInfo {
+  code: number
+  reason: string
+}
+
 /** 待响应请求（按 reqId 匹配） */
 export interface PendingRequest {
   resolve: (frame: ServerFrame) => void
@@ -21,6 +30,8 @@ export interface WsEventMap {
   frame: ServerFrame
   kicked: KickedFrame
   error: ErrorFrame
+  /** 致命关闭（4001/4002）：不会自动重连，上层应清会话并回登录页。 */
+  fatalClose: FatalCloseInfo
 }
 
 export interface WsClientOptions {
@@ -51,6 +62,8 @@ export class ChatWsClient {
   private heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private manualClose = false
+  /** 致命关闭事件只通知一次（kicked 帧与随后的 4001 关闭不重复触发）。 */
+  private fatalEmitted = false
   private requestSeq = 0
   private authToken: string | null = null
   private deviceId: string | null = null
@@ -92,6 +105,7 @@ export class ChatWsClient {
     if (this.state === 'connecting' || this.state === 'authed') return
     this.clearReconnectTimer()
     this.manualClose = false
+    this.fatalEmitted = false
     this.setState(this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting')
 
     let socket: WebSocket
@@ -206,11 +220,15 @@ export class ChatWsClient {
     switch (frame.type) {
       case 'hello':
         if (frame.protocolVersion !== this.protocolVersion) {
-          console.warn(
-            `[ws] 协议版本不兼容：服务端 ${frame.protocolVersion}，客户端 ${this.protocolVersion}`,
-          )
+          // protocol.md §4.1：客户端收到不兼容版本必须提示升级并主动关闭，不能进入聊天。
+          const reason = `协议版本不兼容（服务端 ${frame.protocolVersion}，客户端 ${this.protocolVersion}）`
+          console.warn(`[ws] ${reason}`)
+          this.emitFatal(4002, reason)
+          this.closeSocket(4002, reason)
+          break
         }
         this.reconnectAttempt = 0
+        this.fatalEmitted = false
         this.setState('authed')
         this.startHeartbeat()
         break
@@ -218,8 +236,10 @@ export class ChatWsClient {
         this.sendRaw({ type: 'pong', ts: frame.ts })
         break
       case 'kicked':
+        // 被同账号新连接踢下线：不发重连、通知上层清理并回登录页（protocol.md §1）。
         this.manualClose = true
         this.emit('kicked', frame)
+        this.emitFatal(4001, frame.reason || '账号在其他设备登录')
         break
       case 'error':
         this.emit('error', frame)
@@ -237,8 +257,16 @@ export class ChatWsClient {
     this.clearHeartbeat()
     this.rejectAllPending(new Error(`连接已关闭（close code ${event.code}）`))
 
-    // 被踢下线（4001）或主动关闭：不自动重连（protocol.md §1）。
-    if (this.manualClose || event.code === 4001) {
+    // 致命关闭码（4001 被踢 / 4002 认证类失败）：不自动重连，并通知上层清会话回登录页（M3-00）。
+    if (this.manualClose) {
+      this.setState('closed')
+      return
+    }
+    if (TERMINAL_CLOSE_CODES.has(event.code)) {
+      this.emitFatal(
+        event.code,
+        event.reason || (event.code === 4001 ? '账号在其他设备登录' : '认证失败或已过期'),
+      )
       this.setState('closed')
       return
     }
@@ -335,6 +363,25 @@ export class ChatWsClient {
       this.deviceId = 'web-unknown'
       return this.deviceId
     }
+  }
+
+  /** 通知一次致命关闭（kicked 帧与随后的关闭事件只触发一次）。 */
+  private emitFatal(code: number, reason: string): void {
+    if (this.fatalEmitted) return
+    this.fatalEmitted = true
+    this.emit('fatalClose', { code, reason })
+  }
+
+  /** 主动关闭且不再重连（协议版本不兼容等本地判定为致命的场景）。 */
+  private closeSocket(code: number, reason: string): void {
+    this.manualClose = true
+    this.clearReconnectTimer()
+    this.clearHeartbeat()
+    this.rejectAllPending(new Error(reason))
+    const socket = this.socket
+    this.socket = null
+    if (socket && socket.readyState === WebSocket.OPEN) socket.close(code, reason)
+    this.setState('closed')
   }
 
   private setState(next: WsState): void {

@@ -124,3 +124,22 @@ export async function getMeta<T>(key: string): Promise<T | undefined> {
 export function setMeta(key: string, value: unknown): Promise<void> {
   return putRecord<MetaRecord>(STORE_META, { key, value })
 }
+
+/**
+ * 清空全部本地缓存（M3-00：退出登录/账号切换时调用）。
+ * 缓存只是加速渲染，清空不影响服务端事实源；下次登录会重新拉取。
+ */
+export async function clearAllData(): Promise<void> {
+  try {
+    const db = await openDb()
+    const storeNames = [STORE_MESSAGES, STORE_CONVERSATIONS, STORE_META]
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(storeNames, 'readwrite')
+      for (const storeName of storeNames) transaction.objectStore(storeName).clear()
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB 清理失败'))
+    })
+  } catch (error) {
+    console.warn('[db] 清理本地缓存失败', error)
+  }
+}

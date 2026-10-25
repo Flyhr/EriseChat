@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { ApiError } from '../core/http'
 import { chatWs } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
+import { useConversationsStore } from '../stores/conversations'
+import { useMessagesStore } from '../stores/messages'
 
 // 登录/注册页（M2-03）：验证码注册 / 验证码登录 / 密码登录三种模式。
 // 成功后统一走 applySession：写登录态 → 注入 WS 认证 → 建连 → 进聊天页（protocol.md §4.1）。
@@ -30,7 +32,11 @@ const ERROR_MESSAGES: Record<string, string> = {
 }
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
+
+/** 致命关闭（被踢/登录失效）跳转登录页时携带的提示（M3-00）。 */
+const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.notice : '')
 
 const mode = ref<Mode>('code')
 const email = ref('')
@@ -157,6 +163,12 @@ async function submit(): Promise<void> {
 
 /** 登录成功：持久化登录态 → 注入 WS 认证信息并建连（WS auth 必须是连接后首帧）。 */
 function applySession(response: LoginResponse): void {
+  // 切换账号/重新登录前先断开旧连接、清空上一位用户的会话与消息状态（M3-00 修 B4）。
+  if (chatWs.state !== 'idle' && chatWs.state !== 'closed') {
+    chatWs.disconnect(1000, 'switch account')
+  }
+  useConversationsStore().clear()
+  useMessagesStore().clear()
   auth.setSession(response.accessToken, response.user, response.expiresAt)
   chatWs.setAuth(response.accessToken, auth.deviceId)
   chatWs.connect()
@@ -230,6 +242,7 @@ function applySession(response: LoginResponse): void {
           />
         </label>
 
+        <p v-if="noticeMessage" class="login-form__notice" role="status">{{ noticeMessage }}</p>
         <p v-if="devCodeHint" class="login-form__hint">
           Development 测试码：<strong>{{ devCodeHint }}</strong>（生产环境不返回）
         </p>
@@ -357,6 +370,15 @@ function applySession(response: LoginResponse): void {
 }
 
 .login-form__hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.login-form__notice {
   margin: 0;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);

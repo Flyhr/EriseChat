@@ -175,6 +175,13 @@ export const useConversationsStore = defineStore('conversations', () => {
     items.value = []
     loaded.value = false
     cacheRestored = false
+    // 清除本地已读游标（含 localStorage），避免账号切换后沿用上一位用户的已读状态（M3-00）。
+    lastReadSeqByConversation.value = {}
+    try {
+      window.localStorage.removeItem(READ_SEQ_STORAGE_KEY)
+    } catch {
+      // localStorage 不可用时本来也没有持久化。
+    }
     if (unsubscribeFrame) {
       unsubscribeFrame()
       unsubscribeFrame = null
