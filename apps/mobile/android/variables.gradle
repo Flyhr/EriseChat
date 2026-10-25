@@ -1,5 +1,6 @@
 ext {
-    minSdkVersion = 24
+    // M5-01：按计划最低 API 26（Android 8.0）；compile/target 保持 36（Android 16）。
+    minSdkVersion = 26
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'
