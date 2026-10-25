@@ -1,5 +1,3 @@
-using System.Data.Common;
-using System.Globalization;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
@@ -9,7 +7,6 @@ using Chat.Server.Modules.Conversations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using ConversationEntity = Chat.Server.Data.Entities.Conversation;
 using MessageEntity = Chat.Server.Data.Entities.Message;
@@ -125,7 +122,7 @@ public sealed class MessageService
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var seq = await AllocateSeqAsync(conversationId, cancellationToken);
+            var seq = await SeqAllocator.AllocateAsync(_db, conversationId, cancellationToken);
             var entity = new MessageEntity
             {
                 Id = Guid.NewGuid().ToString("D"),
@@ -287,27 +284,6 @@ public sealed class MessageService
 
         rows.Reverse();
         return new MessageHistoryPage(rows.Select(ToProtocolMessage).ToList(), hasMore);
-    }
-
-    /// <summary>事务内分配会话内严格 +1 的 seq（protocol/protocol.md §4.3、AGENTS §5.1）。</summary>
-    private async Task<long> AllocateSeqAsync(string conversationId, CancellationToken cancellationToken)
-    {
-        var dbConnection = _db.Database.GetDbConnection();
-        await using var command = dbConnection.CreateCommand();
-        command.Transaction = _db.Database.CurrentTransaction?.GetDbTransaction();
-        command.CommandText = "UPDATE conversations SET last_seq = last_seq + 1 WHERE id = @id RETURNING last_seq;";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "@id";
-        parameter.Value = conversationId;
-        command.Parameters.Add(parameter);
-
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        if (result is null or DBNull)
-        {
-            throw new ApiException(ErrorCodes.InternalError, "会话序号分配失败", StatusCodes.Status500InternalServerError);
-        }
-
-        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     /// <summary>规范化后的发送内容：image/file 的 content 与 messages.file_id 以 files 记录为准（M3-03）。</summary>

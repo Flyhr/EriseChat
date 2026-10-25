@@ -28,4 +28,10 @@ public sealed class AppOptions
 
     /// <summary>协议版本，握手与 /api/health 使用（protocol/protocol.md §8）。</summary>
     public int ProtocolVersion { get; set; } = 1;
+
+    /// <summary>群成员上限（含群主），默认 100；使用时限制在 2~500（M3-04）。</summary>
+    public int GroupMaxMembers { get; set; } = 100;
+
+    /// <summary>是否仅群主可邀请成员，默认 false = 所有成员可邀请（M3-04）。</summary>
+    public bool GroupOnlyOwnerCanInvite { get; set; }
 }

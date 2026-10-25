@@ -70,7 +70,8 @@ builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddSingleton<LoginAttemptLimiter>();
 builder.Services.AddScoped<AuthService>();
 
-// 会话（M1-07）：单聊创建（direct_key 唯一索引幂等去重）、列表与成员权限；变更经 WS conv.updated 推送。
+// 会话（M1-07 + M3-04）：单聊/群聊创建、列表与成员权限；变更经 WS conv.updated 推送；系统消息由 SystemMessageWriter 写入。
+builder.Services.AddScoped<SystemMessageWriter>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddSingleton<ConversationRealtimeNotifier>();
 

@@ -7,7 +7,8 @@ using Microsoft.AspNetCore.Http;
 namespace Chat.Server.Api;
 
 /// <summary>
-/// 会话 REST 边界（M1-07 最小集，计划 §7）：创建单聊、当前用户会话列表、单会话读取。
+/// 会话 REST 边界（M1-07 单聊 + M3-04 群聊，计划 §7）：创建单聊/群聊、当前用户会话列表、
+/// 单会话读取；群成员邀请/退出/移除（M3-04 第二提交）。
 /// 响应为 protocol/protocol.md §4.5 的 Conversation 对象（与 apps/web/src/types/frames.d.ts 一致）。
 /// </summary>
 public static class ConversationsEndpoints
@@ -50,21 +51,39 @@ public static class ConversationsEndpoints
         CancellationToken cancellationToken)
     {
         var userId = GetUserId(principal);
+        var type = request.Type?.Trim().ToLowerInvariant();
 
-        // M1 只实现单聊；群聊在 M3 批次接入（避免现在写入半成品语义）。
-        if (!string.Equals(request.Type?.Trim(), "direct", StringComparison.OrdinalIgnoreCase))
+        if (type == "direct")
         {
-            throw ApiException.ValidationFailed("当前版本仅支持单聊（type=direct）");
+            var conversation = await conversations.CreateDirectAsync(
+                userId,
+                request.Title,
+                request.MemberIds,
+                cancellationToken);
+
+            notifier.PushUpdated(new[] { conversation });
+            return Results.Json(conversation);
         }
 
-        var conversation = await conversations.CreateDirectAsync(
-            userId,
-            request.Title,
-            request.MemberIds,
-            cancellationToken);
+        if (type == "group")
+        {
+            var result = await conversations.CreateGroupAsync(
+                userId,
+                request.Title,
+                request.MemberIds,
+                cancellationToken);
 
-        notifier.PushUpdated(new[] { conversation });
-        return Results.Json(conversation);
+            // 先推系统消息（message.new），再推完整会话（conv.updated）；两者都只发给在线成员。
+            if (result.SystemMessage is not null)
+            {
+                notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
+            }
+
+            notifier.PushUpdated(new[] { result.Conversation });
+            return Results.Json(result.Conversation);
+        }
+
+        throw ApiException.ValidationFailed("type 必须是 direct 或 group");
     }
 
     private static async Task<IResult> GetAsync(
@@ -82,8 +101,8 @@ public static class ConversationsEndpoints
         principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
 
     /// <summary>
-    /// 创建会话请求（与 apps/web/src/api/conversations.ts 的 CreateConversationRequest 对齐）。
-    /// M1 仅支持 type=direct + memberIds 恰好一个对方用户。
+    /// 创建会话请求（与 apps/web/src/api/conversations.ts 的 CreateConversationRequest 对齐）：
+    /// type=direct 时 memberIds 恰好一个对方用户；type=group 时 title 为群名（1~100 字符）、memberIds 为邀请成员。
     /// </summary>
     public sealed record CreateConversationRequest(string? Type, string? Title, IReadOnlyList<string>? MemberIds);
 }

@@ -2,18 +2,29 @@ using System.Text.Json;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Options;
 using Chat.Server.Data;
+using Chat.Server.Modules.Messages;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using ConversationEntity = Chat.Server.Data.Entities.Conversation;
 using ConversationMemberEntity = Chat.Server.Data.Entities.ConversationMember;
 using MessageEntity = Chat.Server.Data.Entities.Message;
 
 namespace Chat.Server.Modules.Conversations;
 
+/// <summary>群成员变更结果：最新会话 DTO、系统消息（无变化时为 null）、需推送的成员、被移除用户（退出/移除场景）。</summary>
+public sealed record GroupMutationResult(
+    Conversation Conversation,
+    IReadOnlyList<string> MemberUserIds,
+    Message? SystemMessage,
+    string? RemovedUserId);
+
 /// <summary>
-/// 会话业务（M1-07 最小集）：创建单聊（direct_key 去重）、当前用户会话列表、单会话读取（成员校验）。
+/// 会话业务（M1-07 单聊最小集 + M3-04 群聊成员管理）：创建单聊（direct_key 去重）/群聊、
+/// 当前用户会话列表、单会话读取（成员校验）、群成员邀请/退出/移除。
 /// 输出 DTO 为 protocol/protocol.md §4.5 的 Conversation 对象，REST 与 WS conv.list 共用。
 /// </summary>
 public sealed class ConversationService
@@ -21,11 +32,19 @@ public sealed class ConversationService
     private const int TitleMaxLength = 100;
 
     private readonly ChatDbContext _db;
+    private readonly SystemMessageWriter _systemMessages;
+    private readonly AppOptions _appOptions;
     private readonly ILogger<ConversationService> _logger;
 
-    public ConversationService(ChatDbContext db, ILogger<ConversationService> logger)
+    public ConversationService(
+        ChatDbContext db,
+        SystemMessageWriter systemMessages,
+        IOptions<AppOptions> appOptions,
+        ILogger<ConversationService> logger)
     {
         _db = db;
+        _systemMessages = systemMessages;
+        _appOptions = appOptions.Value;
         _logger = logger;
     }
 
@@ -149,6 +168,106 @@ public sealed class ConversationService
             otherUserId);
 
         return (await BuildAsync(new[] { entity }, currentUserId, cancellationToken))[0];
+    }
+
+    /// <summary>
+    /// 创建群聊（M3-04）：校验群名/成员 → 事务内写会话、成员与 group.created 系统消息（seq 严格 +1）
+    /// → 提交后返回最新 Conversation DTO 与系统消息（供 REST 向在线成员推送）。
+    /// </summary>
+    public async Task<GroupMutationResult> CreateGroupAsync(
+        string currentUserId,
+        string? title,
+        IReadOnlyList<string>? memberIds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTitle = NormalizeGroupTitle(title);
+        var invitedIds = NormalizeMemberIds(memberIds, currentUserId);
+        if (invitedIds.Count == 0)
+        {
+            throw ApiException.ValidationFailed("群聊至少需要邀请 1 位成员（不含群主）");
+        }
+
+        var maxMembers = Math.Clamp(_appOptions.GroupMaxMembers, 2, 500);
+        if (invitedIds.Count + 1 > maxMembers)
+        {
+            throw ApiException.ValidationFailed($"群成员数量超过上限（最多 {maxMembers} 人，含群主）");
+        }
+
+        var creator = await _db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == currentUserId, cancellationToken);
+        if (creator is null || creator.Status != UserStatus.Active)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        var invitedUsers = await _db.Users.AsNoTracking()
+            .Where(user => invitedIds.Contains(user.Id))
+            .ToListAsync(cancellationToken);
+        if (invitedUsers.Count != invitedIds.Count)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (invitedUsers.Any(user => user.Status != UserStatus.Active))
+        {
+            throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不可用", StatusCodes.Status404NotFound);
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var entity = new ConversationEntity
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            Type = ConversationType.Group,
+            Title = normalizedTitle,
+            DirectKey = null,
+            CreatedBy = currentUserId,
+            CreatedAt = now,
+            LastSeq = 0,
+            LastMessageId = null,
+        };
+
+        _db.Conversations.Add(entity);
+        _db.ConversationMembers.Add(new ConversationMemberEntity
+        {
+            ConversationId = entity.Id,
+            UserId = currentUserId,
+            Role = MemberRole.Owner,
+            JoinedAt = now,
+            LastReadSeq = 0,
+        });
+        foreach (var invitedId in invitedIds)
+        {
+            _db.ConversationMembers.Add(new ConversationMemberEntity
+            {
+                ConversationId = entity.Id,
+                UserId = invitedId,
+                Role = MemberRole.Member,
+                JoinedAt = now,
+                LastReadSeq = 0,
+            });
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var systemContent = new SystemContent(
+            "group.created",
+            currentUserId,
+            null,
+            $"{creator.DisplayName} 创建了群聊");
+        var systemMessage = await _systemMessages.AppendAsync(entity, currentUserId, systemContent, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "创建群聊会话：{ConversationId}（成员 {MemberCount} 人，创建者 {UserId}）",
+            entity.Id,
+            invitedIds.Count + 1,
+            currentUserId);
+
+        var conversation = (await BuildAsync(new[] { entity }, currentUserId, cancellationToken))[0];
+        var memberUserIds = invitedIds.Append(currentUserId).ToList();
+        return new GroupMutationResult(conversation, memberUserIds, systemMessage, RemovedUserId: null);
     }
 
     /// <summary>读取单个会话：不存在 NOT_FOUND，非成员 NOT_MEMBER。</summary>
@@ -299,5 +418,54 @@ public sealed class ConversationService
         }
 
         return normalized;
+    }
+
+    /// <summary>群名：必填、去首尾空格、1~100 字符（计划 §4.6，v1 建群后不改名）。</summary>
+    private static string NormalizeGroupTitle(string? title)
+    {
+        var normalized = title?.Trim();
+        if (string.IsNullOrEmpty(normalized))
+        {
+            throw ApiException.ValidationFailed("群聊名称不能为空");
+        }
+
+        if (normalized.Length > TitleMaxLength)
+        {
+            throw ApiException.ValidationFailed($"群聊名称最多 {TitleMaxLength} 个字符");
+        }
+
+        return normalized;
+    }
+
+    /// <summary>成员 ID 去重、去空、去自己，保持传入顺序（用于建群与邀请）。</summary>
+    private static List<string> NormalizeMemberIds(IReadOnlyList<string>? memberIds, string currentUserId)
+    {
+        var result = new List<string>();
+        if (memberIds is null)
+        {
+            return result;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var raw in memberIds)
+        {
+            var userId = (raw ?? string.Empty).Trim();
+            if (userId.Length == 0)
+            {
+                throw ApiException.ValidationFailed("memberIds 不能包含空用户 ID");
+            }
+
+            if (string.Equals(userId, currentUserId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (seen.Add(userId))
+            {
+                result.Add(userId);
+            }
+        }
+
+        return result;
     }
 }

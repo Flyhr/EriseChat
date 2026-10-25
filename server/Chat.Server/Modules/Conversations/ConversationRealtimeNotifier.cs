@@ -5,8 +5,9 @@ using Microsoft.Extensions.Logging;
 namespace Chat.Server.Modules.Conversations;
 
 /// <summary>
-/// 会话变更的 WS 推送（M1-07）：新建/变更后向所有在线成员连接推一次完整 Conversation 对象（conv.updated）。
-/// 推送为尽力而为：单条连接失败只记 debug，不影响 REST 主流程。
+/// 会话变更的 WS 推送（M1-07 + M3-04）：新建/变更后向所有在线成员连接推一次完整 Conversation 对象
+/// （conv.updated）；群聊 REST 操作产生的系统消息通过 message.new 广播给在线成员（含操作者本人，
+/// 客户端按 messageId 去重）。推送为尽力而为：单条连接失败只记 debug，不影响 REST 主流程。
 /// </summary>
 public sealed class ConversationRealtimeNotifier
 {
@@ -49,7 +50,31 @@ public sealed class ConversationRealtimeNotifier
             pushed);
     }
 
-    private async Task SendSafeAsync(WsConnection connection, ConvUpdatedFrame frame)
+    /// <summary>
+    /// 向指定成员的在线连接广播 message.new（REST 场景含发送者本人；广播不带 clientMsgId，
+    /// 客户端按 messageId 去重）。不阻塞调用方。
+    /// </summary>
+    public void PushNewMessage(Message message, IReadOnlyList<string> memberUserIds)
+    {
+        var frame = new MessageNewFrame(message with { ClientMsgId = null });
+        var pushed = 0;
+        foreach (var userId in memberUserIds.Distinct(StringComparer.Ordinal))
+        {
+            foreach (var connection in _connections.GetConnections(userId))
+            {
+                pushed++;
+                _ = SendSafeAsync(connection, frame);
+            }
+        }
+
+        _logger.LogInformation(
+            "message.new 推送：会话 {ConversationId}，seq {Seq} → {ConnectionCount} 条在线连接",
+            message.ConversationId,
+            message.Seq,
+            pushed);
+    }
+
+    private async Task SendSafeAsync(WsConnection connection, FrameEnvelope frame)
     {
         try
         {
