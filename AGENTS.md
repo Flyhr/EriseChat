@@ -100,10 +100,12 @@ dotnet test server/Chat.Server.Tests            # 服务端单测（默认不跑
 cd apps/web && npm install && npm run dev       # Web 开发（http://127.0.0.1:5173）
 cd apps/web && npm run build                    # Web 构建（产物 dist/，不入库）
 cd apps/desktop && npm install && npm run dev   # Electron 开发（需先启动 Web dev server）
-cd apps/desktop && npm run dist                 # NSIS 安装包（M4 验证）
+cd apps/desktop && npm run dist                 # NSIS 安装包（M4 已产出 1.0.0，产物 dist/ 不入库）
 cd apps/mobile && npm install && npm run sync   # 同步 Web 产物到 Android 工程
 cd apps/mobile/android && ./gradlew assembleRelease  # APK（M5 验证，需 Android SDK/Gradle）
-infra/install.sh && infra/backup.sh             # 服务器安装/备份（M4 前创建）
+bash infra/publish-linux.sh 1.0.0               # 发布 Linux 包（产物 docs/test/，不入库）
+sudo bash infra/install.sh <chat-server.zip>    # 服务器安装/升级（详见 docs/deploy.md）
+sudo bash infra/backup.sh                       # 服务器每日备份（cron 见部署文档）
 ```
 
 > 默认不执行测试命令；确需运行时按 §11.3 分批跑最小范围，超过约 2 分钟或全量/压测/e2e 先申请（§11.4）。

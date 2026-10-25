@@ -10,7 +10,7 @@
 - **给谁用**：公司/团队内部，10~100 个账号、峰值 ≤100 在线；部署在云服务器 + 域名/HTTPS；不做公网运营，不需要 ICP/等保/实名/内容审核。
 - **交付物**：Windows 安装包 `EiseChat-Setup-x.y.z.exe`、Android APK `EiseChat-x.y.z.apk`（侧载安装）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）；iPhone 仅出方案、本期不实现。
 - **技术骨架**：一套 Vue 3 前端核心复用到 Web / Windows（Electron）/ Android（Capacitor）；服务端是唯一事实源，客户端 IndexedDB 只是缓存。
-- **当前状态**：✅ **M1 / M2 / M3 已完成（2026-10-25）** —— M0 交付保持：工程基础配置（`.editorconfig`、`.gitignore`）、协议 [protocol/protocol.md](protocol/protocol.md)（17 类帧、错误码、兼容规则）、表结构 [protocol/schema.sql](protocol/schema.sql)（10 张表 DDL）、服务端与三端壳工程可构建。M1 服务端已完成：邮箱验证码注册/验证码登录/密码登录/注销（JWT HS256 + `sessions` 撤销）、WebSocket `/ws`（10 秒认证、心跳、单活动连接踢旧）、`message.send/ack/new`（事务内 `seq` 严格 +1、`clientMsgId` 幂等、广播除发送连接）、`sync.request/response` 补拉（每会话每批 ≤200）、单聊会话创建/列表与 `conv.updated` 推送、EF Core + SQLite（WAL、初始迁移、启动自动迁移），40 个 xUnit 用例通过。M2 Web 端已完成：登录/注册三模式、会话列表与发起单聊、聊天页（历史分页、乐观发送与 2s/5s/10s 重试、`message.new` 合并、自动滚底）、未读角标、断线补拉 + IndexedDB 缓存 + 连接横幅、用户搜索；前端核心逻辑 34 个 Vitest 用例与端到端脚本（100 条互发无丢无重、断线重连补拉）验证通过。M3 全部完成（服务端 + Web）：群聊创建/邀请/退出/移除与成员管理面板、系统消息、图片压缩与文件上传下载（鉴权下载、缩略图/预览）、已读回执（滚到底上报与已读/未读标记）、typing 输入提示与 3 秒节流、通讯录/单聊头部/群成员面板在线状态；服务端 xUnit 40 个用例覆盖 M1~M3 关键路径，前端 M3 新增 57 个 Vitest 用例（附件 15 + 群聊 18 + 已读/typing/presence 24，累计 91 个），M3 端到端验收脚本 77 项检查全部通过。NSIS 安装包与 APK 打包留 M4/M5。部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接）。
+- **当前状态**：✅ **M1 / M2 / M3 / M4 已完成（2026-10-25）** —— M0 交付保持：工程基础配置（`.editorconfig`、`.gitignore`）、协议 [protocol/protocol.md](protocol/protocol.md)（17 类帧、错误码、兼容规则）、表结构 [protocol/schema.sql](protocol/schema.sql)（10 张表 DDL）、服务端与三端壳工程可构建。M1 服务端已完成：邮箱验证码注册/验证码登录/密码登录/注销（JWT HS256 + `sessions` 撤销）、WebSocket `/ws`（10 秒认证、心跳、单活动连接踢旧）、`message.send/ack/new`（事务内 `seq` 严格 +1、`clientMsgId` 幂等、广播除发送连接）、`sync.request/response` 补拉（每会话每批 ≤200）、单聊会话创建/列表与 `conv.updated` 推送、EF Core + SQLite（WAL、初始迁移、启动自动迁移），40 个 xUnit 用例通过。M2 Web 端已完成：登录/注册三模式、会话列表与发起单聊、聊天页（历史分页、乐观发送与 2s/5s/10s 重试、`message.new` 合并、自动滚底）、未读角标、断线补拉 + IndexedDB 缓存 + 连接横幅、用户搜索；前端核心逻辑 34 个 Vitest 用例与端到端脚本（100 条互发无丢无重、断线重连补拉）验证通过。M3 全部完成（服务端 + Web）：群聊创建/邀请/退出/移除与成员管理面板、系统消息、图片压缩与文件上传下载（鉴权下载、缩略图/预览）、已读回执（滚到底上报与已读/未读标记）、typing 输入提示与 3 秒节流、通讯录/单聊头部/群成员面板在线状态；服务端 xUnit 40 个用例覆盖 M1~M3 关键路径，前端 M3 新增 57 个 Vitest 用例（附件 15 + 群聊 18 + 已读/typing/presence 24，累计 91 个），M3 端到端验收脚本 77 项检查全部通过。M4 已完成（2026-10-25）：客户端支持运行时配置服务端地址；Electron 桌面壳支持托盘/关闭到托盘/窗口记忆/新消息系统通知/开机自启/单实例；NSIS 安装包 `EiseChat-Setup-1.0.0.exe` 已产出（121,290,299 B，SHA256 `2f949a2a…ce9722550`，免签名，SmartScreen 需「更多信息 → 仍要运行」），服务端提供 `GET /download` 下载页与 `/download/files/` 安装包分发；`infra/` 提供 Linux 发布/安装/Caddy/备份/恢复脚本与 [docs/deploy.md](docs/deploy.md)。未完成：Android APK 留 M5；实际公网部署与 SMTP 邮件通道需用户云服务器侧资源/后续实现（当前 Production 发码为占位 500）。部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接）。
 - **目标周期**：约 6~7 周 MVP（Windows 安装包 + Android APK + 服务器云端部署 + 可用聊天闭环；**iPhone 不在本期**）。
 - **成本**：软件授权 0 元；云服务器约 60~150 元/月（域名已有；TLS、邮件额度、Android 签名均免费）。
 
@@ -80,18 +80,24 @@ cd apps/web && npm install
 npm run dev     # http://127.0.0.1:5173
 npm run build   # 产物 apps/web/dist（不入库）
 
-# Windows 壳（开发态需先启动上面的 Web dev server；M4 验证安装包）
+# Windows 壳（开发态需先启动上面的 Web dev server；安装包 M4 已产出）
 cd apps/desktop && npm install && npm run dev   # Electron 加载 http://127.0.0.1:5173
-npm run dist                                    # NSIS 安装包
+npm run dist                                    # NSIS 安装包（apps/desktop/dist/EiseChat-Setup-1.0.0.exe，不入库）
 
 # Android 壳（Web 资源打进 APK；打包需 Android SDK/Gradle，M5 验证）
 cd apps/mobile && npm install && npm run sync
 
 # M3 端到端验收（一次性脚本，docs/test/ 不入库；需服务端以 Development 启动并监听 8080）
 EISECHAT_PYTHON=python node docs/test/m3-e2e.mjs
+
+# 下载页 / 安装包分发（服务端启动后；安装包放 data/downloads/，浏览器打开 http://127.0.0.1:8080/download）
+
+# 服务器部署（Linux，详见 docs/deploy.md；发布与安装也可在服务器/开发机分别执行）
+bash infra/publish-linux.sh 1.0.0               # 产出 chat-server-1.0.0-linux-x64.zip（docs/test 不入库）
+sudo bash infra/install.sh /tmp/chat-server-1.0.0-linux-x64.zip   # 服务器上执行
 ```
 
-> 完整命令清单见 [AGENTS.md](AGENTS.md) §8；M1 服务端与 M2/M3 Web 端已完成（认证/WS/消息/补拉/登录注册/会话列表/聊天页/群聊/图片文件/已读/typing/在线状态），本机两个浏览器即可完成登录与互发验证；端到端验收脚本见上方 `m3-e2e.mjs`（一次性，不入库）。
+> 完整命令清单见 [AGENTS.md](AGENTS.md) §8；M1 服务端与 M2/M3 Web 端已完成（认证/WS/消息/补拉/登录注册/会话列表/聊天页/群聊/图片文件/已读/typing/在线状态），M4 已交付 Windows 安装包、`GET /download` 下载页与 `infra/` 部署脚本/`docs/deploy.md`；本机两个浏览器仍可直接完成登录与互发验证（端到端验收脚本见上方 `m3-e2e.mjs`，一次性，不入库）。
 
 ## 重要边界（内部版）
 
@@ -105,4 +111,4 @@ EISECHAT_PYTHON=python node docs/test/m3-e2e.mjs
 ## 下一步
 
 1. 无需再确认：按主计划 §12 已定参数开工（邮箱白名单留空 = 不限制、云服务器 2C4G 轻量、占位域名 `chat.example.com`、真实域名后替换）。
-2. M3 已收口，进入 M4：Electron 桌面壳打磨（托盘/系统通知/单实例）、NSIS 安装包、云服务器部署（Caddy HTTPS、systemd、邮件通道、备份到对象存储）与 `GET /download` 下载页；M5 再出 Android APK。`infra/` 与 `docs/deploy.md` 按 M4 补齐。
+2. M4 已收口（Windows 安装包 1.0.0、下载页、`infra/` 部署脚本与 `docs/deploy.md`）；接下来 M5：Android APK（Capacitor + 自签名、Web 资源打进 APK）与 M6：稳定性/备份恢复演练/内测。实际公网部署、邮件通道（SMTP/免费 API）与备份需在用户云服务器上按部署文档执行（AI 不执行 ssh/外网操作）。
