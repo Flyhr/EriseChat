@@ -24,6 +24,7 @@ import {
   STORE_MESSAGES,
 } from '../core/db'
 import { useConversationsStore } from './conversations'
+import { useAuthStore } from './auth'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
 const PAGE_SIZE = 50
@@ -514,6 +515,54 @@ export const useMessagesStore = defineStore('messages', () => {
    * 收到 message.new：并入对应会话（按 messageId 去重、按 seq 排序）并持久化；
    * 未打开的会话只更新会话摘要（conversations.applyMessage）；发现缺口时提示补拉。
    */
+  /**
+   * 桌面壳系统通知（M4-02）：仅当运行在 Electron 桌面壳（window.eisechatDesktop.notify 存在）
+   * 且窗口不可见、且不是自己的消息时提示；Web 版无该对象直接忽略。
+   */
+  function notifyDesktopIncoming(message: Message): void {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    const desktop = (window as Window & {
+      eisechatDesktop?: { notify?: (payload: { title?: string; body?: string }) => void }
+    }).eisechatDesktop
+    if (!desktop?.notify) return
+    if (document.visibilityState === 'visible') return
+
+    const selfUserId = useAuthStore().user?.userId ?? ''
+    if (message.senderId === selfUserId) return
+
+    const conversation = useConversationsStore().getById(message.conversationId)
+    const title = conversation ? conversationTitleOf(conversation, selfUserId) : 'EiseChat 新消息'
+    desktop.notify({ title, body: previewOf(message) })
+  }
+
+  function conversationTitleOf(
+    conversation: {
+      type: string
+      title: string
+      members: readonly { userId: string; displayName: string }[]
+    },
+    selfUserId: string,
+  ): string {
+    if (conversation.type === 'group') return conversation.title.trim() || '群聊'
+    const other = conversation.members.find((member) => member.userId !== selfUserId)
+    return other?.displayName ?? '新消息'
+  }
+
+  function previewOf(message: Message): string {
+    if (message.msgType === 'image') return '[图片]'
+    if (message.msgType === 'file') {
+      const content = message.content
+      return typeof content === 'object' && content !== null && 'name' in content
+        ? `[文件] ${String(content.name)}`
+        : '[文件]'
+    }
+    if (typeof message.content === 'string') {
+      const text = message.content.trim()
+      return text.length > 80 ? `${text.slice(0, 80)}…` : text
+    }
+    return '新消息'
+  }
+
   function handleIncoming(message: Message): GapCheckResult {
     // 自己的消息经多端/补拉回到本地时，清掉同 clientMsgId 的待发消息，避免重复展示。
     if (message.clientMsgId) {
@@ -526,6 +575,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
     const result = merge(message.conversationId, [message])
     useConversationsStore().applyMessage(message.conversationId, message)
+    notifyDesktopIncoming(message)
     if (result.hasGap) {
       // 缺口立即补拉（协议 §6.3）：syncAll 会以本地游标重新拉取缺失区间。
       void syncAll()

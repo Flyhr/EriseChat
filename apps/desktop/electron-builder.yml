@@ -14,9 +14,12 @@ files:
   - package.json
 
 # 打包态加载 web 构建产物：apps/web/dist → resources/web-dist（与 electron/main.ts 一致）。
+# 托盘图标单独带入 resources/icon.ico（build/icon.ico 只用于 exe 图标，不会打进 asar/resources）。
 extraResources:
   - from: ../web/dist
     to: web-dist
+  - from: build/icon.ico
+    to: icon.ico
 
 win:
   target:
