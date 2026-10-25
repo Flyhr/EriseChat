@@ -21,11 +21,31 @@ const emit = defineEmits<{
 }>()
 
 const container = ref<HTMLDivElement | null>(null)
+/** 用户是否停留在底部附近（图片异步加载撑高列表时，只有此时才自动滚到底）。 */
+const stickToBottom = ref(true)
 
 function scrollToBottom(): void {
   const element = container.value
   if (!element) return
   element.scrollTop = element.scrollHeight
+}
+
+function isNearBottom(): boolean {
+  const element = container.value
+  if (!element) return true
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 80
+}
+
+function onScroll(): void {
+  stickToBottom.value = isNearBottom()
+}
+
+/** 图片缩略图加载完成后：用户原本在底部则跟随滚到底，否则保持当前位置（避免打断向上翻阅）。 */
+function onImageLoaded(): void {
+  if (!stickToBottom.value) return
+  void nextTick(() => {
+    scrollToBottom()
+  })
 }
 
 // 消息数量变化（收到/发送/加载历史）或切换会话时滚到底部。
@@ -36,6 +56,7 @@ watch(
     props.messages[0]?.messageId ?? '',
   ],
   () => {
+    stickToBottom.value = true
     void nextTick(scrollToBottom)
   },
   { immediate: true },
@@ -43,7 +64,7 @@ watch(
 </script>
 
 <template>
-  <div ref="container" class="message-list">
+  <div ref="container" class="message-list" @scroll="onScroll">
     <button
       v-if="hasMore"
       class="message-list__more"
@@ -60,6 +81,7 @@ watch(
       :key="message.messageId"
       :message="message"
       :self="message.senderId === selfUserId"
+      @image-loaded="onImageLoaded"
     />
     <MessageBubble
       v-for="item in pending ?? []"
@@ -68,6 +90,7 @@ watch(
       :self="true"
       :status="item.status"
       @retry="emit('retry', item.clientMsgId)"
+      @image-loaded="onImageLoaded"
     />
   </div>
 </template>
