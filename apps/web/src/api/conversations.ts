@@ -1,4 +1,5 @@
-// 会话接口（对应 server/Chat.Server/Api/ConversationEndpoints.cs；M1 实现后按实际契约校准）。
+// 会话接口（对应 server/Chat.Server/Api/ConversationsEndpoints.cs；M2-04 已按服务端实际契约校准 list/create）。
+// members/updateTitle 服务端尚未实现，保留占位给后续里程碑。
 import { http } from '../core/http'
 import type { Conversation, ConversationMember } from '../types/frames'
 

@@ -8,7 +8,7 @@ const router = createRouter({
   routes: [
     { path: '/', redirect: '/chat' },
     { path: '/login', name: 'login', component: () => import('../pages/Login.vue') },
-    { path: '/chat', name: 'chat', component: () => import('../pages/Chat.vue') },
+    { path: '/chat/:conversationId?', name: 'chat', component: () => import('../pages/Chat.vue') },
     { path: '/contacts', name: 'contacts', component: () => import('../pages/Contacts.vue') },
     { path: '/settings', name: 'settings', component: () => import('../pages/Settings.vue') },
     { path: '/admin', name: 'admin', component: () => import('../pages/Admin.vue') },
