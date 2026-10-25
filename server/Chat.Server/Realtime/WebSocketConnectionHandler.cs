@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
@@ -19,16 +18,12 @@ public sealed class WebSocketConnectionHandler
     /// <summary>连接建立后必须在此时间内发送 auth 首帧。</summary>
     public const int AuthTimeoutMilliseconds = 10_000;
 
-    /// <summary>typing 转发节流：每连接 × 每会话 1 秒，超频静默丢弃、不回 error。</summary>
-    public const long TypingThrottleMilliseconds = 1_000;
-
     private readonly ConnectionManager _connections;
     private readonly PresenceService _presence;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<WebSocketConnectionHandler> _logger;
-    private readonly ConcurrentDictionary<(string ConnectionId, string ConversationId), long> _typingThrottle = new();
-
+    private readonly TypingThrottle _typingThrottle = new();
     public WebSocketConnectionHandler(
         ConnectionManager connections,
         PresenceService presence,
@@ -409,25 +404,10 @@ public sealed class WebSocketConnectionHandler
                 memberUserIds = await conversations.GetMemberUserIdsAsync(connection.UserId, request.ConversationId, connectionAborted);
             }
 
-            var now = Environment.TickCount64;
-            var throttleKey = (connection.ConnectionId, request.ConversationId);
-            if (_typingThrottle.TryGetValue(throttleKey, out var lastForwardAt) &&
-                now - lastForwardAt < TypingThrottleMilliseconds)
+            // 节流：每连接 × 每会话 1 秒（M3-05 语义；M3-06 抽到 TypingThrottle 便于单测）。
+            if (!_typingThrottle.TryPass(connection.ConnectionId, request.ConversationId, Environment.TickCount64))
             {
                 return;
-            }
-
-            _typingThrottle[throttleKey] = now;
-            if (_typingThrottle.Count > 5_000)
-            {
-                var cutoff = now - 60_000;
-                foreach (var pair in _typingThrottle)
-                {
-                    if (pair.Value < cutoff)
-                    {
-                        _typingThrottle.TryRemove(pair.Key, out _);
-                    }
-                }
             }
 
             var frame = new TypingServerFrame(request.ConversationId, connection.UserId);

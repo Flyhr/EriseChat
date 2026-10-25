@@ -79,7 +79,8 @@ public sealed class PresenceService
     }
 
     /// <summary>共同会话的其他成员（DISTINCT），即需要收到该用户在线状态的用户集合。</summary>
-    private async Task<List<string>> FindPeerUserIdsAsync(string userId, CancellationToken cancellationToken)
+    /// <remarks>M3-06：改为 internal 以便单测（Chat.Server.csproj 的 InternalsVisibleTo）直接验证查询；运行时行为不变。</remarks>
+    internal async Task<List<string>> FindPeerUserIdsAsync(string userId, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
