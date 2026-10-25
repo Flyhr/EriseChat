@@ -41,6 +41,19 @@ export function setAccessTokenProvider(provider: () => string | null): void {
   accessTokenProvider = provider
 }
 
+// 401 统一处理（M2-02）：core 不反向依赖 store/router，由应用入口注册回调（project-overview.md §10）。
+// 认证接口自身返回 401（如密码错误）不触发回调，避免 /login ↔ /login 循环跳转。
+let unauthorizedHandler: (() => void) | null = null
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler
+}
+
+/** 认证类接口（/auth/*）：其 401 属业务错误，由页面提示，不清登录态。 */
+function isAuthEndpoint(path: string): boolean {
+  return path.startsWith('/auth/')
+}
+
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   const base = path.startsWith('http') ? path : `${config.apiBase}${path}`
   if (!query) return base
@@ -97,6 +110,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     const data: unknown = text ? JSON.parse(text) : undefined
 
     if (!response.ok) {
+      // 401：token 失效/被撤销 → 清登录态并回登录页（认证接口自身 401 只抛错给页面提示）。
+      if (response.status === 401 && unauthorizedHandler !== null && !isAuthEndpoint(path)) {
+        unauthorizedHandler()
+      }
       throw new ApiError(response.status, (data ?? {}) as ApiErrorBody)
     }
     return data as T

@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 // 路由表（docs/project-overview.md §7.2）；页面组件懒加载，减小首屏体积。
-// 登录守卫 M1 接入 auth store 后启用：未登录访问受保护路由 → /login。
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -16,8 +16,16 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach(() => {
-  // TODO(M1): 读取 auth store 登录态；未登录访问非 /login 路由时跳转登录页。
+// 登录守卫（M2-02）：未登录访问非 /login 一律回登录页；已登录访问 /login 直接进 /chat。
+// 守卫在 app.use(pinia)/app.use(router) 后的首次导航时执行，此时 pinia 已激活。
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  if (!auth.isLoggedIn && to.name !== 'login') {
+    return { name: 'login' }
+  }
+  if (auth.isLoggedIn && to.name === 'login') {
+    return { name: 'chat' }
+  }
   return true
 })
 
