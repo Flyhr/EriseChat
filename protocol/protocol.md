@@ -1,7 +1,7 @@
 # EiseChat WebSocket 协议 v1
 
 > 本文件是**协议帧与字段的唯一来源**（`AGENTS.md` §1/§5）；表结构唯一来源为 `protocol/schema.sql`。
-> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.3）与 `docs/project-overview.md` §11.1。
+> 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.4）与 `docs/project-overview.md` §11.1。
 > 版本：`protocolVersion = 1`（2026-10-25 初版）；变更必须先改本文件与计划文档，再改实现，且只允许向后兼容的增量（见 §8）。
 
 ## 1. 传输与连接
@@ -180,6 +180,7 @@
 - `text`：字符串（纯文本，客户端渲染时必须转义，禁止注入 HTML）。
 - `image` / `file`：FileContent 对象，格式见 §7。
 - `system`：服务端生成的系统事件对象（M3 使用），核心字段为 `event`（事件名，必填）、`actorId`（触发者，可选）、`targetUserIds`（涉及成员，可选）、`text`（服务端生成的中文描述，可选）；后续新增可选字段属向后兼容增量。
+- 系统消息事件名（v1，M3）：`group.created`、`member.joined`、`member.left`、`member.removed`；`text` 为服务端生成的中文描述，客户端渲染为居中小字，不做 i18n。
 
 ### 4.4 `sync.request` / `sync.response`（补拉同步）
 
@@ -244,9 +245,12 @@ batch 对象：
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `type` | string | 是 | 固定 `conv.updated` |
-| `conversations` | array | 是 | 发生变化的 Conversation 数组 |
+| `conversations` | array | 是 | 发生变化的 Conversation 数组；被移出/主动退出场景可为空数组 |
+| `removedConversationIds` | string[] | 否 | 当前连接用户被移出/主动退出群聊时，服务端推送该帧，`conversations` 可为空数组，`removedConversationIds` 列出被移除的会话；客户端收到后移除对应会话的本地状态（列表项、消息缓存、游标） |
 
 规则：触发场景为「新建会话、标题变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。
+
+群聊创建与成员管理走 REST（见计划 §7）；成功后服务端在同一事务内写一条 `msgType=system` 消息（`seq` 严格 +1），并推送 `message.new`（在线成员）与 `conv.updated`（含全体成员的最新 Conversation）；客户端对 `message.new` 按 `messageId` 去重。
 
 **会话对象（Conversation）**：
 
@@ -457,7 +461,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 ### 8.1 协议版本
 
-- 当前 `protocolVersion = 1`，随计划 V2.3.3 发布。
+- 当前 `protocolVersion = 1`，随计划 V2.3.4 发布。
 - 服务端在 `hello` 中下发 `protocolVersion`；客户端在 `auth` 中可带上自身版本（缺省视为 1）。
 - 版本不兼容时服务端回 `error`（`PROTOCOL_VERSION_MISMATCH`）并关闭；客户端提示升级，不进入聊天。
 
@@ -511,3 +515,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M1-11 校准） | 2026-10-25 | 按 M1 实现补注（帧/字段语义未变）：纯文本消息上限 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）；`conv.list` 响应按最近消息时间倒序（无消息按创建时间）；M1 服务端已处理帧为 `auth`/`hello`/`ping`/`pong`/`message.send`/`message.ack`/`message.new`/`sync.request`/`sync.response`/`conv.list`/`conv.updated`/`kicked`/`error`，`read.update`/`read.updated`/`typing`/`presence` 保留至 M3（当前服务端按未处理帧忽略）；`protocolVersion` 仍为 `1` |
 | v1（M3-01 库表增量） | 2026-10-25 | 无帧变更；messages 表新增可选 file_id（引用 files.id，用于下载鉴权与孤儿清理），protocol/schema.sql 同步；protocolVersion 仍为 1 |
 | v1（M3-03 校准） | 2026-10-25 | 明确文件消息的 fileId 归属校验、content 以 files 记录为准、messages.file_id 落库；帧格式与 protocolVersion 不变 |
+| v1（M3-04 校准） | 2026-10-25 | 新增 conv.updated.removedConversationIds；系统消息事件名 group.created/member.joined/member.left/member.removed；群聊 REST 行为与推送时序；帧格式与 protocolVersion 不变 |

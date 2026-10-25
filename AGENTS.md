@@ -1,7 +1,7 @@
 # AGENTS.md — EiseChat 项目约束
 
 > 本文件是仓库级硬约束，任何 AI / 开发代理在改动本仓库前必须阅读并遵守。
-> 唯一现行计划：`docs/internal-plan.md`（V2.3.3）。文档职责与优先级见 §1（项目介绍以 `README.md` 为准，项目说明与目录架构见 `docs/project-overview.md`）。
+> 唯一现行计划：`docs/internal-plan.md`（V2.3.4）。文档职责与优先级见 §1（项目介绍以 `README.md` 为准，项目说明与目录架构见 `docs/project-overview.md`）。
 > 本文件版本 1.6（2026-10-25），随计划变更时同步更新（1.6 仅按 M0 实际工程补全 §8 命令与文档状态，规则内容不变）。
 
 ## 1. 文档分工与优先级
