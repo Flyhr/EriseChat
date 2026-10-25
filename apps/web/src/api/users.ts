@@ -1,4 +1,4 @@
-// 用户接口（对应 server/Chat.Server/Api/UserEndpoints.cs；M1 实现后按实际契约校准）。
+// 用户接口（对应 server/Chat.Server/Api/UserEndpoints.cs；M2-01 已按服务端实际契约校准）。
 import { http } from '../core/http'
 import type { AuthUser } from './auth'
 
@@ -12,9 +12,13 @@ export interface SearchUsersResponse {
 }
 
 export const usersApi = {
-  /** 当前登录用户资料 */
+  /** 当前登录用户资料（GET /api/me） */
   me: () => http.get<UserProfile>('/me'),
 
-  /** 按昵称/邮箱搜索用户（建群、加好友用，M2 使用） */
-  search: (keyword: string) => http.get<SearchUsersResponse>('/users', { query: { keyword } }),
+  /**
+   * 按邮箱/昵称模糊搜索用户（GET /api/users?search=，需登录；M2 建单聊/群用）。
+   * 服务端规则：search 去空白后 1~64 字符，排除当前用户，最多 20 条，按昵称排序；
+   * http.get 的 query 会序列化为 `?search=...`（见 core/http.ts buildUrl）。
+   */
+  search: (search: string) => http.get<SearchUsersResponse>('/users', { query: { search } }),
 }
