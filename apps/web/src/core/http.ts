@@ -66,6 +66,17 @@ function buildUrl(path: string, query?: Record<string, QueryValue>): string {
   return qs ? `${base}?${qs}` : base
 }
 
+/** 桌面/APK 打包态（file://）下未配置服务器地址时，相对 URL 会落到 file:///api/...，提前给出可读提示。 */
+function assertReachableUrl(url: string): void {
+  if (typeof window === 'undefined') return
+  if (window.location.protocol !== 'file:') return
+  if (/^https?:\/\//i.test(url)) return
+  throw new ApiError(0, {
+    code: 'SERVER_URL_REQUIRED',
+    message: '请先填写服务器地址（如 http://127.0.0.1:8080），再登录或发送验证码',
+  })
+}
+
 /** 发送 REST 请求并解析 JSON；非 2xx 抛 ApiError（204 返回 undefined）。 */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const {
@@ -97,8 +108,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
+  const url = buildUrl(path, query)
+  assertReachableUrl(url)
+
   try {
-    const response = await fetch(buildUrl(path, query), {
+    const response = await fetch(url, {
       method,
       headers: finalHeaders,
       body: payload,
@@ -164,8 +178,11 @@ export async function requestBlob(path: string, options: RequestOptions = {}): P
     }
   }
 
+  const url = buildUrl(path, query)
+  assertReachableUrl(url)
+
   try {
-    const response = await fetch(buildUrl(path, query), {
+    const response = await fetch(url, {
       method,
       headers: finalHeaders,
       body: payload,

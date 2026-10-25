@@ -53,6 +53,14 @@ builder.Services.ConfigureHttpJsonOptions(options =>
         allowIntegerValues: false));
 });
 
+// 跨域（M4-08）：桌面客户端用 file:// 加载本地页面（浏览器 Origin 为 "null"），REST 请求属跨域；
+// 未开启 CORS 时浏览器直接报 "Failed to fetch"，导致桌面端无法登录。内部工具允许任意来源/头/方法，
+// 业务鉴权仍由 JWT 承担（不启用 AllowCredentials）。
+builder.Services.AddCors(options => options.AddPolicy("ClientApp", policy =>
+    policy.SetIsOriginAllowed(_ => true)
+        .AllowAnyHeader()
+        .AllowAnyMethod()));
+
 // 邮件通道：Development 用 Mock（验证码输出到控制台 stdout，不接真实邮件）；其它环境注册 SMTP 占位实现（M1-04 不真实发信）。
 if (builder.Environment.IsDevelopment())
 {
@@ -201,6 +209,10 @@ using (var scope = app.Services.CreateScope())
 // 统一错误处理：异常中间件在最外层；状态码兜底为 404/405 等无响应体的响应补 JSON
 // （后续鉴权中间件返回 401/403 时同样复用该错误体）。
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// CORS 必须在认证/终结点之前：桌面端 file:// 页面的预检（OPTIONS）不带 JWT，需要在这里直接应答。
+app.UseCors("ClientApp");
+
 app.UseStatusCodePages(async context =>
 {
     var httpContext = context.HttpContext;

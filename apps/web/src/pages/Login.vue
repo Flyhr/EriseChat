@@ -39,11 +39,17 @@ const auth = useAuthStore()
 /** 致命关闭（被踢/登录失效）跳转登录页时携带的提示（M3-00）。 */
 const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.notice : '')
 
+/** 桌面/APK 打包态：页面以 file:// 加载，「同源」不可用，必须显式配置服务器地址（M4-08）。 */
+const isFileShell = typeof window !== 'undefined' && window.location.protocol === 'file:'
+const DEFAULT_DESKTOP_SERVER = 'http://127.0.0.1:8080'
+
 /** M4-01：服务器地址配置（桌面/APK 首次使用需填写；Web 同源可留空）。 */
 const serverUrlOpen = ref(false)
 const serverUrl = ref(getServerUrl())
 const serverUrlError = ref('')
-const serverUrlLabel = computed(() => serverUrl.value.trim() || '与当前页面同源')
+const serverUrlLabel = computed(
+  () => serverUrl.value.trim() || (isFileShell ? '未配置，请点此填写' : '与当前页面同源'),
+)
 
 const mode = ref<Mode>('code')
 const email = ref('')
@@ -68,8 +74,22 @@ const sendButtonLabel = computed(() => {
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof ApiError) return ERROR_MESSAGES[error.code] ?? error.message
+  // 浏览器对网络/CORS 失败只抛 TypeError: Failed to fetch，需给出可操作的指引。
+  if (error instanceof TypeError) {
+    return isFileShell
+      ? '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:8080）后重试'
+      : '无法连接服务器，请检查网络或服务器地址'
+  }
   if (error instanceof Error && error.message) return error.message
   return '网络异常，请稍后重试'
+}
+
+/** 展开服务器地址编辑区：桌面端未配置时预填本机默认地址，点「保存」即可生效。 */
+function toggleServerEditor(): void {
+  serverUrlOpen.value = !serverUrlOpen.value
+  if (serverUrlOpen.value && serverUrl.value.trim().length === 0 && isFileShell) {
+    serverUrl.value = DEFAULT_DESKTOP_SERVER
+  }
 }
 
 function startCooldown(seconds: number): void {
@@ -128,7 +148,8 @@ async function submit(): Promise<void> {
     errorMessage.value = '请输入验证码'
     return
   }
-  if (mode.value !== 'code' && password.value.length === 0) {
+  // 密码登录必填；注册模式下密码可选（服务端允许只凭验证码注册，AGENTS.md §6）。
+  if (mode.value === 'password' && password.value.length === 0) {
     errorMessage.value = '请输入密码'
     return
   }
@@ -211,14 +232,18 @@ function clearServerUrl(): void {
       <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
 
       <div class="login-server">
-        <button class="login-server__toggle" type="button" @click="serverUrlOpen = !serverUrlOpen">
+        <button class="login-server__toggle" type="button" @click="toggleServerEditor">
           服务器地址：{{ serverUrlLabel }}{{ serverUrlOpen ? '（收起）' : '（修改）' }}
         </button>
         <div v-if="serverUrlOpen" class="login-server__panel">
           <input
             v-model="serverUrl"
             type="url"
-            placeholder="https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）"
+            :placeholder="
+              isFileShell
+                ? 'http://127.0.0.1:8080（本机）或 https://你的域名'
+                : 'https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）'
+            "
           />
           <div class="login-server__actions">
             <button class="login-server__save" type="button" @click="saveServerUrl">保存</button>
