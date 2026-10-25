@@ -7,13 +7,15 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Email;
+using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
-// EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；M1-05 注册/登录/JWT）。
+// EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；
+// M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接）。
 // 配置来源优先级：secrets.json（可选，gitignore）> 环境变量 > appsettings.{Environment}.json > appsettings.json；
 // 端口、数据/文件目录、上传上限、注册开关、邮箱域名白名单、JWT、邮件、限流阈值均走配置。
 // 业务模块（认证、消息、WS 帧处理）从 M1 后续批次逐步接入。
@@ -49,26 +51,20 @@ builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddSingleton<LoginAttemptLimiter>();
 builder.Services.AddScoped<AuthService>();
 
+// 实时通信（M1-06）：WS 握手/心跳/单活动连接；消息/同步等业务帧在 M1-07+ 接入。
+builder.Services.AddSingleton<ConnectionManager>();
+builder.Services.AddSingleton<WebSocketConnectionHandler>();
+builder.Services.AddScoped<WsAuthenticator>();
+builder.Services.AddHostedService<HeartbeatService>();
+
 // JWT Bearer 校验：除签名/过期外，还查 sessions（jti 未撤销）与 users.status（未禁用），实现 logout 即失效。
 var jwtAuthOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
-var jwtSigningKey = new SymmetricSecurityKey(JwtTokenService.GetKeyBytes(jwtAuthOptions.Key));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.MapInboundClaims = false;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = jwtAuthOptions.Issuer,
-            ValidateAudience = true,
-            ValidAudience = jwtAuthOptions.Audience,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = jwtSigningKey,
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromSeconds(Math.Max(0, jwtAuthOptions.ClockSkewSeconds)),
-            NameClaimType = "sub",
-            RoleClaimType = "role",
-        };
+        // 与 WS auth 帧校验共用同一套参数（Realtime/JwtTokenValidator），避免两处规则漂移。
+        options.TokenValidationParameters = JwtTokenValidator.CreateTokenValidationParameters(jwtAuthOptions);
         options.Events = new JwtBearerEvents
         {
             OnTokenValidated = async context =>
@@ -171,6 +167,10 @@ app.UseStatusCodePages(async context =>
 // 认证/授权：JWT Bearer 校验（含 sessions 撤销检查）；401/403 由上方状态码兜底输出统一错误体。
 app.UseAuthentication();
 app.UseAuthorization();
+
+// WebSocket（M1-06）：GET /ws 握手；连接建立后 10 秒内必须发送 auth 帧（其它请求继续走后续中间件）。
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
+app.UseMiddleware<WsMiddleware>();
 
 // 静态文件：前端构建产物复制到 wwwroot/（构建生成，不手改，见 docs/project-overview.md §7.4）。
 app.UseDefaultFiles();
