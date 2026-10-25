@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+// M5-03：release 签名配置从仓库根 infra/keys/keystore.properties 读取（该目录已 gitignore，禁止入库）。
+// 文件缺失时直接构建失败并给出明确提示，绝不静默回退 debug 签名（避免产出不可覆盖升级的安装包）。
+def keystorePropertiesFile = rootProject.file('../../../infra/keys/keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream -> keystoreProperties.load(stream) }
+}
+
 android {
     namespace = "com.eisechat.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,8 +25,22 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (!keystorePropertiesFile.exists()) {
+                throw new GradleException("缺少 Android release 签名配置：${keystorePropertiesFile}；" +
+                    "请先生成 keystore（参考 docs/mobile.md「构建与签名」），该文件不可提交入库。")
+            }
+            storeFile rootProject.file(keystoreProperties['storeFile'])
+            storePassword keystoreProperties['storePassword']
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+        }
+    }
     buildTypes {
         release {
+            // M5-03：release 使用自签名 keystore；未签名 APK 无法在真机安装。
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
