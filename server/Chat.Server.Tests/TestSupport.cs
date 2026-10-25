@@ -4,6 +4,7 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
+using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Messages;
 using Microsoft.Data.Sqlite;
@@ -129,6 +130,17 @@ public static class TestSupport
 
     public static MessageService CreateMessageService(ChatDbContext db) =>
         new(db, Options.Create(CreateAppOptions()));
+
+    /// <summary>M3-06：系统消息写入器（群成员变更系统消息）。</summary>
+    public static SystemMessageWriter CreateSystemMessageWriter(ChatDbContext db) => new(db);
+
+    /// <summary>M3-06：会话业务（真实 SystemMessageWriter + AppOptions，可按用例覆盖群配置）。</summary>
+    public static ConversationService CreateConversationService(ChatDbContext db, AppOptions? appOptions = null) =>
+        new(
+            db,
+            new SystemMessageWriter(db),
+            Options.Create(appOptions ?? CreateAppOptions()),
+            NullLogger<ConversationService>.Instance);
 
     public static AuthService CreateAuthService(
         ChatDbContext db,
