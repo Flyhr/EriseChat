@@ -121,6 +121,19 @@ describe('buildSyncCursors', () => {
     expect(buildSyncCursors(many, 1000)).toHaveLength(100)
   })
 
+  it('超过 100 个会话时截断，剩余游标可在下一轮继续发送（M3-00 N2）', () => {
+    const all = new Map(
+      Array.from({ length: 130 }, (_, index) => [`conv-${index}`, index] as const),
+    )
+    const first = buildSyncCursors(all, 100)
+    expect(first).toHaveLength(100)
+    expect(first[99]).toEqual({ conversationId: 'conv-99', lastSeq: 99 })
+    const remaining = new Map([...all].slice(100))
+    const second = buildSyncCursors(remaining, 100)
+    expect(second).toHaveLength(30)
+    expect(second[0]).toEqual({ conversationId: 'conv-100', lastSeq: 100 })
+  })
+
   it('空 Map 返回空数组', () => {
     expect(buildSyncCursors(new Map())).toEqual([])
   })

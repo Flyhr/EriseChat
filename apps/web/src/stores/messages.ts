@@ -17,6 +17,8 @@ import { useConversationsStore } from './conversations'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
 const PAGE_SIZE = 50
+/** 单条文本消息最大字符数（服务端校验同值；输入框与发送入口双重拦截）。 */
+export const MAX_TEXT_LENGTH = 4096
 /** 首次发送后等待 ack 的时长；超时进入重试（2s/5s/10s，同一 clientMsgId 幂等）。 */
 const ACK_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [2000, 5000, 10000] as const
@@ -157,7 +159,8 @@ export const useMessagesStore = defineStore('messages', () => {
       for (const conversation of conversations.items) {
         const cached = await getMessagesByConversation(conversation.conversationId)
         if (cached.length === 0) continue
-        const merged = mergeMessages([], cached)
+        // 与内存中已有消息合并（不覆盖已拉到的新消息），再按 seq 去重排序（M3-00 N4）。
+        const merged = mergeMessages(messagesOf(conversation.conversationId), cached)
         byConversation.value = { ...byConversation.value, [conversation.conversationId]: merged }
         loadedConversations.value = {
           ...loadedConversations.value,
@@ -196,7 +199,14 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     try {
       const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
-      merge(conversationId, page.messages)
+      const before = lastSeqOf(conversationId)
+      const result = merge(conversationId, page.messages)
+      const pageMaxSeq = page.messages.reduce((max, item) => Math.max(max, item.seq), before)
+      // 首屏基线（本地无游标）直接以本页最大 seq 为游标；已有游标且检测到缺口时保持游标不动，
+      // 交给 syncAll 从缺口处补拉，避免把缺口吞掉（M3-00 N1）。
+      if (before === 0 || !result.hasGap) {
+        advanceLastSeq(conversationId, Math.max(pageMaxSeq, result.lastSeq))
+      }
       hasMoreByConversation.value = {
         ...hasMoreByConversation.value,
         [conversationId]: page.hasMore,
@@ -252,20 +262,21 @@ export const useMessagesStore = defineStore('messages', () => {
     syncInFlight = true
     syncing.value = true
     try {
-      const pending = new Map<string, number>()
+      let pending = new Map<string, number>()
       for (const conversation of conversations.items) {
         pending.set(conversation.conversationId, lastSeqOf(conversation.conversationId))
       }
       const gapRetries = new Map<string, number>()
       let rounds = 0
 
-      while (pending.size > 0 && rounds < SYNC_MAX_ROUNDS) {
+      while (rounds < SYNC_MAX_ROUNDS) {
         rounds += 1
         const cursors = buildSyncCursors(pending, 100)
         if (cursors.length === 0) break
 
-        let response: SyncResponseFrame
+        const sentSeq = new Map(cursors.map((cursor) => [cursor.conversationId, cursor.lastSeq]))
         const frame: SyncRequestFrame = { type: 'sync.request', cursors }
+        let response: SyncResponseFrame
         try {
           response = await chatWs.request<SyncResponseFrame>(frame)
         } catch (error) {
@@ -275,9 +286,10 @@ export const useMessagesStore = defineStore('messages', () => {
 
         const next = new Map<string, number>()
         for (const batch of response.batches ?? []) {
+          if (!sentSeq.has(batch.conversationId)) continue
           const messages = batch.messages ?? []
           if (messages.length === 0) continue
-          const cursor = pending.get(batch.conversationId) ?? lastSeqOf(batch.conversationId)
+          const cursor = sentSeq.get(batch.conversationId) ?? lastSeqOf(batch.conversationId)
           const gap = detectGap(cursor, messages)
           merge(batch.conversationId, messages)
           conversations.applyMessage(batch.conversationId, messages[messages.length - 1])
@@ -296,9 +308,13 @@ export const useMessagesStore = defineStore('messages', () => {
           }
         }
 
-        pending.clear()
-        for (const [conversationId, seq] of next) pending.set(conversationId, seq)
-        if (!response.hasMore) break
+        // 本轮请求未覆盖的会话（一次最多 100 个 cursors）保留到下一轮，不能丢（M3-00 N2）。
+        for (const [conversationId, seq] of pending) {
+          if (!sentSeq.has(conversationId)) next.set(conversationId, seq)
+        }
+        pending = next
+        // 没有待补会话且服务端无更多数据时才结束，避免把未覆盖会话丢掉（M3-00 N3）。
+        if (pending.size === 0 && !response.hasMore) break
       }
 
       lastSyncedAt.value = Date.now()
@@ -362,16 +378,24 @@ export const useMessagesStore = defineStore('messages', () => {
       msgType: 'text',
       content: pending.content,
     }
-    if (!chatWs.send(frame)) {
-      // 断线时 chatWs.send 返回 false；ack 超时后按重试间隔继续尝试，最终失败可手动重发。
-      console.warn('[messages] WebSocket 未连接，消息将在重试窗口内继续尝试')
+    if (chatWs.send(frame)) {
+      scheduleAckTimeout(pending)
+      return
     }
-    scheduleAckTimeout(pending)
+    // 未连接：不启动 8 秒 ack 计时，直接进入 2s/5s/10s 重试序列，避免几十秒后才标失败（M3-00 N8）。
+    console.warn('[messages] WebSocket 未连接，消息进入重试序列')
+    scheduleRetry(pending)
   }
 
   function handleAckTimeout(conversationId: string, clientMsgId: string): void {
     const pending = findPending(conversationId, clientMsgId)
     if (!pending || pending.status !== 'sending') return
+    scheduleRetry(pending)
+  }
+
+  /** 按 2s/5s/10s 间隔重发同一 clientMsgId；3 次重试仍失败则标记 failed（可手动重发）。 */
+  function scheduleRetry(pending: PendingMessage): void {
+    clearTimers(pending.clientMsgId)
     if (pending.retries >= RETRY_DELAYS_MS.length) {
       pending.status = 'failed'
       return
@@ -379,16 +403,21 @@ export const useMessagesStore = defineStore('messages', () => {
     const delay = RETRY_DELAYS_MS[pending.retries]
     pending.retries += 1
     const timer = setTimeout(() => {
-      retryTimers.delete(clientMsgId)
+      retryTimers.delete(pending.clientMsgId)
       transmit(pending)
     }, delay)
-    retryTimers.set(clientMsgId, timer)
+    retryTimers.set(pending.clientMsgId, timer)
   }
 
   /** 乐观发送文本消息：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
-  function sendText(conversationId: string, text: string, senderId: string): void {
+  function sendText(conversationId: string, text: string, senderId: string): boolean {
     const content = text.trim()
-    if (!content) return
+    if (!content) return false
+    if (content.length > MAX_TEXT_LENGTH) {
+      // 输入框已有 maxlength 拦截，这里兜底防止程序化调用超长文本（M3-00 N10）。
+      console.warn(`[messages] 文本超过 ${MAX_TEXT_LENGTH} 字符上限，已拦截`)
+      return false
+    }
     const pending: PendingMessage = {
       clientMsgId: crypto.randomUUID(),
       conversationId,
@@ -404,6 +433,7 @@ export const useMessagesStore = defineStore('messages', () => {
       [conversationId]: [...pendingOf(conversationId), pending],
     }
     transmit(pending)
+    return true
   }
 
   /** 重发失败消息：复用同一 clientMsgId（服务端幂等，不会重复落库）。 */
@@ -483,9 +513,22 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /**
+   * 认证成功（首次登录/断线重连/刷新后建连）：先强制刷新会话列表拿最新 lastSeq，
+   * 再统一补拉增量——只在此一处触发，避免页面与 store 双拉（M3-00 B3）。
+   */
+  async function handleAuthed(): Promise<void> {
+    try {
+      await useConversationsStore().load(true)
+    } catch (error) {
+      console.warn('[messages] 刷新会话列表失败，使用本地缓存继续', error)
+    }
+    await syncAll()
+  }
+
+  /**
    * 订阅 WS 帧与连接状态（只注册一次）：
    * - message.ack / message.new 实时合并；
-   * - authed（hello 后）触发一次全量补拉（首次进入/断线重连成功）；
+   * - authed（hello 后）触发会话列表刷新 + 全量补拉（首次进入/断线重连成功）；
    * - visibilitychange 回前台时补拉增量。
    */
   function subscribeRealtime(): () => void {
@@ -495,7 +538,7 @@ export const useMessagesStore = defineStore('messages', () => {
     unsubscribers.push(chatWs.on('frame', handleFrame))
     unsubscribers.push(
       chatWs.on('statechange', (state: WsState) => {
-        if (state === 'authed') void syncAll()
+        if (state === 'authed') void handleAuthed()
       }),
     )
 
@@ -504,8 +547,8 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     document.addEventListener('visibilitychange', visibilityHandler)
 
-    // 订阅时若已认证（如从登录页跳转后路由已建连），立即补拉一次。
-    if (chatWs.state === 'authed') void syncAll()
+    // 订阅时若已认证（如从登录页跳转后路由已建连），立即刷新列表并补拉一次。
+    if (chatWs.state === 'authed') void handleAuthed()
 
     return disposeRealtime
   }

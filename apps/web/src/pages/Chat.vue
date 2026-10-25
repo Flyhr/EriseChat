@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -56,25 +56,34 @@ watch(
 )
 
 // 打开会话（或会话内收到新消息）时推进本地已读游标：未读角标随之清除。
-// M3 接入 read.update 上报服务端后，改由服务端 read.updated 驱动。
+// M3-00 N6：仅当页面可见且当前会话就是 activeId 时才推进；滚到底判定留 M3-09，服务端 read.update 在 M3 接入。
+function markActiveConversationRead(): void {
+  const conversationId = activeId.value
+  const lastSeq = activeConversation.value?.lastSeq ?? 0
+  if (!conversationId || lastSeq <= 0) return
+  if (document.visibilityState !== 'visible') return
+  if (activeId.value !== conversationId) return
+  conversations.markRead(conversationId, lastSeq)
+}
+
 watch(
   () => [activeId.value, activeConversation.value?.lastSeq ?? 0] as const,
-  ([conversationId, lastSeq]) => {
-    if (!conversationId || lastSeq <= 0) return
-    conversations.markRead(conversationId, lastSeq)
-  },
+  markActiveConversationRead,
   { immediate: true },
 )
 
 onMounted(async () => {
-  // 启动/刷新：先恢复 IndexedDB 缓存渲染（会话列表 + 各会话最近消息），
-  // 再拉服务端最新列表并补拉增量（M2-06；authed/重连成功/回前台也会触发 syncAll）。
+  // 启动/刷新：先恢复 IndexedDB 缓存渲染（会话列表 + 各会话最近消息）；
+  // 会话列表刷新与增量补拉统一由 messages store 在 authed（首次/重连成功）时触发（M3-00 B3）。
   conversations.subscribeRealtime()
   messages.subscribeRealtime()
+  document.addEventListener('visibilitychange', markActiveConversationRead)
   await conversations.restoreFromCache()
   await messages.restoreFromCache()
-  await conversations.load()
-  void messages.syncAll()
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', markActiveConversationRead)
 })
 
 function selectConversation(conversationId: string): void {

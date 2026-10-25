@@ -98,23 +98,31 @@ export const useConversationsStore = defineStore('conversations', () => {
 
   /**
    * 收到一条新消息后更新会话摘要（列表预览/排序用）：
-   * 仅更新已在列表中的会话；会话不存在时忽略（列表刷新后自然出现）。
+   * 仅更新已在列表中的会话；只有 seq 更大的消息才更新 lastMessage（补拉到的旧消息不覆盖最新消息，M3-00 N5）。
    */
   function applyMessage(conversationId: string, message: Message): void {
     const index = items.value.findIndex((item) => item.conversationId === conversationId)
     if (index < 0) return
     const current = items.value[index]
-    const next: Conversation = {
-      ...current,
-      lastSeq: Math.max(current.lastSeq, message.seq),
-      lastMessage: message,
+    const nextLastSeq = Math.max(current.lastSeq, message.seq)
+    if (message.seq > current.lastSeq) {
+      const next: Conversation = { ...current, lastSeq: nextLastSeq, lastMessage: message }
+      items.value = [
+        ...items.value.slice(0, index),
+        next,
+        ...items.value.slice(index + 1),
+      ]
+      persistConversations([next])
+      return
     }
-    items.value = [
-      ...items.value.slice(0, index),
-      next,
-      ...items.value.slice(index + 1),
-    ]
-    persistConversations([next])
+    if (nextLastSeq !== current.lastSeq) {
+      const next: Conversation = { ...current, lastSeq: nextLastSeq }
+      items.value = [
+        ...items.value.slice(0, index),
+        next,
+        ...items.value.slice(index + 1),
+      ]
+    }
   }
 
   /**
