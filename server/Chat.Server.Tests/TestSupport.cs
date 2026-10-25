@@ -237,6 +237,48 @@ public static class TestSupport
         return conversation;
     }
 
+    /// <summary>M3-06：种子群聊（owner + members，lastSeq=0，无系统消息）。</summary>
+    public static async Task<ConversationEntity> SeedGroupConversationAsync(
+        ChatDbContext db,
+        User owner,
+        params User[] members)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var conversation = new ConversationEntity
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            Type = Chat.Protocol.ConversationType.Group,
+            Title = "测试群聊",
+            DirectKey = null,
+            CreatedBy = owner.Id,
+            CreatedAt = now,
+            LastSeq = 0,
+        };
+        db.Conversations.Add(conversation);
+        db.ConversationMembers.Add(new ConversationMemberEntity
+        {
+            ConversationId = conversation.Id,
+            UserId = owner.Id,
+            Role = Chat.Protocol.MemberRole.Owner,
+            JoinedAt = now,
+            LastReadSeq = 0,
+        });
+        foreach (var member in members)
+        {
+            db.ConversationMembers.Add(new ConversationMemberEntity
+            {
+                ConversationId = conversation.Id,
+                UserId = member.Id,
+                Role = Chat.Protocol.MemberRole.Member,
+                JoinedAt = now,
+                LastReadSeq = 0,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        return conversation;
+    }
+
     /// <summary>批量种子消息（直接落库，避免 250 次发送拖慢测试）。</summary>
     public static async Task SeedMessagesAsync(
         ChatDbContext db,
