@@ -6,7 +6,7 @@ import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
 
-/** 本地已读游标持久化 key：M2 阶段先本地记录，M3 接入 read.update 后以服务端 last_read_seq 为准。 */
+/** 本地已读游标持久化 key：用于页面内即时展示与服务端上报兜底；服务端 last_read_seq 是事实源（read.update）。 */
 const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
 
 /** 被移出/退出群聊后的缓存清理回调（messages store 注册；避免两个 store 循环 import）。 */
@@ -60,6 +60,7 @@ export const useConversationsStore = defineStore('conversations', () => {
   const removedConversationIds = ref<string[]>([])
   const removedHandlers: ConversationRemovedHandler[] = []
   let unsubscribeFrame: (() => void) | null = null
+  let unsubscribeState: (() => void) | null = null
   let cacheRestored = false
 
   /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算）。 */
@@ -92,8 +93,9 @@ export const useConversationsStore = defineStore('conversations', () => {
   }
 
   /**
-   * 标记会话已读（打开会话/在会话内收到新消息时调用）：
-   * M2 暂存本地（localStorage）；M3 接入 read.update 上报服务端后改为以服务端为准。
+   * 标记会话已读（打开会话/在会话内收到新消息时调用）：更新本地游标用于即时展示，
+   * 并上报服务端 read.update（protocol.md §4.6）——服务端 last_read_seq 是事实源，
+   * 重新登录/换设备后未读数以它为准（否则每次登录都会把历史消息算成未读）。
    */
   function markRead(conversationId: string, seq: number): void {
     if (!Number.isFinite(seq) || seq <= 0) return
@@ -103,6 +105,31 @@ export const useConversationsStore = defineStore('conversations', () => {
       [conversationId]: seq,
     }
     persistReadSeq(lastReadSeqByConversation.value)
+    reportReadSeq(conversationId, seq)
+  }
+
+  /**
+   * 上报已读游标到服务端（M3-05 read.update）：连接未认证时静默跳过，
+   * 认证成功后的 flushReadSeq 会补报，不阻塞页面交互。
+   */
+  function reportReadSeq(conversationId: string, seq: number): void {
+    if (chatWs.state !== 'authed') return
+    chatWs.send({ type: 'read.update', conversationId, lastReadSeq: seq })
+  }
+
+  /**
+   * 认证成功（首次/重连）后补报：把本地领先服务端快照的已读游标逐个上报一次，
+   * 覆盖「上报时连接尚未认证 / 已读后断线重连」的场景。
+   */
+  function flushReadSeq(): void {
+    if (chatWs.state !== 'authed') return
+    for (const [conversationId, seq] of Object.entries(lastReadSeqByConversation.value)) {
+      const conversation = getById(conversationId)
+      if (!conversation) continue
+      if (seq > (conversation.lastReadSeq ?? 0)) {
+        chatWs.send({ type: 'read.update', conversationId, lastReadSeq: seq })
+      }
+    }
   }
 
   /**
@@ -246,6 +273,10 @@ export const useConversationsStore = defineStore('conversations', () => {
       }
       upsert(frame.conversations)
     })
+    // 认证成功（首次/重连）后补报已读游标，避免服务端 last_read_seq 长期滞后导致重新登录误报未读。
+    unsubscribeState = chatWs.on('statechange', (state) => {
+      if (state === 'authed') flushReadSeq()
+    })
     return unsubscribeFrame
   }
 
@@ -265,6 +296,10 @@ export const useConversationsStore = defineStore('conversations', () => {
     if (unsubscribeFrame) {
       unsubscribeFrame()
       unsubscribeFrame = null
+    }
+    if (unsubscribeState) {
+      unsubscribeState()
+      unsubscribeState = null
     }
   }
 

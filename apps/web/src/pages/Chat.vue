@@ -69,8 +69,9 @@ watch(
   { immediate: true },
 )
 
-// 打开会话（或会话内收到新消息）时推进本地已读游标：未读角标随之清除。
-// M3-00 N6：仅当页面可见且当前会话就是 activeId 时才推进；滚到底判定留 M3-09，服务端 read.update 在 M3 接入。
+// 打开会话（或会话内收到新消息）时推进已读游标并上报服务端（read.update，M3-05 服务端已支持）：
+// 未读角标随之清除；服务端 last_read_seq 是重新登录/换设备后未读计算的依据。
+// M3-00 N6：仅当页面可见且当前会话就是 activeId 时才推进；滚到底判定留 M3-09。
 function markActiveConversationRead(): void {
   const conversationId = activeId.value
   const lastSeq = activeConversation.value?.lastSeq ?? 0
