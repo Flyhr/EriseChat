@@ -1,4 +1,4 @@
-// 消息接口（对应 server/Chat.Server/Api/MessageEndpoints.cs；M1 实现后按实际契约校准）。
+// 消息接口（对应 server/Chat.Server/Api/MessageEndpoints.cs；M1 已实现，M2-05 接入历史分页）。
 // 正常收发走 WebSocket（core/ws.ts）；这里的 REST 只做历史分页兜底（project-overview.md §7.5）。
 import { http } from '../core/http'
 import type { Message } from '../types/frames'

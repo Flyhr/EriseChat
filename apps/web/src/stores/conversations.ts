@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { Conversation } from '../types/frames'
+import type { Conversation, Message } from '../types/frames'
 import { conversationsApi } from '../api/conversations'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
@@ -37,6 +37,26 @@ export const useConversationsStore = defineStore('conversations', () => {
     const conversation = getById(conversationId)
     if (!conversation) return 0
     return unreadCount(conversation.lastSeq, conversation.lastReadSeq)
+  }
+
+  /**
+   * 收到一条新消息后更新会话摘要（列表预览/排序用）：
+   * 仅更新已在列表中的会话；会话不存在时忽略（列表刷新后自然出现）。
+   */
+  function applyMessage(conversationId: string, message: Message): void {
+    const index = items.value.findIndex((item) => item.conversationId === conversationId)
+    if (index < 0) return
+    const current = items.value[index]
+    const next: Conversation = {
+      ...current,
+      lastSeq: Math.max(current.lastSeq, message.seq),
+      lastMessage: message,
+    }
+    items.value = [
+      ...items.value.slice(0, index),
+      next,
+      ...items.value.slice(index + 1),
+    ]
   }
 
   /** 从服务端加载当前用户会话列表（幂等：已加载且非强制时直接返回）。 */
@@ -86,6 +106,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     loading,
     loaded,
     upsert,
+    applyMessage,
     getById,
     unreadOf,
     load,

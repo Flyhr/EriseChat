@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
+import MessageList from '../components/MessageList.vue'
+import SendBox from '../components/SendBox.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
+import { useMessagesStore } from '../stores/messages'
 
-// 聊天主页面（M2-04）：左侧会话列表 + 右侧选中会话占位；消息流与发送框在 M2-05 接入。
+// 聊天主页面（M2-04 会话列表 + M2-05 消息流）：左侧会话列表，右侧消息流与发送框。
 // 规则：页面只做编排，状态走 stores/，连接走 core/ws.ts，不直接 new WebSocket / fetch。
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
+const messages = useMessagesStore()
 
 const selfUserId = computed(() => auth.user?.userId ?? '')
 const activeId = computed(() =>
@@ -28,14 +32,53 @@ const activeTitle = computed(() => {
   return other?.displayName ?? conversation.title ?? '单聊会话'
 })
 
+// 当前会话的消息缓存（已落库事实消息 + 乐观发送中的本地消息）与历史分页状态。
+const activeMessages = computed(() =>
+  activeId.value ? messages.messagesOf(activeId.value) : [],
+)
+const activePending = computed(() =>
+  activeId.value ? messages.pendingOf(activeId.value) : [],
+)
+const activeHasMore = computed(() => (activeId.value ? messages.hasMoreOf(activeId.value) : false))
+const activeLoadingHistory = computed(() =>
+  activeId.value ? messages.isLoadingMore(activeId.value) : false,
+)
+const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
+
+// 切换会话：首次进入拉最新一页历史（M2-05）；已加载过直接用缓存，后续新消息由 message.new 合并。
+watch(
+  activeId,
+  (conversationId) => {
+    if (!conversationId) return
+    void messages.loadInitial(conversationId)
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   void conversations.load()
-  // 订阅服务端 conv.updated：其他端新建/更新会话时刷新左侧列表（列表顺序由 store 统一计算）。
+  // 服务端推送：conv.updated 更新会话列表、message.ack/message.new 更新消息流（各自只订阅一次）。
   conversations.subscribeRealtime()
+  messages.subscribeRealtime()
 })
 
 function selectConversation(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
+}
+
+function sendMessage(text: string): void {
+  if (!activeId.value || !selfUserId.value) return
+  messages.sendText(activeId.value, text, selfUserId.value)
+}
+
+function retryMessage(clientMsgId: string): void {
+  if (!activeId.value) return
+  messages.retrySend(activeId.value, clientMsgId)
+}
+
+function loadMoreMessages(): void {
+  if (!activeId.value) return
+  void messages.loadMore(activeId.value)
 }
 </script>
 
@@ -66,9 +109,17 @@ function selectConversation(conversationId: string): void {
     <section class="chat-page__main">
       <template v-if="activeConversation">
         <header class="chat-page__main-header">{{ activeTitle }}</header>
-        <div class="chat-page__main-body">
-          <EmptyState title="消息流即将接入" description="M2-05 实现消息收发、发送状态机、seq 去重与断线补拉。" />
-        </div>
+        <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
+        <MessageList
+          :messages="activeMessages"
+          :pending="activePending"
+          :self-user-id="selfUserId"
+          :has-more="activeHasMore"
+          :loading="activeLoadingHistory"
+          @load-more="loadMoreMessages"
+          @retry="retryMessage"
+        />
+        <SendBox @send="sendMessage" />
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"
@@ -130,6 +181,7 @@ function selectConversation(conversationId: string): void {
 .chat-page__main {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .chat-page__main-header {
@@ -141,11 +193,10 @@ function selectConversation(conversationId: string): void {
   border-bottom: 1px solid var(--color-border);
 }
 
-.chat-page__main-body {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-5);
+.chat-page__main-hint {
+  margin: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: center;
 }
 </style>

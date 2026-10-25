@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 
-// 发送框（纯展示 + 本地输入）：只 emit 文本，发送/重试/状态机由 store 负责（M1）。
+// 发送框（纯展示 + 本地输入）：只 emit 文本，发送/重试/状态机由 stores/messages.ts 负责。
+// Enter 发送、Shift+Enter 换行；发送中/失败态由消息气泡展示，不在输入框阻断继续输入。
 const emit = defineEmits<{
   send: [text: string]
 }>()
@@ -22,7 +23,7 @@ function submit(): void {
       v-model="text"
       class="send-box__input"
       rows="2"
-      placeholder="输入消息，Enter 发送（M1）"
+      placeholder="输入消息，Enter 发送，Shift+Enter 换行"
       @keydown.enter.exact.prevent="submit"
     />
     <button class="send-box__button" type="submit" :disabled="!text.trim()">发送</button>
