@@ -74,6 +74,31 @@ public sealed class ConversationRealtimeNotifier
             pushed);
     }
 
+    /// <summary>
+    /// 向被移出/主动退出的用户推送 conv.updated（conversations 为空数组 + removedConversationIds），
+    /// 客户端收到后移除该会话的本地状态（M3-04）。不阻塞调用方。
+    /// </summary>
+    public void PushRemoved(string userId, string conversationId)
+    {
+        var frame = new ConvUpdatedFrame(Array.Empty<Conversation>())
+        {
+            RemovedConversationIds = new[] { conversationId },
+        };
+
+        var pushed = 0;
+        foreach (var connection in _connections.GetConnections(userId))
+        {
+            pushed++;
+            _ = SendSafeAsync(connection, frame);
+        }
+
+        _logger.LogInformation(
+            "conv.updated(removed) 推送：会话 {ConversationId}，用户 {UserId} → {ConnectionCount} 条在线连接",
+            conversationId,
+            userId,
+            pushed);
+    }
+
     private async Task SendSafeAsync(WsConnection connection, FrameEnvelope frame)
     {
         try

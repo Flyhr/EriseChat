@@ -270,6 +270,232 @@ public sealed class ConversationService
         return new GroupMutationResult(conversation, memberUserIds, systemMessage, RemovedUserId: null);
     }
 
+    /// <summary>
+    /// 邀请成员（M3-04）：仅群聊；非成员 NOT_MEMBER；GroupOnlyOwnerCanInvite 时仅群主可邀请；
+    /// 已在群内的用户幂等跳过；无新增时直接返回当前会话、不写系统消息、不推送。
+    /// </summary>
+    public async Task<GroupMutationResult> AddMembersAsync(
+        string currentUserId,
+        string conversationId,
+        IReadOnlyList<string>? userIds,
+        CancellationToken cancellationToken)
+    {
+        if (userIds is null || userIds.Count == 0)
+        {
+            throw ApiException.ValidationFailed("userIds 不能为空");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (conversation.Type != ConversationType.Group)
+        {
+            throw ApiException.ValidationFailed("仅群聊支持成员管理");
+        }
+
+        var members = await _db.ConversationMembers
+            .Where(member => member.ConversationId == conversationId)
+            .ToListAsync(cancellationToken);
+
+        var currentMembership = members.FirstOrDefault(member => string.Equals(member.UserId, currentUserId, StringComparison.Ordinal));
+        if (currentMembership is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        if (_appOptions.GroupOnlyOwnerCanInvite && currentMembership.Role != MemberRole.Owner)
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "仅群主可以邀请成员", StatusCodes.Status403Forbidden);
+        }
+
+        var existingIds = members.Select(member => member.UserId).ToHashSet(StringComparer.Ordinal);
+        var candidateIds = NormalizeMemberIds(userIds, currentUserId)
+            .Where(userId => !existingIds.Contains(userId))
+            .ToList();
+
+        if (candidateIds.Count == 0)
+        {
+            // 幂等：没有新成员时不写系统消息、不推送，直接返回当前会话。
+            var current = (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
+            return new GroupMutationResult(current, existingIds.ToList(), SystemMessage: null, RemovedUserId: null);
+        }
+
+        var maxMembers = Math.Clamp(_appOptions.GroupMaxMembers, 2, 500);
+        if (members.Count + candidateIds.Count > maxMembers)
+        {
+            throw ApiException.ValidationFailed($"群成员数量超过上限（最多 {maxMembers} 人）");
+        }
+
+        var operatorUser = await _db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == currentUserId, cancellationToken);
+        if (operatorUser is null)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        var candidateUsers = await _db.Users.AsNoTracking()
+            .Where(user => candidateIds.Contains(user.Id))
+            .ToListAsync(cancellationToken);
+        if (candidateUsers.Count != candidateIds.Count)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (candidateUsers.Any(user => user.Status != UserStatus.Active))
+        {
+            throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不可用", StatusCodes.Status404NotFound);
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        foreach (var candidateId in candidateIds)
+        {
+            var newMember = new ConversationMemberEntity
+            {
+                ConversationId = conversationId,
+                UserId = candidateId,
+                Role = MemberRole.Member,
+                JoinedAt = now,
+                LastReadSeq = 0,
+            };
+            members.Add(newMember);
+            _db.ConversationMembers.Add(newMember);
+        }
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var nameById = candidateUsers.ToDictionary(user => user.Id, user => user.DisplayName, StringComparer.Ordinal);
+        var invitedNames = candidateIds.Select(userId => nameById[userId]).ToList();
+        var systemContent = new SystemContent(
+            "member.joined",
+            currentUserId,
+            candidateIds,
+            $"{operatorUser.DisplayName} 邀请 {string.Join("、", invitedNames)} 加入群聊");
+        var systemMessage = await _systemMessages.AppendAsync(conversation, currentUserId, systemContent, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "群成员邀请：{ConversationId} 新增 {AddedCount} 人（操作者 {UserId}）",
+            conversationId,
+            candidateIds.Count,
+            currentUserId);
+
+        var updated = (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
+        var memberUserIds = existingIds.Concat(candidateIds).ToList();
+        return new GroupMutationResult(updated, memberUserIds, systemMessage, RemovedUserId: null);
+    }
+
+    /// <summary>
+    /// 退出/移除群成员（M3-04）：目标=自己即退出（群主不可退出）；移除他人仅群主可操作。
+    /// 成员变更与系统消息在同一事务内提交。
+    /// </summary>
+    public async Task<GroupMutationResult> RemoveMemberAsync(
+        string currentUserId,
+        string conversationId,
+        string targetUserId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedTargetId = (targetUserId ?? string.Empty).Trim();
+        if (normalizedTargetId.Length == 0)
+        {
+            throw ApiException.ValidationFailed("userId 不能为空");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (conversation.Type != ConversationType.Group)
+        {
+            throw ApiException.ValidationFailed("仅群聊支持成员管理");
+        }
+
+        var members = await _db.ConversationMembers
+            .Where(member => member.ConversationId == conversationId)
+            .ToListAsync(cancellationToken);
+
+        var currentMembership = members.FirstOrDefault(member => string.Equals(member.UserId, currentUserId, StringComparison.Ordinal));
+        if (currentMembership is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        var targetMembership = members.FirstOrDefault(member => string.Equals(member.UserId, normalizedTargetId, StringComparison.Ordinal));
+        if (targetMembership is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "该用户不是群成员", StatusCodes.Status404NotFound);
+        }
+
+        var operatorUser = await _db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == currentUserId, cancellationToken);
+        if (operatorUser is null)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        var isSelf = string.Equals(normalizedTargetId, currentUserId, StringComparison.Ordinal);
+        SystemContent systemContent;
+        if (isSelf)
+        {
+            if (currentMembership.Role == MemberRole.Owner)
+            {
+                throw ApiException.ValidationFailed("群主不能退出群聊（v1 不支持转让群主）");
+            }
+
+            systemContent = new SystemContent(
+                "member.left",
+                currentUserId,
+                null,
+                $"{operatorUser.DisplayName} 退出了群聊");
+        }
+        else
+        {
+            if (currentMembership.Role != MemberRole.Owner)
+            {
+                throw new ApiException(ErrorCodes.Forbidden, "只有群主可以移除成员", StatusCodes.Status403Forbidden);
+            }
+
+            var targetUser = await _db.Users.AsNoTracking()
+                .FirstOrDefaultAsync(user => user.Id == normalizedTargetId, cancellationToken);
+            var targetName = targetUser?.DisplayName ?? "该成员";
+            systemContent = new SystemContent(
+                "member.removed",
+                currentUserId,
+                new[] { normalizedTargetId },
+                $"{operatorUser.DisplayName} 将 {targetName} 移出群聊");
+        }
+
+        _db.ConversationMembers.Remove(targetMembership);
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var systemMessage = await _systemMessages.AppendAsync(conversation, currentUserId, systemContent, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "群成员变更：{ConversationId} 移除 {TargetUserId}（{Event}，操作者 {UserId}）",
+            conversationId,
+            normalizedTargetId,
+            systemContent.Event,
+            currentUserId);
+
+        var updated = (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
+        var remainingMemberIds = members
+            .Where(member => !string.Equals(member.UserId, normalizedTargetId, StringComparison.Ordinal))
+            .Select(member => member.UserId)
+            .ToList();
+        return new GroupMutationResult(updated, remainingMemberIds, systemMessage, RemovedUserId: normalizedTargetId);
+    }
+
     /// <summary>读取单个会话：不存在 NOT_FOUND，非成员 NOT_MEMBER。</summary>
     public async Task<Conversation> GetAsync(string currentUserId, string conversationId, CancellationToken cancellationToken)
     {
