@@ -4,6 +4,7 @@ import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import MessageAttachment from './MessageAttachment.vue'
 import ImagePreview from './ImagePreview.vue'
+import { systemMessageText } from '../core/groupChat'
 
 // 消息气泡（纯展示）。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3 安全要求）。
 // pending 消息显示「发送中/失败重发」状态；失败时点击气泡上的按钮重发（复用 clientMsgId）。
@@ -24,14 +25,6 @@ const emit = defineEmits<{
   imageLoaded: []
 }>()
 
-/** 系统消息事件兜底文案（content.text 缺失时使用；未知事件回退「系统消息」）。 */
-const SYSTEM_EVENT_FALLBACK: Readonly<Record<string, string>> = {
-  'group.created': '群聊已创建',
-  'member.joined': '有新成员加入群聊',
-  'member.left': '有成员退出群聊',
-  'member.removed': '有成员被移出群聊',
-}
-
 const contentText = computed(() => {
   const content = props.message.content
   if (typeof content === 'string') return content
@@ -42,13 +35,7 @@ const contentText = computed(() => {
 /** system 消息：居中灰字、无气泡/头像，不参与附件/时间/状态渲染。 */
 const isSystem = computed(() => props.message.msgType === 'system')
 
-const systemText = computed(() => {
-  const content = props.message.content
-  if (typeof content === 'string') return content
-  if ('text' in content && content.text) return content.text
-  const event = 'event' in content ? content.event : ''
-  return SYSTEM_EVENT_FALLBACK[event] ?? '系统消息'
-})
+const systemText = computed(() => systemMessageText(props.message.content))
 
 /** 仅 image/file 且 content 为 FileContent 时用附件组件渲染；异常数据回退文本。 */
 const showAttachment = computed(() => {

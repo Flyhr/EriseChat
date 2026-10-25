@@ -4,6 +4,7 @@ import { conversationsApi } from '../api/conversations'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from './Avatar.vue'
 import { ApiError } from '../core/http'
+import { sortMembers } from '../core/groupChat'
 import type { Conversation, ConversationMember } from '../types/frames'
 
 // 群成员管理面板（M3-08）：成员列表（群主优先）、邀请成员、移除成员（仅群主）、退出群聊（非群主）。
@@ -29,12 +30,7 @@ const inviteResults = ref<UserProfile[]>([])
 const selectedInviteIds = ref<string[]>([])
 const searching = ref(false)
 
-const members = computed(() =>
-  [...props.conversation.members].sort((a, b) => {
-    if (a.role !== b.role) return a.role === 'owner' ? -1 : 1
-    return a.displayName.localeCompare(b.displayName, 'zh-CN')
-  }),
-)
+const members = computed(() => sortMembers(props.conversation.members))
 
 const selfMember = computed(() =>
   props.conversation.members.find((member) => member.userId === props.selfUserId),

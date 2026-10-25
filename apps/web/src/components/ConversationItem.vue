@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '../types/frames'
+import { conversationLabel, systemMessageText } from '../core/groupChat'
 import Avatar from './Avatar.vue'
 
 // 会话列表项（纯展示）：标题（单聊显示对方昵称/群聊显示群名与成员数）、最后一条消息摘要、
@@ -25,27 +26,11 @@ const otherMember = computed(() => {
 
 const title = computed(() => {
   const conversation = props.conversation
-  if (conversation.type === 'group') {
-    const name = conversation.title || '群聊'
-    return `${name}（${conversation.members.length}）`
-  }
+  if (conversation.type === 'group') return conversationLabel(conversation)
   return otherMember.value?.displayName ?? conversation.title ?? '单聊会话'
 })
 
 const avatarFileId = computed(() => otherMember.value?.avatarFileId)
-
-/** 系统事件兜底文案（服务端 text 缺失时使用；protocol.md §4.3 的四个事件）。 */
-const SYSTEM_EVENT_FALLBACK: Record<string, string> = {
-  'group.created': '群聊已创建',
-  'member.joined': '有新成员加入群聊',
-  'member.left': '有成员退出群聊',
-  'member.removed': '有成员被移出群聊',
-}
-
-function systemPreview(content: { event?: string; text?: string }): string {
-  if (content.text) return truncate(content.text)
-  return SYSTEM_EVENT_FALLBACK[content.event ?? ''] ?? '系统消息'
-}
 
 const preview = computed(() => {
   const message = props.conversation.lastMessage
@@ -61,11 +46,7 @@ const preview = computed(() => {
         ? `[文件] ${String(message.content.name)}`
         : '[文件]'
     case 'system':
-      return typeof message.content === 'object' &&
-        message.content !== null &&
-        'event' in message.content
-        ? systemPreview(message.content)
-        : '[系统消息]'
+      return truncate(systemMessageText(message.content))
     default:
       return typeof message.content === 'string' ? truncate(message.content) : '暂无消息'
   }
