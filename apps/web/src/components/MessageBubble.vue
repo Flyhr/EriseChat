@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { FileContent, Message } from '../types/frames'
+import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import MessageAttachment from './MessageAttachment.vue'
 import ImagePreview from './ImagePreview.vue'
@@ -8,6 +8,7 @@ import ImagePreview from './ImagePreview.vue'
 // 消息气泡（纯展示）。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3 安全要求）。
 // pending 消息显示「发送中/失败重发」状态；失败时点击气泡上的按钮重发（复用 clientMsgId）。
 // M3-07：image/file 消息改用 MessageAttachment（鉴权 blob 渲染），点击图片打开 ImagePreview 大图。
+// M3-08：system 消息（群事件）不带气泡、居中灰色小字；文案优先 content.text，缺失时按事件名兜底。
 const props = withDefaults(
   defineProps<{
     message: Message | PendingMessage
@@ -23,11 +24,30 @@ const emit = defineEmits<{
   imageLoaded: []
 }>()
 
+/** 系统消息事件兜底文案（content.text 缺失时使用；未知事件回退「系统消息」）。 */
+const SYSTEM_EVENT_FALLBACK: Readonly<Record<string, string>> = {
+  'group.created': '群聊已创建',
+  'member.joined': '有新成员加入群聊',
+  'member.left': '有成员退出群聊',
+  'member.removed': '有成员被移出群聊',
+}
+
 const contentText = computed(() => {
   const content = props.message.content
   if (typeof content === 'string') return content
   if ('fileId' in content) return content.name
   return content.text ?? '[系统消息]'
+})
+
+/** system 消息：居中灰字、无气泡/头像，不参与附件/时间/状态渲染。 */
+const isSystem = computed(() => props.message.msgType === 'system')
+
+const systemText = computed(() => {
+  const content = props.message.content
+  if (typeof content === 'string') return content
+  if ('text' in content && content.text) return content.text
+  const event = 'event' in content ? content.event : ''
+  return SYSTEM_EVENT_FALLBACK[event] ?? '系统消息'
 })
 
 /** 仅 image/file 且 content 为 FileContent 时用附件组件渲染；异常数据回退文本。 */
@@ -60,7 +80,11 @@ const timeText = computed(() =>
 </script>
 
 <template>
+  <div v-if="isSystem" class="message-system">
+    <span class="message-system__text">{{ systemText }}</span>
+  </div>
   <div
+    v-else
     class="message-bubble"
     :class="{
       'message-bubble--self': self,
@@ -95,6 +119,19 @@ const timeText = computed(() =>
 </template>
 
 <style scoped>
+.message-system {
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--space-2);
+}
+
+.message-system__text {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: center;
+  word-break: break-word;
+}
+
 .message-bubble {
   max-width: 72%;
   padding: var(--space-2) var(--space-3);

@@ -91,6 +91,7 @@ watch(
 function handleRemovedNotice(): void {
   const removedId = conversations.lastRemovedConversationId
   if (!removedId) return
+  showMembersPanel.value = false
   if (activeId.value === removedId) {
     pageNotice.value = '你已被移出群聊或已退出群聊'
     void router.replace({ name: 'chat' })
@@ -147,6 +148,13 @@ function onLeftGroup(conversationId: string): void {
 // 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
 const uploadBusy = ref(false)
 const uploadError = ref<string | null>(null)
+
+// 退出登录/切换账号：关闭群成员面板并清空页内提示（面板内部状态随 v-if 卸载重置）。
+watch(selfUserId, () => {
+  showMembersPanel.value = false
+  pageNotice.value = ''
+  uploadError.value = null
+})
 
 async function handleFileSelected(file: File): Promise<void> {
   const conversationId = activeId.value
