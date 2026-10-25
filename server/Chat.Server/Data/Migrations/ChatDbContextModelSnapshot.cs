@@ -147,7 +147,6 @@ namespace Chat.Server.Data.Migrations
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
                         .HasColumnName("role")
                         .HasDefaultValueSql("'member'");
@@ -279,6 +278,10 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("deleted_at");
 
+                    b.Property<string>("FileId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("file_id");
+
                     b.Property<string>("MsgType")
                         .IsRequired()
                         .HasColumnType("TEXT")
@@ -298,6 +301,9 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnName("seq");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("FileId")
+                        .HasDatabaseName("idx_messages_file_id");
 
                     b.HasIndex("ReplyTo")
                         .HasDatabaseName("idx_messages_reply_to");

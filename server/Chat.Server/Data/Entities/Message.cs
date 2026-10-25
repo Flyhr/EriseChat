@@ -29,6 +29,13 @@ public sealed class Message
     /// <summary>按 msg_type 解释的 JSON 文本（text 为 JSON 字符串，其余为 JSON 对象）。</summary>
     public string ContentJson { get; set; } = string.Empty;
 
+    /// <summary>
+    /// image/file 消息引用的文件 ID（files.id，可空）。text/system 为 NULL。
+    /// 支撑列：不建库级外键（SQLite 对已有表加 FK 需整表重建），引用完整性由应用层发送时校验、
+    /// 孤儿清理兜底；用于文件下载时的会话成员鉴权与孤儿清理（M3-01，不属于帧字段）。
+    /// </summary>
+    public string? FileId { get; set; }
+
     /// <summary>被回复消息 ID（自引用，可空）。</summary>
     public string? ReplyTo { get; set; }
 

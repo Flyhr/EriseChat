@@ -212,6 +212,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .HasColumnName("msg_type")
                 .HasConversion(LowercaseEnum<MessageType>());
             entity.Property(message => message.ContentJson).HasColumnName("content_json").IsRequired();
+            entity.Property(message => message.FileId).HasColumnName("file_id");
             entity.Property(message => message.ReplyTo).HasColumnName("reply_to");
             entity.Property(message => message.CreatedAt).HasColumnName("created_at");
             entity.Property(message => message.DeletedAt).HasColumnName("deleted_at");
@@ -220,6 +221,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.HasIndex(message => new { message.ConversationId, message.Seq })
                 .HasDatabaseName("idx_messages_conversation_seq");
             entity.HasIndex(message => message.ReplyTo).HasDatabaseName("idx_messages_reply_to");
+            // M3-01：image/file 消息引用的文件 ID（无外键，应用层保证引用完整性），索引用于下载鉴权与孤儿清理。
+            entity.HasIndex(message => message.FileId).HasDatabaseName("idx_messages_file_id");
             // EF 会为外键自动补索引；显式命名以与 schema.sql 的 idx_* 命名保持一致（M1-02 同步补入 schema.sql）。
             entity.HasIndex(message => message.SenderId).HasDatabaseName("idx_messages_sender_id");
 
