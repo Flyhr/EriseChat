@@ -445,6 +445,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 4. **图片**：客户端发送前压缩（最长边 1280px、约 ≤300KB）；图片消息与文件消息共用 FileContent。
 5. **存储**：`/data/files/yyyyMM/{fileId}{ext}`（逻辑路径，实际目录见 `appsettings.json`）；孤儿文件由后台任务清理。
 6. **引用持久化**：服务端在 `messages.file_id` 保存 image/file 消息引用的文件 ID（可空支撑列，不属于帧字段），用于下载时的会话成员鉴权与孤儿文件清理；帧格式不变。
+7. **发送校验与内容归一（v1）**：服务端校验 image/file 消息的 `content.fileId` 必须存在于 `files` 表，且 `files.owner_id` 为发送者本人；不存在或不属于本人时回 `error`（`VALIDATION_FAILED`，语义为「文件不存在或无权使用该文件」，不区分两种情况，也不单独下发 403）。落库与广播时 `content` 的 `name`/`size`/`mime` 以 `files` 记录（`original_name`/`size`/`mime`）为准，客户端传入值不作为权威值；同时把文件 ID 写入支撑列 `messages.file_id`（仅 image/file 消息非空，不属于帧字段）。
 
 示例（图片消息）：
 
@@ -509,3 +510,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M0-02） | 2026-10-25 | 初版：传输格式、17 个帧、错误码、三条时序、文件消息格式、兼容规则；`protocolVersion = 1` |
 | v1（M1-11 校准） | 2026-10-25 | 按 M1 实现补注（帧/字段语义未变）：纯文本消息上限 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）；`conv.list` 响应按最近消息时间倒序（无消息按创建时间）；M1 服务端已处理帧为 `auth`/`hello`/`ping`/`pong`/`message.send`/`message.ack`/`message.new`/`sync.request`/`sync.response`/`conv.list`/`conv.updated`/`kicked`/`error`，`read.update`/`read.updated`/`typing`/`presence` 保留至 M3（当前服务端按未处理帧忽略）；`protocolVersion` 仍为 `1` |
 | v1（M3-01 库表增量） | 2026-10-25 | 无帧变更；messages 表新增可选 file_id（引用 files.id，用于下载鉴权与孤儿清理），protocol/schema.sql 同步；protocolVersion 仍为 1 |
+| v1（M3-03 校准） | 2026-10-25 | 明确文件消息的 fileId 归属校验、content 以 files 记录为准、messages.file_id 落库；帧格式与 protocolVersion 不变 |
