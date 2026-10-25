@@ -8,11 +8,8 @@ public sealed class EmailOptions
 {
     public const string SectionName = "Email";
 
-    /// <summary>是否使用 Mock 发送：不真实发信，验证码固定为 FixedCode，Development 默认开启。</summary>
-    public bool MockEnabled { get; set; }
-
-    /// <summary>Mock 模式固定测试码（仅 Development/测试使用）。</summary>
-    public string FixedCode { get; set; } = "123456";
+    /// <summary>Mock 通道配置（仅 Development 使用：验证码输出到控制台，不真实发信）。</summary>
+    public MockEmailOptions Mock { get; set; } = new();
 
     /// <summary>SMTP 服务器地址（为空表示未配置）。</summary>
     public string SmtpHost { get; set; } = string.Empty;
@@ -34,4 +31,11 @@ public sealed class EmailOptions
 
     /// <summary>发件人显示名称。</summary>
     public string FromName { get; set; } = "EiseChat";
+}
+
+/// <summary>Mock 邮件通道配置（appsettings.Development.json 的 "Email:Mock" 节）。</summary>
+public sealed class MockEmailOptions
+{
+    /// <summary>固定测试码（6 位数字；仅 Development 生效，留空则随机生成）。</summary>
+    public string FixedCode { get; set; } = string.Empty;
 }

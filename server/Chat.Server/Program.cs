@@ -1,8 +1,11 @@
 using System.Reflection;
+using Chat.Server.Api;
 using Chat.Server.Common.Configuration;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
+using Chat.Server.Modules.Auth;
+using Chat.Server.Modules.Email;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -23,6 +26,20 @@ builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptio
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
+
+// 邮件通道：Development 用 Mock（验证码输出到控制台 stdout，不接真实邮件）；其它环境注册 SMTP 占位实现（M1-04 不真实发信）。
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddScoped<IEmailSender, MockEmailSender>();
+}
+else
+{
+    builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+}
+
+// 验证码发送（M1-04）：限流计数为单进程内存（重启清零）；EmailCodeService 负责生成/哈希/落库/发信。
+builder.Services.AddSingleton<EmailCodeRateLimiter>();
+builder.Services.AddScoped<EmailCodeService>();
 
 // 启动期需要绝对路径：先按配置读取一次（DI 中的 IOptions 需等 app 构建后才可读取）。
 var appOptions = builder.Configuration.GetSection(AppOptions.SectionName).Get<AppOptions>() ?? new AppOptions();
@@ -78,6 +95,9 @@ app.UseStatusCodePages(async context =>
 // 静态文件：前端构建产物复制到 wwwroot/（构建生成，不手改，见 docs/project-overview.md §7.4）。
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// 认证 REST：M1-04 起逐步接入（当前仅发送邮箱验证码）。
+app.MapAuthEndpoints();
 
 // 健康检查：部署与发版检查使用（docs/project-overview.md §13.3）；db 探活执行 SELECT 1。
 app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options) =>
