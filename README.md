@@ -10,7 +10,7 @@
 - **给谁用**：公司/团队内部，10~100 个账号、峰值 ≤100 在线；部署在云服务器 + 域名/HTTPS；不做公网运营，不需要 ICP/等保/实名/内容审核。
 - **交付物**：Windows 安装包 `EiseChat-Setup-x.y.z.exe`、Android APK `EiseChat-x.y.z.apk`（侧载安装）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）；iPhone 仅出方案、本期不实现。
 - **技术骨架**：一套 Vue 3 前端核心复用到 Web / Windows（Electron）/ Android（Capacitor）；服务端是唯一事实源，客户端 IndexedDB 只是缓存。
-- **当前状态**：✅ **M0 已完成（2026-10-25）** —— 工程基础配置（`.editorconfig`、`.gitignore`）、协议 [protocol/protocol.md](protocol/protocol.md)（17 类帧、错误码、兼容规则）、表结构 [protocol/schema.sql](protocol/schema.sql)（10 张表 DDL）已定稿；服务端（`server/`）三工程可构建，`GET /api/health` 冒烟通过；Web 前端（`apps/web`）`npm run build` 通过，`core/ws.ts` 连接状态机/心跳/退避与 `core/sync.ts` 去重排序/缺口检测接口就位；Windows（Electron）与 Android（Capacitor）壳工程可加载 Web 构建产物并完成启动冒烟。**M1 业务（邮箱验证码登录、WS 消息、SQLite 迁移）尚未开始**；NSIS 安装包与 APK 打包留 M4/M5 验证。部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接）。
+- **当前状态**：✅ **M1 已完成（2026-10-25）** —— M0 交付保持：工程基础配置（`.editorconfig`、`.gitignore`）、协议 [protocol/protocol.md](protocol/protocol.md)（17 类帧、错误码、兼容规则）、表结构 [protocol/schema.sql](protocol/schema.sql)（10 张表 DDL）、服务端三工程可构建、Web/桌面/移动端骨架可构建。M1 服务端已完成：邮箱验证码注册/验证码登录/密码登录/注销（JWT HS256 + `sessions` 撤销）、WebSocket `/ws`（10 秒认证、心跳、单活动连接踢旧）、`message.send/ack/new`（事务内 `seq` 严格 +1、`clientMsgId` 幂等、广播除发送连接）、`sync.request/response` 补拉（每会话每批 ≤200）、单聊会话创建/列表与 `conv.updated` 推送、EF Core + SQLite（WAL、初始迁移、启动自动迁移），另有 13 个 xUnit 用例与两阶段端到端脚本（100 条消息无丢无重、重启后补拉完整）。**M2（Web 登录/会话/聊天页面业务）尚未开始**；群聊/文件/已读/typing/presence（M3）、NSIS 安装包与 APK（M4/M5）待后续里程碑。部署参数已确认（2C4G 轻量 / 域名已有先用占位 / 注册不限制 / 邮件通道待接）。
 - **目标周期**：约 6~7 周 MVP（Windows 安装包 + Android APK + 服务器云端部署 + 可用聊天闭环；**iPhone 不在本期**）。
 - **成本**：软件授权 0 元；云服务器约 60~150 元/月（域名已有；TLS、邮件额度、Android 签名均免费）。
 
@@ -88,7 +88,7 @@ npm run dist                                    # NSIS 安装包
 cd apps/mobile && npm install && npm run sync
 ```
 
-> 完整命令清单见 [AGENTS.md](AGENTS.md) §8；前端功能与 M1 业务尚未实现，当前仅骨架可构建/启动。
+> 完整命令清单见 [AGENTS.md](AGENTS.md) §8；M1 服务端已完成（认证/WS/消息/补拉），Web 前端页面业务（登录/会话/聊天）按 M2 接入，当前保留骨架可构建/启动。
 
 ## 重要边界（内部版）
 
@@ -102,4 +102,4 @@ cd apps/mobile && npm install && npm run sync
 ## 下一步
 
 1. 无需再确认：按主计划 §12 已定参数开工（邮箱白名单留空 = 不限制、云服务器 2C4G 轻量、占位域名 `chat.example.com`、真实域名后替换）。
-2. M0 已收口，进入 M1：服务端先做邮箱验证码/登录 + JWT + WS/seq/ack/sync + SQLite 迁移，再做 Web 登录/会话/单聊闭环，最后本地两浏览器互发验证；`infra/` 与部署说明按 M4 里程碑补齐。
+2. M1 已收口，进入 M2：Web 登录/会话列表/聊天页接入 M1 的 REST 与 WS（发送队列、补拉、未读、连接状态），本地两浏览器互发验证；群聊/文件/已读/typing/presence 按 M3 补齐；`infra/` 与部署说明按 M4 里程碑补齐。

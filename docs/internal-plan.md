@@ -497,7 +497,7 @@ WebSocket 为消息主通道；REST 负责登录、历史兜底、文件与元�
 6. 本地验证：同一台电脑起服务，两个浏览器（或隐身窗口）用两个邮箱账号互发 100 条；停止服务 1 分钟后恢复，校验消息完整、无重复、顺序正确。
 7. 并行准备：云服务器（2C4G 轻量，选定地域）+ 占位域名（先用 `chat.example.com`，真实域名后替换）+ 邮箱发件通道；M4 再接入部署与 HTTPS。
 
-**当前仓库状态（2026-10-25，M0 已完成）**：已完成工程基础文件（`.editorconfig`、`.gitignore`）；协议 `protocol/protocol.md`（17 类帧、错误码、兼容规则）与 `protocol/schema.sql`（10 张表 DDL）；`server/` 三工程骨架（`dotnet build` 通过、`GET /api/health` 冒烟通过）；`apps/web` Vite + Vue 3 + TS + Pinia 骨架（`npm run build` 通过，`core/ws.ts` 连接状态机/心跳/退避与 `core/sync.ts` 去重排序/缺口检测接口就位）；`apps/desktop` Electron 壳（加载 Web 产物、单实例锁、安全默认，启动冒烟通过）与 `apps/mobile` Capacitor 壳（`android/` 已生成，`applicationId=com.eisechat.mobile`）。待完成：`infra/` 与部署说明（按 M4 里程碑补）；M1 业务（邮箱验证码/登录、WS 帧处理、SQLite 迁移）尚未开始；NSIS 安装包与 APK 打包留 M4/M5 验证。旧计划、可行性分析与 research 技术底稿均已清理；代码按 `docs/project-overview.md` §7 的目录架构新建。
+**当前仓库状态（2026-10-25，M1 已完成）**：M0 交付保持：工程基础文件（`.editorconfig`、`.gitignore`）、协议 `protocol/protocol.md`（17 类帧、错误码、兼容规则）、`protocol/schema.sql`（10 张表 DDL）、`server/` 三工程、`apps/web`/`apps/desktop`/`apps/mobile` 骨架（均可构建，壳工程启动冒烟通过）。M1 服务端已完成：邮件抽象（Development Mock，SMTP 待接）与邮箱验证码发送（HMAC 哈希存储、10 分钟有效、内存限流）、邮箱验证码注册/验证码登录、密码登录（PBKDF2-SHA256 ≥10 万次迭代）、JWT HS256（7 天）+ `sessions` 撤销、统一错误体（`{code,message,traceId}`）与异常中间件、EF Core + SQLite（WAL、`InitialCreate` 迁移、启动自动迁移）、WebSocket `/ws`（10 秒内 `auth`、25s 心跳、单活动连接踢旧、错误码/关闭码）、`message.send/ack/new`（事务内 `seq` 严格 +1、`clientMsgId` 幂等、广播除发送连接）、`sync.request/response`（每会话每批 ≤200、`hasMore` 追平）、单聊会话创建/列表与 `conv.updated` 推送、历史分页；`Chat.Server.Tests` 13 个 xUnit 用例通过（`dotnet test`），两阶段端到端脚本验证 100 条消息无丢无重与服务重启后补拉完整。待完成：`apps/web` 页面业务（M2）、群聊/文件/已读/typing/presence（M3）、`infra/` 与部署说明（M4）、NSIS/APK 打包（M4/M5）。旧计划、可行性分析与 research 技术底稿均已清理；代码按 `docs/project-overview.md` §7 的目录架构新建。
 
 ---
 
@@ -584,6 +584,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| —（M1 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M1 已完成：认证/WS/消息/补拉/单聊会话/EF 迁移与 xUnit、端到端验证全部落地；`protocol/protocol.md` 按实现补注（v1 文本消息上限 4096 字符、会话列表排序口径、M1 已实现帧范围）并在变更记录追加 v1（M1-11 校准）行；`README.md` 当前状态/下一步同步；需求、范围与计划版本（V2.3.2）未变 |
 | —（M0 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M0 已完成：协议/DDL、服务端、Web/桌面/移动端骨架全部落地并完成构建/冒烟验证，M1 业务与 `infra/`、部署说明待做；`AGENTS.md` §8 常用命令按实际工程补全（版本 1.5→1.6，规则内容不变）；`README.md` 当前状态/快速开始同步；需求、范围与计划版本（V2.3.2）未变 |
 | —（状态同步） | 2026-10-25 | §13「当前仓库状态」按实际进度更新：工程基础文件、协议/DDL、服务端骨架与健康检查已完成，Web/桌面/移动端骨架与 M1 待接入；需求、范围与计划版本（V2.3.2）未变 |
 | V2.3.2 | 2026-10-25 | 按 m00148 + m00204 补充工程规范与文档分工：测试文件统一放 `docs/test/`（不再建根级 `tests/` 目录）、默认不跑测试与分批最小范围、提交信息格式、交付说明五要素、禁止 `git push`/`git reset --hard`/`git clean -fd`；明确 `README.md` 为项目介绍唯一出处、`AGENTS.md` 仅放约束；同步 `AGENTS.md` 1.4（2026-10-25 再作去重修订至 1.5：删除 `docs/test/`、git 安全、密钥与禁用依赖清单的重复条目，统一归口 §2/§11.1/§7.6，规则内容不变）与 `docs/project-overview.md` V1.2；工程规范（测试位置/默认不跑测试/测试按缺口/提交信息格式/交付说明）列为硬规则 `AGENTS.md` §2.10 |

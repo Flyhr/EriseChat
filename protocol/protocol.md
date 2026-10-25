@@ -130,7 +130,7 @@
 | `clientMsgId` | string | 是 | 客户端生成的 UUID；会话内唯一，幂等键 |
 | `conversationId` | string | 是 | 目标会话 ID |
 | `msgType` | string | 是 | `text` / `image` / `file`；`system` 仅服务端生成，客户端发送会被拒绝 |
-| `content` | string / object | 是 | `text` 为字符串；`image` / `file` 为 FileContent（见 §7）；大小受服务端配置限制 |
+| `content` | string / object | 是 | `text` 为字符串；`image` / `file` 为 FileContent（见 §7）；大小受服务端配置限制（当前 v1 实现：纯文本 ≤ 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）） |
 | `replyTo` | string | 否 | 被回复消息的 `messageId` |
 
 `message.ack`（S→C，仅发送者连接收到）：
@@ -237,7 +237,7 @@ batch 对象：
 |---|---|---|---|
 | `type` | string | 是 | 固定 `conv.list` |
 | `reqId` | string | 否 | 回传请求的 `reqId` |
-| `conversations` | array | 是 | Conversation 数组（当前用户全部会话，按 `lastSeq` 变化/创建时间倒序） |
+| `conversations` | array | 是 | Conversation 数组（当前用户全部会话，按最近消息时间倒序；无消息的会话按创建时间倒序） |
 
 `conv.updated`（S→C 推送）：
 
@@ -506,3 +506,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1（M0-02） | 2026-10-25 | 初版：传输格式、17 个帧、错误码、三条时序、文件消息格式、兼容规则；`protocolVersion = 1` |
+| v1（M1-11 校准） | 2026-10-25 | 按 M1 实现补注（帧/字段语义未变）：纯文本消息上限 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）；`conv.list` 响应按最近消息时间倒序（无消息按创建时间）；M1 服务端已处理帧为 `auth`/`hello`/`ping`/`pong`/`message.send`/`message.ack`/`message.new`/`sync.request`/`sync.response`/`conv.list`/`conv.updated`/`kicked`/`error`，`read.update`/`read.updated`/`typing`/`presence` 保留至 M3（当前服务端按未处理帧忽略）；`protocolVersion` 仍为 `1` |
