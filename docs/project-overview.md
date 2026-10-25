@@ -524,7 +524,7 @@ infra/install.sh && infra/backup.sh              # 服务器安装 / 备份
 | M5 | 第 5 周 | Android APK（Capacitor + 自签名） | `apps/mobile/`、`infra/keys/`（gitignore） |
 | M6 | 第 6~7 周 | 100 连接稳定性、备份恢复演练、10~20 人内测 | `docs/test/`（不入库）、`docs/usage.md`、发版检查清单 |
 
-> 实现进度（2026-10-25）：M0~M4 已完成（M4：Windows 安装包 1.0.0、Electron 托盘/通知/窗口记忆/开机自启、`GET /download` 下载页与安装包分发、`infra/` 部署脚本与 `docs/deploy.md`），M5（Android APK）/M6（稳定性与恢复演练）未开始；详细状态见 `docs/internal-plan.md` §13。
+> 实现进度（2026-10-26）：M0~M5 已完成（M4：Windows 安装包 1.0.0、Electron 托盘/通知/窗口记忆/开机自启、`GET /download` 下载页与安装包分发、`infra/` 部署脚本与 `docs/deploy.md`；M5：Android APK 1.0.0（`com.eisechat.mobile`、minSdk 26、v2 自签名）已产出并可从下载页下载、图标/启动页、`infra/build-apk.sh` 与 `docs/mobile.md`），M6（稳定性与恢复演练）未开始；详细状态见 `docs/internal-plan.md` §13。
 
 P2 待办（语音消息、搜索、撤回、多设备、群已读、自动更新、Android 前台保活）**不提前做**，先保证 v1 闭环。
 
