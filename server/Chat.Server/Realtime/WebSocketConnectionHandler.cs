@@ -1,8 +1,11 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Modules.Conversations;
+using Chat.Server.Modules.Messages;
+using Chat.Server.Modules.Realtime;
 using Microsoft.Extensions.Logging;
 
 namespace Chat.Server.Realtime;
@@ -16,18 +19,25 @@ public sealed class WebSocketConnectionHandler
     /// <summary>连接建立后必须在此时间内发送 auth 首帧。</summary>
     public const int AuthTimeoutMilliseconds = 10_000;
 
+    /// <summary>typing 转发节流：每连接 × 每会话 1 秒，超频静默丢弃、不回 error。</summary>
+    public const long TypingThrottleMilliseconds = 1_000;
+
     private readonly ConnectionManager _connections;
+    private readonly PresenceService _presence;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<WebSocketConnectionHandler> _logger;
+    private readonly ConcurrentDictionary<(string ConnectionId, string ConversationId), long> _typingThrottle = new();
 
     public WebSocketConnectionHandler(
         ConnectionManager connections,
+        PresenceService presence,
         IServiceScopeFactory scopeFactory,
         ILoggerFactory loggerFactory,
         ILogger<WebSocketConnectionHandler> logger)
     {
         _connections = connections;
+        _presence = presence;
         _scopeFactory = scopeFactory;
         _loggerFactory = loggerFactory;
         _logger = logger;
@@ -77,6 +87,8 @@ public sealed class WebSocketConnectionHandler
             }
 
             var userId = authResult.UserId!;
+            // 记录注册前的在线状态，用于判定 presence 是否 0→1（单活动连接踢旧时不算重新上线）。
+            var hadOnlineConnections = _connections.GetConnections(userId).Count > 0;
             connection.MarkAuthenticated(userId, auth.DeviceId!.Trim());
             _connections.Register(connection);
 
@@ -96,6 +108,11 @@ public sealed class WebSocketConnectionHandler
                 connection.DeviceId,
                 connection.ConnectionId);
 
+            if (!hadOnlineConnections)
+            {
+                await _presence.OnConnectedAsync(userId, connectionAborted);
+            }
+
             await RunMessageLoopAsync(connection, connectionAborted);
         }
         catch (OperationCanceledException)
@@ -114,6 +131,20 @@ public sealed class WebSocketConnectionHandler
         {
             _connections.Unregister(connection);
             _logger.LogDebug("WS 连接结束：{ConnectionId}（用户 {UserId}）", connection.ConnectionId, connection.UserId);
+
+            // presence 下线：仅当该用户已无任何在线连接时推送（被踢旧连接此时新连接仍在，不推）。
+            if (connection.UserId is { Length: > 0 } disconnectedUserId &&
+                _connections.GetConnections(disconnectedUserId).Count == 0)
+            {
+                try
+                {
+                    await _presence.OnDisconnectedAsync(disconnectedUserId, CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogDebug(exception, "presence 下线推送失败：用户 {UserId}", disconnectedUserId);
+                }
+            }
         }
     }
 
@@ -242,11 +273,17 @@ public sealed class WebSocketConnectionHandler
                 case SyncRequestFrame syncRequest:
                     await HandleSyncAsync(connection, syncRequest, connectionAborted);
                     break;
+                case ReadUpdateFrame readUpdate:
+                    await HandleReadUpdateAsync(connection, readUpdate, connectionAborted);
+                    break;
+                case TypingClientFrame typing:
+                    await HandleTypingAsync(connection, typing, connectionAborted);
+                    break;
                 case AuthFrame:
                     _logger.LogDebug("WS 已认证连接重复发送 auth 帧，已忽略（连接 {ConnectionId}）", connection.ConnectionId);
                     break;
                 default:
-                    // read.update / typing / presence 等业务帧在 M1-10+ 逐批接入；当前忽略但不断连。
+                    // presence 为服务端推送帧（C→S 方向按「忽略并记 debug」处理，protocol §4.7）；未知帧不断连。
                     _logger.LogDebug(
                         "WS 帧类型 {FrameType} 暂未实现，已忽略（连接 {ConnectionId}）",
                         parsed.Frame.Type,
@@ -298,6 +335,145 @@ public sealed class WebSocketConnectionHandler
         using var scope = _scopeFactory.CreateScope();
         var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
         await hub.HandleSyncAsync(connection, request, connectionAborted);
+    }
+
+    /// <summary>read.update（M3-05）：只增不减更新自己的已读游标；单聊推 read.updated 给对方（不回显）。</summary>
+    private async Task HandleReadUpdateAsync(
+        WsConnection connection,
+        ReadUpdateFrame request,
+        CancellationToken connectionAborted)
+    {
+        if (string.IsNullOrWhiteSpace(connection.UserId))
+        {
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var reads = scope.ServiceProvider.GetRequiredService<ReadService>();
+            var result = await reads.UpdateReadAsync(connection.UserId, request.ConversationId, request.LastReadSeq, connectionAborted);
+
+            // 只增不减：游标未推进（重复/更小的上报）不广播，避免对方收到无变化的 read.updated。
+            if (result.Changed && !string.IsNullOrEmpty(result.OtherUserId))
+            {
+                var frame = new ReadUpdatedFrame(request.ConversationId, connection.UserId, result.LastReadSeq);
+                foreach (var peer in _connections.GetConnections(result.OtherUserId))
+                {
+                    try
+                    {
+                        await peer.SendFrameAsync(frame, CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogDebug(exception, "read.updated 推送失败：连接 {ConnectionId}", peer.ConnectionId);
+                    }
+                }
+            }
+
+            _logger.LogInformation(
+                "read.update：会话 {ConversationId}，用户 {UserId}，lastReadSeq {LastReadSeq}（连接 {ConnectionId}）",
+                request.ConversationId,
+                connection.UserId,
+                result.LastReadSeq,
+                connection.ConnectionId);
+        }
+        catch (ApiException exception)
+        {
+            await connection.SendErrorAsync(exception.Code, exception.Message, request.ReqId, connectionAborted);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "read.update 处理异常（连接 {ConnectionId}）", connection.ConnectionId);
+            await connection.SendErrorAsync(ErrorCodes.InternalError, "服务端内部错误", request.ReqId, connectionAborted);
+        }
+    }
+
+    /// <summary>typing（M3-05）：成员校验 → 1 秒节流 → 转发给会话内其他在线成员（跳过发送连接）。</summary>
+    private async Task HandleTypingAsync(
+        WsConnection connection,
+        TypingClientFrame request,
+        CancellationToken connectionAborted)
+    {
+        if (string.IsNullOrWhiteSpace(connection.UserId))
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyList<string> memberUserIds;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var conversations = scope.ServiceProvider.GetRequiredService<ConversationService>();
+                memberUserIds = await conversations.GetMemberUserIdsAsync(connection.UserId, request.ConversationId, connectionAborted);
+            }
+
+            var now = Environment.TickCount64;
+            var throttleKey = (connection.ConnectionId, request.ConversationId);
+            if (_typingThrottle.TryGetValue(throttleKey, out var lastForwardAt) &&
+                now - lastForwardAt < TypingThrottleMilliseconds)
+            {
+                return;
+            }
+
+            _typingThrottle[throttleKey] = now;
+            if (_typingThrottle.Count > 5_000)
+            {
+                var cutoff = now - 60_000;
+                foreach (var pair in _typingThrottle)
+                {
+                    if (pair.Value < cutoff)
+                    {
+                        _typingThrottle.TryRemove(pair.Key, out _);
+                    }
+                }
+            }
+
+            var frame = new TypingServerFrame(request.ConversationId, connection.UserId);
+            var forwarded = 0;
+            foreach (var memberId in memberUserIds)
+            {
+                if (string.Equals(memberId, connection.UserId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                foreach (var peer in _connections.GetConnections(memberId))
+                {
+                    if (ReferenceEquals(peer, connection))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        await peer.SendFrameAsync(frame, CancellationToken.None);
+                        forwarded++;
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogDebug(exception, "typing 推送失败：连接 {ConnectionId}", peer.ConnectionId);
+                    }
+                }
+            }
+
+            _logger.LogDebug(
+                "typing 转发：会话 {ConversationId}，用户 {UserId} → {Forwarded} 条连接（连接 {ConnectionId}）",
+                request.ConversationId,
+                connection.UserId,
+                forwarded,
+                connection.ConnectionId);
+        }
+        catch (ApiException exception)
+        {
+            await connection.SendErrorAsync(exception.Code, exception.Message, request.ReqId, connectionAborted);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "typing 处理异常（连接 {ConnectionId}）", connection.ConnectionId);
+            await connection.SendErrorAsync(ErrorCodes.InternalError, "服务端内部错误", request.ReqId, connectionAborted);
+        }
     }
 
     private async Task KickExistingAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)

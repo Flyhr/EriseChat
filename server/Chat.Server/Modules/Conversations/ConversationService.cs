@@ -359,7 +359,8 @@ public sealed class ConversationService
                 UserId = candidateId,
                 Role = MemberRole.Member,
                 JoinedAt = now,
-                LastReadSeq = 0,
+                // M3-05：新成员加入前历史消息不计未读，加入系统消息计 1 条未读（protocol §4.6）。
+                LastReadSeq = conversation.LastSeq,
             };
             members.Add(newMember);
             _db.ConversationMembers.Add(newMember);
@@ -622,6 +623,37 @@ public sealed class ConversationService
             string.IsNullOrEmpty(message.ClientMsgId) ? null : message.ClientMsgId,
             message.ReplyTo,
             message.DeletedAt);
+    }
+
+    /// <summary>
+    /// 取会话全部成员 ID（M3-05 typing 转发用）：会话不存在 NOT_FOUND；当前用户不是成员 NOT_MEMBER。
+    /// </summary>
+    public async Task<IReadOnlyList<string>> GetMemberUserIdsAsync(
+        string userId,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            throw ApiException.ValidationFailed("conversationId 不能为空");
+        }
+
+        if (!await _db.Conversations.AnyAsync(conversation => conversation.Id == conversationId, cancellationToken))
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        var memberUserIds = await _db.ConversationMembers.AsNoTracking()
+            .Where(member => member.ConversationId == conversationId)
+            .Select(member => member.UserId)
+            .ToListAsync(cancellationToken);
+
+        if (!memberUserIds.Contains(userId, StringComparer.Ordinal))
+        {
+            throw new ApiException(ErrorCodes.NotMember, "不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        return memberUserIds;
     }
 
     /// <summary>单聊唯一键：两个 UUID 升序（Ordinal）后以 ':' 拼接，与 schema.sql 约定一致。</summary>

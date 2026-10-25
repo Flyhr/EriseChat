@@ -11,6 +11,7 @@ using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
 using Chat.Server.Modules.Messages;
+using Chat.Server.Modules.Realtime;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
@@ -78,6 +79,10 @@ builder.Services.AddSingleton<ConversationRealtimeNotifier>();
 // 消息（M1-08）：发送/补拉业务在 MessageService，WS 帧编排在 Realtime.MessageHub。
 builder.Services.AddScoped<MessageService>();
 builder.Services.AddScoped<MessageHub>();
+
+// 已读与在线状态（M3-05）：read.update 只增不减落库；presence 由连接生命周期触发推送。
+builder.Services.AddScoped<ReadService>();
+builder.Services.AddSingleton<PresenceService>();
 
 // 文件（M3-02）：磁盘存储为单例（无状态，根目录固定）；上传/下载业务按请求作用域访问数据库。
 builder.Services.AddSingleton<FileStorage>();
