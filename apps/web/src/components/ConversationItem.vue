@@ -3,8 +3,8 @@ import { computed } from 'vue'
 import type { Conversation } from '../types/frames'
 import Avatar from './Avatar.vue'
 
-// 会话列表项（纯展示，M2-04 接线）：标题（单聊显示对方昵称/群聊标题）、最后一条消息摘要、
-// 时间、未读角标（M2-05 起本地已读游标计算；M3 接入服务端 read.* 后改用服务端未读）。
+// 会话列表项（纯展示）：标题（单聊显示对方昵称/群聊显示群名与成员数）、最后一条消息摘要、
+// 时间、未读角标。群聊消息摘要区分 system/image/file（M3-08）。
 const props = defineProps<{
   conversation: Conversation
   /** 当前登录用户 ID：用于单聊时找出对方昵称 */
@@ -24,18 +24,51 @@ const otherMember = computed(() => {
 })
 
 const title = computed(() => {
-  if (props.conversation.type === 'group') return props.conversation.title || '群聊'
-  return otherMember.value?.displayName ?? props.conversation.title ?? '单聊会话'
+  const conversation = props.conversation
+  if (conversation.type === 'group') {
+    const name = conversation.title || '群聊'
+    return `${name}（${conversation.members.length}）`
+  }
+  return otherMember.value?.displayName ?? conversation.title ?? '单聊会话'
 })
 
 const avatarFileId = computed(() => otherMember.value?.avatarFileId)
 
+/** 系统事件兜底文案（服务端 text 缺失时使用；protocol.md §4.3 的四个事件）。 */
+const SYSTEM_EVENT_FALLBACK: Record<string, string> = {
+  'group.created': '群聊已创建',
+  'member.joined': '有新成员加入群聊',
+  'member.left': '有成员退出群聊',
+  'member.removed': '有成员被移出群聊',
+}
+
+function systemPreview(content: { event?: string; text?: string }): string {
+  if (content.text) return truncate(content.text)
+  return SYSTEM_EVENT_FALLBACK[content.event ?? ''] ?? '系统消息'
+}
+
 const preview = computed(() => {
   const message = props.conversation.lastMessage
   if (!message) return '暂无消息'
-  if (typeof message.content === 'string') return truncate(message.content)
-  if ('fileId' in message.content) return `[文件] ${message.content.name}`
-  return message.content.text ? truncate(message.content.text) : '[系统消息]'
+
+  switch (message.msgType) {
+    case 'image':
+      return '[图片]'
+    case 'file':
+      return typeof message.content === 'object' &&
+        message.content !== null &&
+        'name' in message.content
+        ? `[文件] ${String(message.content.name)}`
+        : '[文件]'
+    case 'system':
+      return typeof message.content === 'object' &&
+        message.content !== null &&
+        'event' in message.content
+        ? systemPreview(message.content)
+        : '[系统消息]'
+    default:
+      return typeof message.content === 'string' ? truncate(message.content) : '暂无消息'
+  }
 })
 
 const timeText = computed(() => formatTime(props.conversation.lastMessage?.createdAt ?? props.conversation.createdAt))

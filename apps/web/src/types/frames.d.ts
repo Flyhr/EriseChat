@@ -214,7 +214,13 @@ export interface ConvListResponseFrame extends FrameBase {
 
 export interface ConvUpdatedFrame extends FrameBase {
   type: 'conv.updated'
+  /** 发生变化的会话（被移出/主动退出场景可为空数组） */
   conversations: Conversation[]
+  /**
+   * 当前连接用户被移出/主动退出群聊的会话 ID 列表（protocol.md §4.5）。
+   * 客户端收到后移除会话列表项、消息缓存与本地已读/补拉游标；此时 conversations 可为空数组。
+   */
+  removedConversationIds?: string[]
 }
 
 export interface ReadUpdateFrame extends FrameBase {

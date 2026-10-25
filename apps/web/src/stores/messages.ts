@@ -14,7 +14,15 @@ import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from 
 import { messagesApi } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
 import { config } from '../core/config'
-import { getMessagesByConversation, getMeta, saveMessages, setMeta } from '../core/db'
+import {
+  deleteRecord,
+  getMessagesByConversation,
+  getMeta,
+  saveMessages,
+  setMeta,
+  STORE_CONVERSATIONS,
+  STORE_MESSAGES,
+} from '../core/db'
 import { useConversationsStore } from './conversations'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
@@ -598,6 +606,53 @@ export const useMessagesStore = defineStore('messages', () => {
     realtimeReady = false
   }
 
+  /** 从 key→value 映射中移除某个 key（不存在时原样返回，避免无意义的新对象）。 */
+  function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+    if (!(key in record)) return record
+    const next = { ...record }
+    delete next[key]
+    return next
+  }
+
+  /**
+   * 会话已被移出/主动退出（conv.updated.removedConversationIds）：
+   * 清理该会话的本地消息、补拉游标、待发消息与重试定时器，并删除 IndexedDB 缓存。
+   * 事实源在服务端；若以后重新入群，会重新拉取，不会丢数据。
+   */
+  function removeConversation(conversationId: string): void {
+    for (const pending of pendingByConversation.value[conversationId] ?? []) {
+      clearTimers(pending.clientMsgId)
+    }
+
+    byConversation.value = omitKey(byConversation.value, conversationId)
+    lastSeqByConversation.value = omitKey(lastSeqByConversation.value, conversationId)
+    pendingByConversation.value = omitKey(pendingByConversation.value, conversationId)
+    hasMoreByConversation.value = omitKey(hasMoreByConversation.value, conversationId)
+    loadedConversations.value = omitKey(loadedConversations.value, conversationId)
+    loadingInitialByConversation.value = omitKey(loadingInitialByConversation.value, conversationId)
+    loadingMoreByConversation.value = omitKey(loadingMoreByConversation.value, conversationId)
+
+    void (async () => {
+      try {
+        const cached = await getMessagesByConversation(conversationId)
+        await Promise.all(
+          cached.map((message) => deleteRecord(STORE_MESSAGES, message.messageId)),
+        )
+        const lastSeqMap = (await getMeta<Record<string, number>>(META_LAST_SEQ_KEY)) ?? {}
+        if (conversationId in lastSeqMap) {
+          await setMeta(META_LAST_SEQ_KEY, omitKey(lastSeqMap, conversationId))
+        }
+        await deleteRecord(STORE_CONVERSATIONS, conversationId)
+      } catch (error) {
+        console.warn('[messages] 清理被移除会话缓存失败', error)
+      }
+    })()
+  }
+
+  // 会话被移出/退出时，由 conversations store 回调清理本 store 的消息缓存
+  // （反过来让 conversations import messages 会形成循环依赖，故用回调注册）。
+  useConversationsStore().onConversationRemoved(removeConversation)
+
   function clear(): void {
     const tracked = new Set([...ackTimers.keys(), ...retryTimers.keys()])
     for (const clientMsgId of tracked) clearTimers(clientMsgId)
@@ -638,6 +693,7 @@ export const useMessagesStore = defineStore('messages', () => {
     sendText,
     sendFileMessage,
     retrySend,
+    removeConversation,
     subscribeRealtime,
     clear,
   }

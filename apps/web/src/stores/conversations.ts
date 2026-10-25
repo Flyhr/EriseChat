@@ -4,10 +4,13 @@ import type { Conversation, Message } from '../types/frames'
 import { conversationsApi } from '../api/conversations'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
-import { getConversations, saveConversation } from '../core/db'
+import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
 
 /** 本地已读游标持久化 key：M2 阶段先本地记录，M3 接入 read.update 后以服务端 last_read_seq 为准。 */
 const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
+
+/** 被移出/退出群聊后的缓存清理回调（messages store 注册；避免两个 store 循环 import）。 */
+type ConversationRemovedHandler = (conversationId: string) => void
 
 function readStoredReadSeq(): Record<string, number> {
   try {
@@ -51,10 +54,15 @@ export const useConversationsStore = defineStore('conversations', () => {
   const loaded = ref(false)
   /** 本地已读游标：会话未读 = lastSeq − max(本地已读, 服务端 last_read_seq)。 */
   const lastReadSeqByConversation = ref<Record<string, number>>(readStoredReadSeq())
+  /** 最近一次收到 removedConversationIds 的会话（Chat 页据此跳回 /chat 并提示；消费后调用 clearRemovedNotice 清空）。 */
+  const lastRemovedConversationId = ref<string | null>(null)
+  /** 最近一批被移出/退出的会话 ID（同一帧可能包含多个）。 */
+  const removedConversationIds = ref<string[]>([])
+  const removedHandlers: ConversationRemovedHandler[] = []
   let unsubscribeFrame: (() => void) | null = null
   let cacheRestored = false
 
-  /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算，M3 接入已读后使用） */
+  /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算）。 */
   const sorted = computed(() =>
     [...items.value].sort((a, b) => {
       const aTime = a.lastMessage?.createdAt ?? a.createdAt
@@ -64,6 +72,7 @@ export const useConversationsStore = defineStore('conversations', () => {
   )
 
   function upsert(conversations: readonly Conversation[]): void {
+    if (conversations.length === 0) return
     const byId = new Map(items.value.map((item) => [item.conversationId, item]))
     for (const conversation of conversations) byId.set(conversation.conversationId, conversation)
     items.value = [...byId.values()]
@@ -142,6 +151,56 @@ export const useConversationsStore = defineStore('conversations', () => {
     }
   }
 
+  /** 注册「会话被移出/退出」的缓存清理回调（messages store 在初始化时注册一次）。 */
+  function onConversationRemoved(handler: ConversationRemovedHandler): void {
+    if (!removedHandlers.includes(handler)) removedHandlers.push(handler)
+  }
+
+  /**
+   * 处理 conv.updated.removedConversationIds（protocol.md §4.5）：
+   * 从列表移除、清本地已读游标与 IndexedDB 会话缓存，并通知 messages store 清消息缓存；
+   * 记录 lastRemovedConversationId 供 Chat 页跳转/提示。
+   */
+  function handleRemovedConversations(conversationIds: readonly string[]): void {
+    const removed = conversationIds.filter(
+      (conversationId) => typeof conversationId === 'string' && conversationId.length > 0,
+    )
+    if (removed.length === 0) return
+
+    const removedSet = new Set(removed)
+    items.value = items.value.filter((item) => !removedSet.has(item.conversationId))
+
+    const nextReadSeq = { ...lastReadSeqByConversation.value }
+    for (const conversationId of removed) delete nextReadSeq[conversationId]
+    lastReadSeqByConversation.value = nextReadSeq
+    persistReadSeq(nextReadSeq)
+
+    for (const conversationId of removed) {
+      void deleteRecord(STORE_CONVERSATIONS, conversationId).catch(() => {
+        // 缓存删除失败不影响主流程（下次全量加载会覆盖）。
+      })
+    }
+
+    removedConversationIds.value = removed
+    lastRemovedConversationId.value = removed[removed.length - 1] ?? null
+
+    for (const conversationId of removed) {
+      for (const handler of removedHandlers) {
+        try {
+          handler(conversationId)
+        } catch (error) {
+          console.warn('[conversations] 清理被移除会话缓存失败', error)
+        }
+      }
+    }
+  }
+
+  /** 清除「被移出/退出」提示状态（Chat 页处理完跳转后调用）。 */
+  function clearRemovedNotice(): void {
+    lastRemovedConversationId.value = null
+    removedConversationIds.value = []
+  }
+
   /** 从服务端加载当前用户会话列表（幂等：已加载且非强制时直接返回）。 */
   async function load(force = false): Promise<void> {
     if (loading.value) return
@@ -167,14 +226,25 @@ export const useConversationsStore = defineStore('conversations', () => {
     return conversation
   }
 
+  /** 创建群聊（M3-08）：成功后写入列表并返回会话（调用方负责跳转）。 */
+  async function createGroup(title: string, memberIds: string[]): Promise<Conversation> {
+    const conversation = await conversationsApi.createGroup(title, memberIds)
+    upsert([conversation])
+    return conversation
+  }
+
   /**
-   * 订阅 WS `conv.updated`：其他端新建会话/会话信息变化时，用服务端推送的完整会话对象更新列表
+   * 订阅 WS `conv.updated`：会话信息变化时 upsert；被移出/退出时按 removedConversationIds 清理
    * （protocol.md §4.5；重复调用只注册一次）。
    */
   function subscribeRealtime(): () => void {
     if (unsubscribeFrame !== null) return unsubscribeFrame
     unsubscribeFrame = chatWs.on('frame', (frame) => {
-      if (frame.type === 'conv.updated') upsert(frame.conversations)
+      if (frame.type !== 'conv.updated') return
+      if (frame.removedConversationIds && frame.removedConversationIds.length > 0) {
+        handleRemovedConversations(frame.removedConversationIds)
+      }
+      upsert(frame.conversations)
     })
     return unsubscribeFrame
   }
@@ -185,6 +255,8 @@ export const useConversationsStore = defineStore('conversations', () => {
     cacheRestored = false
     // 清除本地已读游标（含 localStorage），避免账号切换后沿用上一位用户的已读状态（M3-00）。
     lastReadSeqByConversation.value = {}
+    lastRemovedConversationId.value = null
+    removedConversationIds.value = []
     try {
       window.localStorage.removeItem(READ_SEQ_STORAGE_KEY)
     } catch {
@@ -201,14 +273,20 @@ export const useConversationsStore = defineStore('conversations', () => {
     sorted,
     loading,
     loaded,
+    lastRemovedConversationId,
+    removedConversationIds,
     upsert,
     applyMessage,
     getById,
     unreadOf,
     markRead,
     restoreFromCache,
+    onConversationRemoved,
+    handleRemovedConversations,
+    clearRemovedNotice,
     load,
     createDirect,
+    createGroup,
     subscribeRealtime,
     clear,
   }
