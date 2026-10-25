@@ -30,7 +30,8 @@ public sealed record MessageHistoryPage(IReadOnlyList<ProtocolMessage> Messages,
 /// 消息核心业务（M1-08，计划 §4.3/§4.4 + AGENTS §5）：
 /// 1) message.send：成员校验 → 事务内分配严格 +1 seq → 落库（唯一约束幂等）→ 更新 last_message_id；
 /// 2) sync.request：按游标补拉，每会话每批 ≤200 条、按 seq 升序；
-/// 3) REST 历史分页：beforeSeq + limit（默认 50、上限 200），按 seq 升序返回。
+/// 3) REST 历史分页：beforeSeq + limit（默认 50、上限 200），按 seq 升序返回；
+/// 4) M3-03：image/file 消息校验 fileId 归属、content 以 files 记录归一，并落 messages.file_id。
 /// </summary>
 public sealed class MessageService
 {
@@ -68,7 +69,8 @@ public sealed class MessageService
     {
         var conversationId = ValidateId(request.ConversationId, "conversationId");
         var clientMsgId = ValidateId(request.ClientMsgId, "clientMsgId");
-        ValidateContent(request);
+        // M3-03：image/file 需校验文件存在且属于发送者；content 的 name/size/mime 以 files 记录为准。
+        var normalized = await NormalizeContentAsync(request, senderId, cancellationToken);
         var replyTo = string.IsNullOrWhiteSpace(request.ReplyTo) ? null : ValidateId(request.ReplyTo, "replyTo");
 
         // SQLite 默认延迟事务在并发写入时可能因锁升级冲突返回 SQLITE_BUSY / SQLITE_LOCKED（5/6），
@@ -78,7 +80,7 @@ public sealed class MessageService
         {
             try
             {
-                return await SendOnceAsync(senderId, conversationId, clientMsgId, replyTo, request, cancellationToken);
+                return await SendOnceAsync(senderId, conversationId, clientMsgId, replyTo, request, normalized, cancellationToken);
             }
             catch (Exception exception) when (attempt < maxAttempts && IsSqliteBusy(exception))
             {
@@ -94,6 +96,7 @@ public sealed class MessageService
         string clientMsgId,
         string? replyTo,
         MessageSendFrame request,
+        NormalizedSendContent normalized,
         CancellationToken cancellationToken)
     {
         var conversation = await EnsureMemberAsync(senderId, conversationId, cancellationToken);
@@ -130,8 +133,9 @@ public sealed class MessageService
                 SenderId = senderId,
                 ClientMsgId = clientMsgId,
                 Seq = seq,
-                MsgType = request.MsgType,
-                ContentJson = request.Content.Raw.GetRawText(),
+                MsgType = normalized.MsgType,
+                ContentJson = normalized.Content.Raw.GetRawText(),
+                FileId = normalized.FileId,
                 ReplyTo = replyTo,
                 CreatedAt = now,
             };
@@ -306,7 +310,17 @@ public sealed class MessageService
         return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
-    private void ValidateContent(MessageSendFrame request)
+    /// <summary>规范化后的发送内容：image/file 的 content 与 messages.file_id 以 files 记录为准（M3-03）。</summary>
+    private sealed record NormalizedSendContent(MessageContent Content, string? FileId, MessageType MsgType);
+
+    /// <summary>
+    /// 校验并归一 content（M3-03）：text 原样返回；image/file 校验文件存在且属于发送者，
+    /// 并用 files 记录重写 name/size/mime（客户端传入值不作为权威值）。
+    /// </summary>
+    private async Task<NormalizedSendContent> NormalizeContentAsync(
+        MessageSendFrame request,
+        string senderId,
+        CancellationToken cancellationToken)
     {
         if (request.MsgType == MessageType.System)
         {
@@ -340,7 +354,7 @@ public sealed class MessageService
                         StatusCodes.Status400BadRequest);
                 }
 
-                break;
+                return new NormalizedSendContent(request.Content, FileId: null, MessageType.Text);
 
             case MessageType.Image:
             case MessageType.File:
@@ -349,21 +363,31 @@ public sealed class MessageService
                     throw ApiException.ValidationFailed($"{request.MsgType.ToString().ToLowerInvariant()} 消息 content 必须是文件对象");
                 }
 
-                var file = request.Content.AsFileContent();
-                if (file is null ||
-                    string.IsNullOrWhiteSpace(file.FileId) ||
-                    string.IsNullOrWhiteSpace(file.Name) ||
-                    string.IsNullOrWhiteSpace(file.Mime))
+                var content = request.Content.AsFileContent();
+                if (content is null ||
+                    string.IsNullOrWhiteSpace(content.FileId) ||
+                    string.IsNullOrWhiteSpace(content.Name) ||
+                    string.IsNullOrWhiteSpace(content.Mime))
                 {
                     throw ApiException.ValidationFailed("文件对象字段不完整（fileId/name/size/mime）");
                 }
 
-                if (file.Size < 0)
+                // size 字段必须存在且非负（结构校验）；真实大小以 files 记录为准，客户端传值不采信。
+                if (content.Size < 0)
                 {
                     throw ApiException.ValidationFailed("文件大小不能为负数");
                 }
 
-                if (file.Size > _appOptions.UploadMaxBytes)
+                var fileId = ValidateId(content.FileId, "fileId");
+                var storedFile = await _db.Files.AsNoTracking()
+                    .FirstOrDefaultAsync(file => file.Id == fileId, cancellationToken);
+                if (storedFile is null ||
+                    !string.Equals(storedFile.OwnerId, senderId, StringComparison.Ordinal))
+                {
+                    throw ApiException.ValidationFailed("文件不存在或无权使用该文件");
+                }
+
+                if (storedFile.Size > _appOptions.UploadMaxBytes)
                 {
                     throw new ApiException(
                         ErrorCodes.MessageTooLarge,
@@ -371,7 +395,11 @@ public sealed class MessageService
                         StatusCodes.Status400BadRequest);
                 }
 
-                break;
+                var normalizedFile = new FileContent(storedFile.Id, storedFile.OriginalName, storedFile.Size, storedFile.Mime);
+                return new NormalizedSendContent(
+                    MessageContent.FromObject(normalizedFile),
+                    storedFile.Id,
+                    request.MsgType);
 
             default:
                 throw ApiException.ValidationFailed("不支持的 msgType");
