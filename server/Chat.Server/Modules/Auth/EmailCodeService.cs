@@ -1,10 +1,9 @@
 using System.Globalization;
-using System.Net.Mail;
 using System.Security.Cryptography;
-using System.Text;
 using Chat.Protocol;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
+using Chat.Server.Common.Security;
 using Chat.Server.Data;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Email;
@@ -69,7 +68,7 @@ public sealed class EmailCodeService
         string? ip,
         CancellationToken cancellationToken)
     {
-        if (!TryNormalizeEmail(rawEmail, out var email))
+        if (!EmailAddress.TryNormalize(rawEmail, out var email))
         {
             throw ApiException.ValidationFailed("邮箱格式不正确");
         }
@@ -89,7 +88,7 @@ public sealed class EmailCodeService
             Id = Guid.NewGuid().ToString("D"),
             Email = email,
             Purpose = purpose,
-            CodeHash = HashCode(email, purpose, code),
+            CodeHash = EmailCodeHasher.Hash(_jwtOptions.Key, email, purpose, code),
             ExpiresAt = now + ExpiresMinutes * 60_000L,
             Attempts = 0,
             CreatedAt = now,
@@ -176,20 +175,6 @@ public sealed class EmailCodeService
         return RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>验证码哈希：HMAC-SHA256(服务端密钥, email + purpose + code)，只存 Base64 结果。</summary>
-    private string HashCode(string email, EmailCodePurpose purpose, string code)
-    {
-        var key = _jwtOptions.Key;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            throw new InvalidOperationException("JWT 密钥为空，无法计算验证码哈希（首次启动应已生成 secrets.json）");
-        }
-
-        var payload = $"{email}\n{purpose.ToString().ToLowerInvariant()}\n{code}";
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
-        return Convert.ToBase64String(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload)));
-    }
-
     private ApiException BuildRateLimitException(EmailCodeRateLimitRejection rejection) => rejection switch
     {
         EmailCodeRateLimitRejection.EmailTooFrequent => new ApiException(
@@ -206,30 +191,6 @@ public sealed class EmailCodeService
             StatusCodes.Status429TooManyRequests),
         _ => new ApiException(ErrorCodes.EmailRateLimited, "发送过于频繁，请稍后再试", StatusCodes.Status429TooManyRequests),
     };
-
-    private static bool TryNormalizeEmail(string? rawEmail, out string normalized)
-    {
-        normalized = string.Empty;
-        if (string.IsNullOrWhiteSpace(rawEmail))
-        {
-            return false;
-        }
-
-        var candidate = rawEmail.Trim().ToLowerInvariant();
-        if (candidate.Length > 254)
-        {
-            return false;
-        }
-
-        if (!MailAddress.TryCreate(candidate, out var parsed) ||
-            !string.Equals(parsed.Address, candidate, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        normalized = candidate;
-        return true;
-    }
 
     private static bool IsSixDigitCode(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&

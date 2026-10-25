@@ -1,4 +1,5 @@
 using System.Reflection;
+using Chat.Protocol;
 using Chat.Server.Api;
 using Chat.Server.Common.Configuration;
 using Chat.Server.Common.Errors;
@@ -6,11 +7,13 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Email;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 
-// EiseChat 服务端启动（M0-03 骨架；M1-02 接入 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误）。
+// EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；M1-05 注册/登录/JWT）。
 // 配置来源优先级：secrets.json（可选，gitignore）> 环境变量 > appsettings.{Environment}.json > appsettings.json；
 // 端口、数据/文件目录、上传上限、注册开关、邮箱域名白名单、JWT、邮件、限流阈值均走配置。
 // 业务模块（认证、消息、WS 帧处理）从 M1 后续批次逐步接入。
@@ -40,6 +43,79 @@ else
 // 验证码发送（M1-04）：限流计数为单进程内存（重启清零）；EmailCodeService 负责生成/哈希/落库/发信。
 builder.Services.AddSingleton<EmailCodeRateLimiter>();
 builder.Services.AddScoped<EmailCodeService>();
+
+// 认证（M1-05）：JWT HS256（签发见 Modules/Auth/JwtTokenService）；密码 PBKDF2；登录失败锁定为单进程内存。
+builder.Services.AddScoped<JwtTokenService>();
+builder.Services.AddSingleton<LoginAttemptLimiter>();
+builder.Services.AddScoped<AuthService>();
+
+// JWT Bearer 校验：除签名/过期外，还查 sessions（jti 未撤销）与 users.status（未禁用），实现 logout 即失效。
+var jwtAuthOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+var jwtSigningKey = new SymmetricSecurityKey(JwtTokenService.GetKeyBytes(jwtAuthOptions.Key));
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = jwtAuthOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtAuthOptions.Audience,
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = jwtSigningKey,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromSeconds(Math.Max(0, jwtAuthOptions.ClockSkewSeconds)),
+            NameClaimType = "sub",
+            RoleClaimType = "role",
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var db = context.HttpContext.RequestServices.GetRequiredService<ChatDbContext>();
+                var principal = context.Principal;
+                var userId = principal?.FindFirst("sub")?.Value;
+                var jwtId = principal?.FindFirst("jti")?.Value;
+                if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(jwtId))
+                {
+                    context.Fail("令牌缺少 sub/jti");
+                    return;
+                }
+
+                var cancellationToken = context.HttpContext.RequestAborted;
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var session = await db.Sessions.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.JwtId == jwtId, cancellationToken);
+                if (session is null ||
+                    session.RevokedAt is not null ||
+                    !string.Equals(session.UserId, userId, StringComparison.Ordinal))
+                {
+                    context.Fail("会话不存在或已撤销");
+                    return;
+                }
+
+                var status = await db.Users.AsNoTracking()
+                    .Where(item => item.Id == userId)
+                    .Select(item => (UserStatus?)item.Status)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (status != UserStatus.Active)
+                {
+                    context.Fail("账号不可用");
+                    return;
+                }
+
+                // 低频刷新最近活跃时间（60 秒节流），避免每个已认证请求都写库。
+                if (now - session.LastSeenAt >= 60_000)
+                {
+                    await db.Sessions
+                        .Where(item => item.Id == session.Id)
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LastSeenAt, now), cancellationToken);
+                }
+            },
+        };
+    });
+builder.Services.AddAuthorization();
 
 // 启动期需要绝对路径：先按配置读取一次（DI 中的 IOptions 需等 app 构建后才可读取）。
 var appOptions = builder.Configuration.GetSection(AppOptions.SectionName).Get<AppOptions>() ?? new AppOptions();
@@ -92,12 +168,17 @@ app.UseStatusCodePages(async context =>
     await RestErrorWriter.WriteAsync(httpContext, httpContext.Response.StatusCode, code, message);
 });
 
+// 认证/授权：JWT Bearer 校验（含 sessions 撤销检查）；401/403 由上方状态码兜底输出统一错误体。
+app.UseAuthentication();
+app.UseAuthorization();
+
 // 静态文件：前端构建产物复制到 wwwroot/（构建生成，不手改，见 docs/project-overview.md §7.4）。
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// 认证 REST：M1-04 起逐步接入（当前仅发送邮箱验证码）。
+// 认证/用户 REST：M1-04 发码、M1-05 注册/登录/注销与当前用户资料。
 app.MapAuthEndpoints();
+app.MapUserEndpoints();
 
 // 健康检查：部署与发版检查使用（docs/project-overview.md §13.3）；db 探活执行 SELECT 1。
 app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options) =>
