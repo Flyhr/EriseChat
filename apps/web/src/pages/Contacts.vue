@@ -1,21 +1,42 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from '../components/Avatar.vue'
 import { ApiError } from '../core/http'
 import { useConversationsStore } from '../stores/conversations'
 
-// 通讯录页（M2-04）：按邮箱/昵称搜索用户 → 发起单聊 → 进入 /chat/:conversationId。
+// 通讯录页（M2-04 单聊 / M3-08 建群）：搜索用户 → 发起单聊或勾选成员创建群聊 → 进入 /chat/:conversationId。
 const router = useRouter()
 const conversations = useConversationsStore()
 
+const mode = ref<'direct' | 'group'>('direct')
 const keyword = ref('')
 const results = ref<UserProfile[]>([])
 const searched = ref(false)
 const searching = ref(false)
-const creatingUserId = ref<string | null>(null)
+const busyUserId = ref<string | null>(null)
+const creatingGroup = ref(false)
 const errorMessage = ref('')
+
+// 建群状态：群名称必填（服务端 1~100 字符）+ 至少 1 位被邀请成员（不含群主）。
+const groupTitle = ref('')
+const selectedMembers = ref<UserProfile[]>([])
+
+const isGroupMode = computed(() => mode.value === 'group')
+
+function switchMode(next: 'direct' | 'group'): void {
+  if (mode.value === next) return
+  mode.value = next
+  errorMessage.value = ''
+  results.value = []
+  searched.value = false
+  keyword.value = ''
+  if (next === 'direct') {
+    groupTitle.value = ''
+    selectedMembers.value = []
+  }
+}
 
 async function search(): Promise<void> {
   const trimmed = keyword.value.trim()
@@ -37,8 +58,8 @@ async function search(): Promise<void> {
 }
 
 async function startDirectChat(user: UserProfile): Promise<void> {
-  if (creatingUserId.value !== null) return
-  creatingUserId.value = user.userId
+  if (busyUserId.value !== null) return
+  busyUserId.value = user.userId
   errorMessage.value = ''
   try {
     const conversation = await conversations.createDirect(user.userId)
@@ -46,7 +67,49 @@ async function startDirectChat(user: UserProfile): Promise<void> {
   } catch (error) {
     errorMessage.value = toMessage(error)
   } finally {
-    creatingUserId.value = null
+    busyUserId.value = null
+  }
+}
+
+function isSelected(userId: string): boolean {
+  return selectedMembers.value.some((member) => member.userId === userId)
+}
+
+function toggleMember(user: UserProfile): void {
+  selectedMembers.value = isSelected(user.userId)
+    ? selectedMembers.value.filter((member) => member.userId !== user.userId)
+    : [...selectedMembers.value, user]
+}
+
+function removeSelected(userId: string): void {
+  selectedMembers.value = selectedMembers.value.filter((member) => member.userId !== userId)
+}
+
+async function createGroup(): Promise<void> {
+  if (creatingGroup.value) return
+  const title = groupTitle.value.trim()
+  if (title.length === 0) {
+    errorMessage.value = '请输入群名称'
+    return
+  }
+  if (selectedMembers.value.length === 0) {
+    errorMessage.value = '请至少选择 1 位成员'
+    return
+  }
+
+  creatingGroup.value = true
+  errorMessage.value = ''
+  try {
+    const conversation = await conversations.createGroup(
+      title,
+      selectedMembers.value.map((member) => member.userId),
+    )
+    await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
+  } catch (error) {
+    // 服务端 VALIDATION_FAILED 的具体文案（人数上限/成员不存在等）原样展示，不自行编造。
+    errorMessage.value = toMessage(error)
+  } finally {
+    creatingGroup.value = false
   }
 }
 
@@ -64,7 +127,23 @@ function toMessage(error: unknown): string {
   <main class="contacts-page">
     <header class="contacts-page__header">
       <RouterLink class="contacts-page__back" to="/chat">返回消息</RouterLink>
-      <h2 class="contacts-page__title">通讯录</h2>
+      <h2 class="contacts-page__title">{{ isGroupMode ? '新建群聊' : '通讯录' }}</h2>
+      <button
+        v-if="!isGroupMode"
+        type="button"
+        class="contacts-page__mode"
+        @click="switchMode('group')"
+      >
+        新建群聊
+      </button>
+      <button
+        v-else
+        type="button"
+        class="contacts-page__mode contacts-page__mode--ghost"
+        @click="switchMode('direct')"
+      >
+        返回单聊
+      </button>
     </header>
 
     <form class="contacts-page__search" @submit.prevent="search">
@@ -72,13 +151,47 @@ function toMessage(error: unknown): string {
         v-model="keyword"
         type="search"
         maxlength="64"
-        placeholder="输入邮箱或昵称搜索用户"
+        :placeholder="isGroupMode ? '输入邮箱或昵称搜索并勾选成员' : '输入邮箱或昵称搜索用户'"
         aria-label="搜索用户"
       />
       <button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button>
     </form>
 
     <p v-if="errorMessage" class="contacts-page__error" role="alert">{{ errorMessage }}</p>
+
+    <section v-if="isGroupMode" class="contacts-page__group">
+      <label class="contacts-page__label" for="group-title">群名称（必填，1~100 字符）</label>
+      <input
+        id="group-title"
+        v-model="groupTitle"
+        type="text"
+        maxlength="100"
+        class="contacts-page__title-input"
+        placeholder="例如：研发群"
+      />
+
+      <p class="contacts-page__label">已选成员（{{ selectedMembers.length }}）</p>
+      <p v-if="selectedMembers.length === 0" class="contacts-page__hint">
+        在下方搜索结果中勾选成员，至少 1 人（不含自己）。
+      </p>
+      <ul v-else class="contacts-page__chips">
+        <li v-for="member in selectedMembers" :key="member.userId" class="contacts-page__chip">
+          <span>{{ member.displayName }}</span>
+          <button type="button" class="contacts-page__chip-remove" @click="removeSelected(member.userId)">
+            移除
+          </button>
+        </li>
+      </ul>
+
+      <button
+        type="button"
+        class="contacts-page__create"
+        :disabled="creatingGroup"
+        @click="createGroup"
+      >
+        {{ creatingGroup ? '创建中…' : '创建群聊' }}
+      </button>
+    </section>
 
     <ul v-if="results.length > 0" class="contacts-page__list">
       <li v-for="user in results" :key="user.userId" class="contacts-page__item">
@@ -88,17 +201,29 @@ function toMessage(error: unknown): string {
           <span class="contacts-page__email">{{ user.email }}</span>
         </span>
         <button
+          v-if="isGroupMode"
           type="button"
           class="contacts-page__action"
-          :disabled="creatingUserId !== null"
+          :class="{ 'contacts-page__action--selected': isSelected(user.userId) }"
+          @click="toggleMember(user)"
+        >
+          {{ isSelected(user.userId) ? '取消选择' : '选择' }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="contacts-page__action"
+          :disabled="busyUserId !== null"
           @click="startDirectChat(user)"
         >
-          {{ creatingUserId === user.userId ? '创建中…' : '发消息' }}
+          {{ busyUserId === user.userId ? '创建中…' : '发消息' }}
         </button>
       </li>
     </ul>
     <p v-else-if="searched && !searching" class="contacts-page__hint">没有找到匹配的用户。</p>
-    <p v-else class="contacts-page__hint">搜索同事的邮箱或昵称，发起单聊。</p>
+    <p v-else class="contacts-page__hint">
+      {{ isGroupMode ? '搜索同事，勾选后创建群聊。' : '搜索同事的邮箱或昵称，发起单聊。' }}
+    </p>
   </main>
 </template>
 
@@ -123,8 +248,24 @@ function toMessage(error: unknown): string {
 }
 
 .contacts-page__title {
+  flex: 1;
   margin: 0;
   font-size: 20px;
+}
+
+.contacts-page__mode {
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.contacts-page__mode--ghost {
+  background: transparent;
+  color: var(--color-primary);
 }
 
 .contacts-page__search {
@@ -174,6 +315,80 @@ function toMessage(error: unknown): string {
   font-size: 13px;
 }
 
+.contacts-page__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.contacts-page__group .contacts-page__hint {
+  margin: 0;
+}
+
+.contacts-page__label {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.contacts-page__title-input {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.contacts-page__title-input:focus {
+  border-color: var(--color-primary);
+}
+
+.contacts-page__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.contacts-page__chip {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-hover);
+  font-size: 12px;
+}
+
+.contacts-page__chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--color-danger);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.contacts-page__create {
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.contacts-page__create:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .contacts-page__list {
   margin: 0;
   padding: 0;
@@ -210,17 +425,22 @@ function toMessage(error: unknown): string {
 
 .contacts-page__action {
   flex: none;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-primary);
+  padding: 6px 12px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-primary);
+  font-size: 12px;
   cursor: pointer;
 }
 
 .contacts-page__action:disabled {
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  opacity: 0.6;
   cursor: not-allowed;
+}
+
+.contacts-page__action--selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
 }
 </style>

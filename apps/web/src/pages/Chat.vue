@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
+import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
@@ -12,8 +13,9 @@ import { compressImageFile } from '../core/imageCompress'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
+import type { Conversation } from '../types/frames'
 
-// 聊天主页面（M2-04 会话列表 + M2-05 消息流）：左侧会话列表，右侧消息流与发送框。
+// 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
 // 规则：页面只做编排，状态走 stores/，连接走 core/ws.ts，不直接 new WebSocket / fetch。
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +30,8 @@ const activeId = computed(() =>
 const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
 )
+const isGroup = computed(() => activeConversation.value?.type === 'group')
+const memberCount = computed(() => activeConversation.value?.members.length ?? 0)
 const activeTitle = computed(() => {
   const conversation = activeConversation.value
   if (!conversation) return ''
@@ -35,6 +39,11 @@ const activeTitle = computed(() => {
   const other = conversation.members.find((member) => member.userId !== selfUserId.value)
   return other?.displayName ?? conversation.title ?? '单聊会话'
 })
+
+// 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
+const pageNotice = ref('')
+// 群成员管理面板（仅群聊可用）。
+const showMembersPanel = ref(false)
 
 // 当前会话的消息缓存（已落库事实消息 + 乐观发送中的本地消息）与历史分页状态。
 const activeMessages = computed(() =>
@@ -53,6 +62,7 @@ const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId
 watch(
   activeId,
   (conversationId) => {
+    showMembersPanel.value = false
     if (!conversationId) return
     void messages.loadInitial(conversationId)
   },
@@ -75,6 +85,20 @@ watch(
   markActiveConversationRead,
   { immediate: true },
 )
+
+// 被移出/主动退出群聊（conv.updated.removedConversationIds）：会话与消息缓存清理由 stores 完成，
+// 页面负责提示与跳转（若正是当前打开的会话）。
+function handleRemovedNotice(): void {
+  const removedId = conversations.lastRemovedConversationId
+  if (!removedId) return
+  if (activeId.value === removedId) {
+    pageNotice.value = '你已被移出群聊或已退出群聊'
+    void router.replace({ name: 'chat' })
+  }
+  conversations.clearRemovedNotice()
+}
+
+watch(() => conversations.lastRemovedConversationId, handleRemovedNotice)
 
 onMounted(async () => {
   // 启动/刷新：先恢复 IndexedDB 缓存渲染（会话列表 + 各会话最近消息）；
@@ -107,6 +131,17 @@ function retryMessage(clientMsgId: string): void {
 function loadMoreMessages(): void {
   if (!activeId.value) return
   void messages.loadMore(activeId.value)
+}
+
+// 群成员面板操作结果：邀请/移除后服务端返回最新 Conversation，写回 store（成员数即时更新）。
+function onGroupUpdated(conversation: Conversation): void {
+  conversations.upsert([conversation])
+}
+
+// 主动退出群聊成功：移出列表并清缓存（与 removedConversationIds 推送路径一致），回到空聊天页。
+function onLeftGroup(conversationId: string): void {
+  showMembersPanel.value = false
+  conversations.handleRemovedConversations([conversationId])
 }
 
 // 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
@@ -166,7 +201,7 @@ async function handleFileSelected(file: File): Promise<void> {
 
       <p v-if="conversations.loading" class="chat-page__hint">加载中…</p>
       <p v-else-if="conversations.sorted.length === 0" class="chat-page__hint">
-        还没有会话，去「通讯录」搜索用户发起单聊。
+        还没有会话，去「通讯录」搜索用户发起单聊或创建群聊。
       </p>
       <nav v-else class="chat-page__list" aria-label="会话列表">
         <ConversationItem
@@ -182,8 +217,24 @@ async function handleFileSelected(file: File): Promise<void> {
     </aside>
 
     <section class="chat-page__main">
+      <p v-if="pageNotice" class="chat-page__notice" role="status">
+        <span>{{ pageNotice }}</span>
+        <button type="button" class="chat-page__notice-close" @click="pageNotice = ''">知道了</button>
+      </p>
+
       <template v-if="activeConversation">
-        <header class="chat-page__main-header">{{ activeTitle }}</header>
+        <header class="chat-page__main-header">
+          <span class="chat-page__main-title" :title="activeTitle">{{ activeTitle }}</span>
+          <span v-if="isGroup" class="chat-page__member-count">{{ memberCount }} 人</span>
+          <button
+            v-if="isGroup"
+            type="button"
+            class="chat-page__members-button"
+            @click="showMembersPanel = true"
+          >
+            群成员
+          </button>
+        </header>
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <MessageList
           :messages="activeMessages"
@@ -200,6 +251,14 @@ async function handleFileSelected(file: File): Promise<void> {
           @send="sendMessage"
           @file-selected="handleFileSelected"
         />
+        <GroupMembersPanel
+          v-if="showMembersPanel && activeConversation.type === 'group'"
+          :conversation="activeConversation"
+          :self-user-id="selfUserId"
+          @close="showMembersPanel = false"
+          @updated="onGroupUpdated"
+          @left="onLeftGroup"
+        />
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"
@@ -209,7 +268,7 @@ async function handleFileSelected(file: File): Promise<void> {
       <EmptyState
         v-else
         title="选择会话开始聊天"
-        description="从左侧选择会话，或到「通讯录」搜索用户发起单聊。"
+        description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
       />
     </section>
   </main>
@@ -264,13 +323,62 @@ async function handleFileSelected(file: File): Promise<void> {
   min-height: 0;
 }
 
+.chat-page__notice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 13px;
+}
+
+.chat-page__notice-close {
+  border: none;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .chat-page__main-header {
   display: flex;
+  gap: var(--space-2);
   align-items: center;
   height: var(--header-height);
   padding: 0 var(--space-4);
   font-weight: 600;
   border-bottom: 1px solid var(--color-border);
+}
+
+.chat-page__main-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page__member-count {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-hover);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chat-page__members-button {
+  flex: none;
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .chat-page__main-hint {
