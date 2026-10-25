@@ -1,9 +1,18 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { Message, MessageAckFrame, MessageSendFrame } from '../types/frames'
-import { type GapCheckResult, detectGap, mergeMessages } from '../core/sync'
+import type {
+  Message,
+  MessageAckFrame,
+  MessageSendFrame,
+  ServerFrame,
+  SyncRequestFrame,
+  SyncResponseFrame,
+} from '../types/frames'
+import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
 import { messagesApi } from '../api/messages'
-import { chatWs } from '../core/ws'
+import { chatWs, type WsState } from '../core/ws'
+import { config } from '../core/config'
+import { getMessagesByConversation, getMeta, saveMessages, setMeta } from '../core/db'
 import { useConversationsStore } from './conversations'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
@@ -11,6 +20,12 @@ const PAGE_SIZE = 50
 /** 首次发送后等待 ack 的时长；超时进入重试（2s/5s/10s，同一 clientMsgId 幂等）。 */
 const ACK_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [2000, 5000, 10000] as const
+/** 本会话已知最大 seq 的 IndexedDB 持久化 key（补拉游标）。 */
+const META_LAST_SEQ_KEY = 'lastSeqByConversation'
+/** 一次 syncAll 最多发多少轮 sync.request（防止服务端异常时死循环）。 */
+const SYNC_MAX_ROUNDS = 20
+/** 同一会话检测到 seq 缺口时，最多用同一游标重试补拉的次数。 */
+const SYNC_GAP_RETRIES = 1
 
 export type PendingStatus = 'sending' | 'failed'
 
@@ -32,9 +47,9 @@ function reqIdOf(clientMsgId: string): string {
   return `msg-${clientMsgId}`
 }
 
-// 消息缓存、历史分页与发送状态机。事实源在服务端（AGENTS.md §2.8），
-// 本地按会话缓存 Message[]（已落库）与 PendingMessage[]（乐观发送中）；
-// 收发统一走 core/ws.ts 的 chatWs，不直接 new WebSocket / fetch（project-overview.md §10）。
+// 消息缓存、历史分页、发送状态机与断线补拉（M2-06）。事实源在服务端（AGENTS.md §2.8），
+// 本地按会话缓存 Message[]（已落库）与 PendingMessage[]（乐观发送中），
+// IndexedDB 只做缓存（core/db.ts）；收发统一走 core/ws.ts 的 chatWs。
 export const useMessagesStore = defineStore('messages', () => {
   const byConversation = ref<Record<string, Message[]>>({})
   const lastSeqByConversation = ref<Record<string, number>>({})
@@ -43,11 +58,20 @@ export const useMessagesStore = defineStore('messages', () => {
   const loadedConversations = ref<Record<string, boolean>>({})
   const loadingInitialByConversation = ref<Record<string, boolean>>({})
   const loadingMoreByConversation = ref<Record<string, boolean>>({})
+  /** 是否正在补拉（UI 可显示同步状态；同一时刻只允许一轮 syncAll）。 */
+  const syncing = ref(false)
+  /** 最近一次补拉完成时间（UTC 毫秒）。 */
+  const lastSyncedAt = ref(0)
 
-  // 定时器不进响应式状态；按 clientMsgId 管理，避免 UI 重新渲染抖动。
+  // 定时器/订阅/游标等非响应式状态放在闭包里，避免 UI 重新渲染抖动。
   const ackTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  let unsubscribeFrame: (() => void) | null = null
+  const unsubscribers: Array<() => void> = []
+  let visibilityHandler: (() => void) | null = null
+  let realtimeReady = false
+  let syncInFlight = false
+  let syncQueued = false
+  let cacheRestored = false
 
   function messagesOf(conversationId: string): Message[] {
     return byConversation.value[conversationId] ?? []
@@ -78,26 +102,94 @@ export const useMessagesStore = defineStore('messages', () => {
     lastSeqByConversation.value = { ...lastSeqByConversation.value, [conversationId]: seq }
   }
 
-  /** 合并服务端事实消息：去重 + 按 seq 升序；返回缺口检测结果（补拉在 M2-06 接入）。 */
+  /** 持久化各会话的补拉游标（IndexedDB meta）。 */
+  function persistLastSeqMap(): void {
+    void setMeta(META_LAST_SEQ_KEY, { ...lastSeqByConversation.value }).catch(() => {
+      // 缓存写入失败不影响主流程。
+    })
+  }
+
+  /** 把服务端事实消息写入 IndexedDB（按 messageId 覆盖，天然幂等）。 */
+  function persistMessages(messages: readonly Message[]): void {
+    if (messages.length === 0) return
+    void saveMessages(messages).catch(() => {
+      // 缓存写入失败不影响主流程。
+    })
+  }
+
+  /** 合并服务端事实消息：去重 + 按 seq 升序，并持久化消息与游标。 */
   function merge(conversationId: string, incoming: readonly Message[]): GapCheckResult {
     const result = detectGap(lastSeqOf(conversationId), incoming)
     const merged = mergeMessages(messagesOf(conversationId), incoming)
     byConversation.value = { ...byConversation.value, [conversationId]: merged }
     setLastSeq(conversationId, result.lastSeq)
+    persistMessages(incoming)
+    persistLastSeqMap()
     return result
   }
 
   /** 用补拉结果直接推进游标（调用方已按批处理时使用）。 */
   function advanceLastSeq(conversationId: string, lastSeq: number): void {
     setLastSeq(conversationId, lastSeq)
+    persistLastSeqMap()
   }
 
   /**
-   * 首次进入会话：REST 拉最新一页历史（limit=50），与本地缓存合并。
-   * 幂等：已加载过或正在加载时直接返回。
+   * 启动/刷新时从 IndexedDB 恢复缓存（先渲染本地记录，再走 syncAll 补拉增量）。
+   * 需要先调用 conversations.restoreFromCache()，以便知道要恢复哪些会话的消息。
+   */
+  async function restoreFromCache(): Promise<void> {
+    if (cacheRestored) return
+    cacheRestored = true
+    try {
+      const stored = await getMeta<Record<string, number>>(META_LAST_SEQ_KEY)
+      if (stored && typeof stored === 'object') {
+        const restored: Record<string, number> = {}
+        for (const [conversationId, seq] of Object.entries(stored)) {
+          if (typeof seq === 'number' && Number.isInteger(seq) && seq > 0) {
+            restored[conversationId] = seq
+          }
+        }
+        lastSeqByConversation.value = { ...lastSeqByConversation.value, ...restored }
+      }
+
+      const conversations = useConversationsStore()
+      for (const conversation of conversations.items) {
+        const cached = await getMessagesByConversation(conversation.conversationId)
+        if (cached.length === 0) continue
+        const merged = mergeMessages([], cached)
+        byConversation.value = { ...byConversation.value, [conversation.conversationId]: merged }
+        loadedConversations.value = {
+          ...loadedConversations.value,
+          [conversation.conversationId]: true,
+        }
+        // 缓存可能是截断的历史：允许继续向上加载更早消息。
+        hasMoreByConversation.value = {
+          ...hasMoreByConversation.value,
+          [conversation.conversationId]: true,
+        }
+        const maxSeq = merged[merged.length - 1].seq
+        setLastSeq(conversation.conversationId, maxSeq)
+      }
+      persistLastSeqMap()
+    } catch (error) {
+      console.warn('[messages] 读取本地缓存失败', error)
+    }
+  }
+
+  /**
+   * 首次进入会话：优先使用本地缓存（已由 restoreFromCache 载入），
+   * 否则 REST 拉最新一页历史（limit=50）；缓存存在时由 syncAll 补齐增量。
    */
   async function loadInitial(conversationId: string): Promise<void> {
     if (isLoaded(conversationId) || loadingInitialByConversation.value[conversationId]) return
+    if (messagesOf(conversationId).length > 0) {
+      loadedConversations.value = {
+        ...loadedConversations.value,
+        [conversationId]: true,
+      }
+      return
+    }
     loadingInitialByConversation.value = {
       ...loadingInitialByConversation.value,
       [conversationId]: true,
@@ -138,6 +230,84 @@ export const useMessagesStore = defineStore('messages', () => {
       loadingMoreByConversation.value = {
         ...loadingMoreByConversation.value,
         [conversationId]: false,
+      }
+    }
+  }
+
+  /**
+   * 补拉所有会话的增量（协议 §4.4）：
+   * 以本地 lastSeq 生成 cursors → sync.request → 合并并持久化；
+   * 每轮最多 100 个 cursors，取满一批（200 条）且有更多时继续下一轮；
+   * 合并后检测到 seq 缺口则用同一游标立即再补一次（有限次）。
+   */
+  async function syncAll(): Promise<void> {
+    if (chatWs.state !== 'authed') return
+    if (syncInFlight) {
+      syncQueued = true
+      return
+    }
+    const conversations = useConversationsStore()
+    if (conversations.items.length === 0) return
+
+    syncInFlight = true
+    syncing.value = true
+    try {
+      const pending = new Map<string, number>()
+      for (const conversation of conversations.items) {
+        pending.set(conversation.conversationId, lastSeqOf(conversation.conversationId))
+      }
+      const gapRetries = new Map<string, number>()
+      let rounds = 0
+
+      while (pending.size > 0 && rounds < SYNC_MAX_ROUNDS) {
+        rounds += 1
+        const cursors = buildSyncCursors(pending, 100)
+        if (cursors.length === 0) break
+
+        let response: SyncResponseFrame
+        const frame: SyncRequestFrame = { type: 'sync.request', cursors }
+        try {
+          response = await chatWs.request<SyncResponseFrame>(frame)
+        } catch (error) {
+          console.warn('[messages] sync.request 失败，稍后重试', error)
+          break
+        }
+
+        const next = new Map<string, number>()
+        for (const batch of response.batches ?? []) {
+          const messages = batch.messages ?? []
+          if (messages.length === 0) continue
+          const cursor = pending.get(batch.conversationId) ?? lastSeqOf(batch.conversationId)
+          const gap = detectGap(cursor, messages)
+          merge(batch.conversationId, messages)
+          conversations.applyMessage(batch.conversationId, messages[messages.length - 1])
+
+          if (gap.hasGap) {
+            const retried = gapRetries.get(batch.conversationId) ?? 0
+            if (retried < SYNC_GAP_RETRIES) {
+              gapRetries.set(batch.conversationId, retried + 1)
+              next.set(batch.conversationId, cursor)
+            }
+            continue
+          }
+
+          if (messages.length >= config.syncBatchSize) {
+            next.set(batch.conversationId, lastSeqOf(batch.conversationId))
+          }
+        }
+
+        pending.clear()
+        for (const [conversationId, seq] of next) pending.set(conversationId, seq)
+        if (!response.hasMore) break
+      }
+
+      lastSyncedAt.value = Date.now()
+    } finally {
+      syncInFlight = false
+      syncing.value = false
+      if (syncQueued) {
+        syncQueued = false
+        void syncAll()
       }
     }
   }
@@ -267,8 +437,8 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /**
-   * 收到 message.new：并入对应会话（按 messageId 去重、按 seq 排序）；
-   * 未打开的会话只更新会话摘要（conversations.applyMessage）。
+   * 收到 message.new：并入对应会话（按 messageId 去重、按 seq 排序）并持久化；
+   * 未打开的会话只更新会话摘要（conversations.applyMessage）；发现缺口时提示补拉。
    */
   function handleIncoming(message: Message): GapCheckResult {
     // 自己的消息经多端/补拉回到本地时，清掉同 clientMsgId 的待发消息，避免重复展示。
@@ -283,43 +453,76 @@ export const useMessagesStore = defineStore('messages', () => {
     const result = merge(message.conversationId, [message])
     useConversationsStore().applyMessage(message.conversationId, message)
     if (result.hasGap) {
-      // 缺口补拉统一在 M2-06（sync.request）接入；此处仅提示，不丢消息。
-      console.warn(`[messages] 会话 ${message.conversationId} 出现 seq 缺口`)
+      // 缺口立即补拉（协议 §6.3）：syncAll 会以本地游标重新拉取缺失区间。
+      void syncAll()
     }
     return result
   }
 
-  /** 订阅 WS 帧：message.ack 落库确认、message.new 实时合并、error 标记发送失败（只注册一次）。 */
-  function subscribeRealtime(): () => void {
-    if (unsubscribeFrame !== null) return unsubscribeFrame
-    unsubscribeFrame = chatWs.on('frame', (frame) => {
-      switch (frame.type) {
-        case 'message.ack':
-          handleAck(frame)
-          break
-        case 'message.new':
-          handleIncoming(frame.message)
-          break
-        case 'error': {
-          const match = /^msg-(.+)$/.exec(frame.reqId ?? '')
-          if (!match) break
-          const pending = findPendingAnywhere(match[1])
-          if (pending) {
-            clearTimers(pending.clientMsgId)
-            pending.status = 'failed'
-          }
-          break
+  function handleFrame(frame: ServerFrame): void {
+    switch (frame.type) {
+      case 'message.ack':
+        handleAck(frame)
+        break
+      case 'message.new':
+        handleIncoming(frame.message)
+        break
+      case 'error': {
+        const match = /^msg-(.+)$/.exec(frame.reqId ?? '')
+        if (!match) break
+        const pending = findPendingAnywhere(match[1])
+        if (pending) {
+          clearTimers(pending.clientMsgId)
+          pending.status = 'failed'
         }
-        default:
-          break
+        break
       }
-    })
-    return unsubscribeFrame
+      default:
+        break
+    }
+  }
+
+  /**
+   * 订阅 WS 帧与连接状态（只注册一次）：
+   * - message.ack / message.new 实时合并；
+   * - authed（hello 后）触发一次全量补拉（首次进入/断线重连成功）；
+   * - visibilitychange 回前台时补拉增量。
+   */
+  function subscribeRealtime(): () => void {
+    if (realtimeReady) return disposeRealtime
+    realtimeReady = true
+
+    unsubscribers.push(chatWs.on('frame', handleFrame))
+    unsubscribers.push(
+      chatWs.on('statechange', (state: WsState) => {
+        if (state === 'authed') void syncAll()
+      }),
+    )
+
+    visibilityHandler = () => {
+      if (document.visibilityState === 'visible' && chatWs.state === 'authed') void syncAll()
+    }
+    document.addEventListener('visibilitychange', visibilityHandler)
+
+    // 订阅时若已认证（如从登录页跳转后路由已建连），立即补拉一次。
+    if (chatWs.state === 'authed') void syncAll()
+
+    return disposeRealtime
+  }
+
+  function disposeRealtime(): void {
+    for (const unsubscribe of unsubscribers.splice(0)) unsubscribe()
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler)
+      visibilityHandler = null
+    }
+    realtimeReady = false
   }
 
   function clear(): void {
     const tracked = new Set([...ackTimers.keys(), ...retryTimers.keys()])
     for (const clientMsgId of tracked) clearTimers(clientMsgId)
+    disposeRealtime()
     byConversation.value = {}
     lastSeqByConversation.value = {}
     pendingByConversation.value = {}
@@ -327,16 +530,19 @@ export const useMessagesStore = defineStore('messages', () => {
     loadedConversations.value = {}
     loadingInitialByConversation.value = {}
     loadingMoreByConversation.value = {}
-    if (unsubscribeFrame) {
-      unsubscribeFrame()
-      unsubscribeFrame = null
-    }
+    syncing.value = false
+    lastSyncedAt.value = 0
+    syncInFlight = false
+    syncQueued = false
+    cacheRestored = false
   }
 
   return {
     byConversation,
     lastSeqByConversation,
     pendingByConversation,
+    syncing,
+    lastSyncedAt,
     messagesOf,
     pendingOf,
     hasMoreOf,
@@ -346,8 +552,10 @@ export const useMessagesStore = defineStore('messages', () => {
     setLastSeq,
     advanceLastSeq,
     merge,
+    restoreFromCache,
     loadInitial,
     loadMore,
+    syncAll,
     sendText,
     retrySend,
     subscribeRealtime,

@@ -66,11 +66,15 @@ watch(
   { immediate: true },
 )
 
-onMounted(() => {
-  void conversations.load()
-  // 服务端推送：conv.updated 更新会话列表、message.ack/message.new 更新消息流（各自只订阅一次）。
+onMounted(async () => {
+  // 启动/刷新：先恢复 IndexedDB 缓存渲染（会话列表 + 各会话最近消息），
+  // 再拉服务端最新列表并补拉增量（M2-06；authed/重连成功/回前台也会触发 syncAll）。
   conversations.subscribeRealtime()
   messages.subscribeRealtime()
+  await conversations.restoreFromCache()
+  await messages.restoreFromCache()
+  await conversations.load()
+  void messages.syncAll()
 })
 
 function selectConversation(conversationId: string): void {

@@ -4,6 +4,7 @@ import type { Conversation, Message } from '../types/frames'
 import { conversationsApi } from '../api/conversations'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
+import { getConversations, saveConversation } from '../core/db'
 
 /** 本地已读游标持久化 key：M2 阶段先本地记录，M3 接入 read.update 后以服务端 last_read_seq 为准。 */
 const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
@@ -32,6 +33,15 @@ function persistReadSeq(map: Record<string, number>): void {
   }
 }
 
+/** 把会话快照写入 IndexedDB（只做缓存，不改变服务端事实源）。 */
+function persistConversations(conversations: readonly Conversation[]): void {
+  for (const conversation of conversations) {
+    void saveConversation(conversation).catch(() => {
+      // 缓存写入失败不影响主流程（下一次加载会重试）。
+    })
+  }
+}
+
 // 会话列表状态：按 conversationId upsert 合并（conv.updated 推送 / 本地新建共用），
 // 展示顺序由 sorted 统一计算（最近消息时间倒序，无消息按创建时间）。
 export const useConversationsStore = defineStore('conversations', () => {
@@ -42,6 +52,7 @@ export const useConversationsStore = defineStore('conversations', () => {
   /** 本地已读游标：会话未读 = lastSeq − max(本地已读, 服务端 last_read_seq)。 */
   const lastReadSeqByConversation = ref<Record<string, number>>(readStoredReadSeq())
   let unsubscribeFrame: (() => void) | null = null
+  let cacheRestored = false
 
   /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算，M3 接入已读后使用） */
   const sorted = computed(() =>
@@ -56,6 +67,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     const byId = new Map(items.value.map((item) => [item.conversationId, item]))
     for (const conversation of conversations) byId.set(conversation.conversationId, conversation)
     items.value = [...byId.values()]
+    persistConversations(conversations)
   }
 
   function getById(conversationId: string): Conversation | undefined {
@@ -102,6 +114,24 @@ export const useConversationsStore = defineStore('conversations', () => {
       next,
       ...items.value.slice(index + 1),
     ]
+    persistConversations([next])
+  }
+
+  /**
+   * 启动/刷新时从 IndexedDB 恢复会话快照（先渲染缓存，再由 load() 拉服务端最新列表）。
+   * 只恢复、不改变 loaded 标记，因此随后的 load() 仍会请求服务端。
+   */
+  async function restoreFromCache(): Promise<void> {
+    if (cacheRestored) return
+    cacheRestored = true
+    try {
+      const cached = await getConversations()
+      if (cached.length > 0 && items.value.length === 0) {
+        items.value = [...cached]
+      }
+    } catch (error) {
+      console.warn('[conversations] 读取本地缓存失败', error)
+    }
   }
 
   /** 从服务端加载当前用户会话列表（幂等：已加载且非强制时直接返回）。 */
@@ -113,6 +143,7 @@ export const useConversationsStore = defineStore('conversations', () => {
       const list = await conversationsApi.list()
       items.value = [...list]
       loaded.value = true
+      persistConversations(list)
     } finally {
       loading.value = false
     }
@@ -143,6 +174,11 @@ export const useConversationsStore = defineStore('conversations', () => {
   function clear(): void {
     items.value = []
     loaded.value = false
+    cacheRestored = false
+    if (unsubscribeFrame) {
+      unsubscribeFrame()
+      unsubscribeFrame = null
+    }
   }
 
   return {
@@ -155,6 +191,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     getById,
     unreadOf,
     markRead,
+    restoreFromCache,
     load,
     createDirect,
     subscribeRealtime,
