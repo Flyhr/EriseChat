@@ -14,6 +14,9 @@ public sealed class AppOptions
     /// <summary>上传文件存储目录（/data/files/yyyyMM/{fileId}{ext}），默认仓库根 data/files。</summary>
     public string FileDirectory { get; set; } = "../../data/files";
 
+    /// <summary>安装包分发目录（Windows exe / Android apk，供 /download 页使用），默认仓库根 data/downloads（M4-04）。</summary>
+    public string DownloadDirectory { get; set; } = "../../data/downloads";
+
     /// <summary>单文件上传上限（字节），默认 50MB（AGENTS §6）。</summary>
     public long UploadMaxBytes { get; set; } = 50L * 1024 * 1024;
 
