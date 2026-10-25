@@ -1,0 +1,41 @@
+[Unit]
+Description=EiseChat 服务端（ASP.NET Core 单进程，REST + WebSocket + 静态前端）
+Documentation=file:///opt/eisechat-server/docs/deploy.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=eisechat
+Group=eisechat
+WorkingDirectory=/opt/eisechat-server
+# 使用 publish-linux.sh 产出的 self-contained 包（自带 .NET 运行时，不依赖机器上的 dotnet）。
+ExecStart=/opt/eisechat-server/Chat.Server
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+# 配置：生产环境；只监听本机 8080，由 Caddy 反代做 HTTPS（AGENTS §6 公网入口）。
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:8080
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+# 数据统一放 /var/lib/eisechat（SQLite、messages/ 文件、downloads/ 安装包）。
+Environment=App__DataDirectory=/var/lib/eisechat
+Environment=App__FileDirectory=/var/lib/eisechat/files
+Environment=App__DownloadDirectory=/var/lib/eisechat/downloads
+
+# 安全加固：只允许写数据目录；不获取新权限；隔离临时目录。
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/eisechat
+RestrictSUIDSGID=true
+
+SyslogIdentifier=eisechat
+
+[Install]
+WantedBy=multi-user.target

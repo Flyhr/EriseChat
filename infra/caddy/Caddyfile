@@ -1,0 +1,31 @@
+# EiseChat 生产反代（Caddy 自动申请/续期 HTTPS）
+# 用法：把 chat.example.com 替换为真实域名，配好 DNS A 记录并放行 80/443，然后：
+#   sudo cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
+#   sudo caddy validate --config /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+# 服务端只监听 127.0.0.1:8080（见 infra/eisechat.service），不直接暴露公网。
+
+{
+	# 证书到期提醒邮箱（替换为管理员邮箱）
+	email admin@example.com
+}
+
+chat.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+
+	# 访问日志（滚动保留）
+	log {
+		output file /var/log/caddy/eisechat-access.log {
+			roll_size 10MiB
+			roll_keep 10
+		}
+		format console
+	}
+
+	header {
+		# 基础安全头（内部工具，避免 MIME 嗅探与跨站引用）
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
