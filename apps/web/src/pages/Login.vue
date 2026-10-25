@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { ApiError } from '../core/http'
 import { chatWs } from '../core/ws'
+import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -37,6 +38,12 @@ const auth = useAuthStore()
 
 /** 致命关闭（被踢/登录失效）跳转登录页时携带的提示（M3-00）。 */
 const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.notice : '')
+
+/** M4-01：服务器地址配置（桌面/APK 首次使用需填写；Web 同源可留空）。 */
+const serverUrlOpen = ref(false)
+const serverUrl = ref(getServerUrl())
+const serverUrlError = ref('')
+const serverUrlLabel = computed(() => serverUrl.value.trim() || '与当前页面同源')
 
 const mode = ref<Mode>('code')
 const email = ref('')
@@ -173,6 +180,28 @@ function applySession(response: LoginResponse): void {
   chatWs.setAuth(response.accessToken, auth.deviceId)
   chatWs.connect()
 }
+
+/** M4-01：保存服务器地址（空字符串 = 同源默认）；Web 端校验 http(s) origin 后持久化。 */
+function saveServerUrl(): void {
+  const value = serverUrl.value.trim()
+  if (value.length > 0 && !setServerUrl(value)) {
+    serverUrlError.value = '地址无效：需以 http:// 或 https:// 开头'
+    return
+  }
+  if (value.length === 0) {
+    resetServerUrl()
+  }
+  serverUrl.value = getServerUrl()
+  serverUrlError.value = ''
+  serverUrlOpen.value = false
+}
+
+/** 恢复同源默认地址（清除 localStorage 配置）。 */
+function clearServerUrl(): void {
+  resetServerUrl()
+  serverUrl.value = ''
+  serverUrlError.value = ''
+}
 </script>
 
 <template>
@@ -180,6 +209,24 @@ function applySession(response: LoginResponse): void {
     <section class="login-card">
       <h1 class="login-card__title">EiseChat</h1>
       <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
+
+      <div class="login-server">
+        <button class="login-server__toggle" type="button" @click="serverUrlOpen = !serverUrlOpen">
+          服务器地址：{{ serverUrlLabel }}{{ serverUrlOpen ? '（收起）' : '（修改）' }}
+        </button>
+        <div v-if="serverUrlOpen" class="login-server__panel">
+          <input
+            v-model="serverUrl"
+            type="url"
+            placeholder="https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）"
+          />
+          <div class="login-server__actions">
+            <button class="login-server__save" type="button" @click="saveServerUrl">保存</button>
+            <button class="login-server__reset" type="button" @click="clearServerUrl">恢复默认</button>
+          </div>
+          <p v-if="serverUrlError" class="login-server__error" role="alert">{{ serverUrlError }}</p>
+        </div>
+      </div>
 
       <div class="login-modes" role="tablist" aria-label="登录方式">
         <button
@@ -311,6 +358,69 @@ function applySession(response: LoginResponse): void {
   color: var(--color-primary);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
+}
+
+.login-server {
+  margin: 0 0 var(--space-3);
+}
+
+.login-server__toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.login-server__panel {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.login-server__panel input {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.login-server__panel input:focus {
+  border-color: var(--color-primary);
+}
+
+.login-server__actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.login-server__save {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.login-server__reset {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.login-server__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 12px;
 }
 
 .login-form {

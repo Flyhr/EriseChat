@@ -1,5 +1,6 @@
 // 全局运行配置（docs/project-overview.md §9、protocol/protocol.md §1/§8）。
 // 环境变量说明见 apps/web/.env.example；这里是唯一默认值来源，业务代码不要直接读 import.meta.env。
+// M4-01：服务器地址支持运行时配置（localStorage，桌面/APK 首次使用需填写）；Web 同源访问留空即用默认值。
 
 export interface AppConfig {
   /** REST 基础路径（默认 /api，开发期由 vite 代理到 127.0.0.1:8080） */
@@ -22,6 +23,9 @@ export interface AppConfig {
   dbName: string
 }
 
+/** 运行时服务器地址的 localStorage 键（只保存 origin，如 https://chat.example.com）。 */
+export const SERVER_URL_STORAGE_KEY = 'eisechat.serverUrl'
+
 function defaultWsUrl(): string {
   if (typeof window === 'undefined') return '/ws'
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -30,6 +34,7 @@ function defaultWsUrl(): string {
 
 const env = import.meta.env
 
+/** 构建期/同源默认值；运行时服务器地址见 resolveApiBase()/resolveWsUrl()。 */
 export const config: AppConfig = {
   apiBase: env.VITE_API_BASE ?? '/api',
   wsUrl: env.VITE_WS_URL || defaultWsUrl(),
@@ -40,6 +45,95 @@ export const config: AppConfig = {
   syncBatchSize: 200,
   requestTimeoutMs: 15000,
   dbName: 'eisechat',
+}
+
+/**
+ * 规范化服务器地址：trim → 必须是 http/https 且带主机名 → 只保留 origin（去尾部斜杠、丢弃 path/query/hash）。
+ * 非法或空值返回 null（调用方回退默认配置）。
+ */
+export function normalizeServerUrl(raw: string | null | undefined): string | null {
+  const value = (raw ?? '').trim()
+  if (!value) return null
+  let parsed: URL
+  try {
+    parsed = new URL(value)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  if (!parsed.hostname) return null
+  return parsed.origin
+}
+
+function storage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage
+  } catch {
+    return null
+  }
+}
+
+function readStoredServerUrl(): string | null {
+  try {
+    return normalizeServerUrl(storage()?.getItem(SERVER_URL_STORAGE_KEY))
+  } catch {
+    return null
+  }
+}
+
+/** 桌面壳 preload 注入的只读服务器地址（M4-02 提供 window.eisechatDesktop.serverUrl），Web 版不存在。 */
+function readInjectedServerUrl(): string | null {
+  if (typeof window === 'undefined') return null
+  const injected = (window as Window & { eisechatDesktop?: { serverUrl?: string } }).eisechatDesktop?.serverUrl
+  return normalizeServerUrl(injected ?? null)
+}
+
+/** 当前生效的服务器地址（运行时配置 > 桌面注入 > 空串 = 与页面同源）。 */
+export function getServerUrl(): string {
+  return readStoredServerUrl() ?? readInjectedServerUrl() ?? ''
+}
+
+/** REST 基础路径：配置了服务器地址时为 `<server>/api`，否则退回构建期/同源默认值。 */
+export function resolveApiBase(): string {
+  const server = readStoredServerUrl() ?? readInjectedServerUrl()
+  return server ? `${server}/api` : config.apiBase
+}
+
+/** WebSocket 地址：配置了服务器地址时为 `ws(s)://<host>/ws`，否则退回默认推导。 */
+export function resolveWsUrl(): string {
+  const server = readStoredServerUrl() ?? readInjectedServerUrl()
+  if (!server) return config.wsUrl
+  const url = new URL(server)
+  const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${wsProtocol}//${url.host}/ws`
+}
+
+/**
+ * 保存服务器地址（空字符串 = 清除配置回退同源默认）。
+ * 返回是否保存成功：非法地址返回 false 且不写入。
+ */
+export function setServerUrl(raw: string): boolean {
+  if ((raw ?? '').trim().length === 0) {
+    resetServerUrl()
+    return true
+  }
+  const normalized = normalizeServerUrl(raw)
+  if (!normalized) return false
+  try {
+    storage()?.setItem(SERVER_URL_STORAGE_KEY, normalized)
+  } catch {
+    // 隐私模式/存储被禁用：忽略持久化失败，本次会话内仍会通过返回值提示已保存。
+  }
+  return true
+}
+
+/** 清除运行时服务器地址，回退构建期/同源默认值。 */
+export function resetServerUrl(): void {
+  try {
+    storage()?.removeItem(SERVER_URL_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
 }
 
 /**

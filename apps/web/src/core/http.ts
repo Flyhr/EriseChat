@@ -1,7 +1,7 @@
 // REST 封装：统一 baseURL、JWT 注入、超时、错误码映射（docs/project-overview.md §9）。
 // 约定：REST 错误响应体为 { code, message, traceId }（protocol.md §5），code 与协议错误码共用枚举。
 
-import { config } from './config'
+import { config, resolveApiBase } from './config'
 
 export interface ApiErrorBody {
   code?: string
@@ -55,7 +55,8 @@ function isAuthEndpoint(path: string): boolean {
 }
 
 function buildUrl(path: string, query?: Record<string, QueryValue>): string {
-  const base = path.startsWith('http') ? path : `${config.apiBase}${path}`
+  // M4-01：运行时服务器地址优先（设置页/登录页可改），否则回退 config.apiBase。
+  const base = path.startsWith('http') ? path : `${resolveApiBase()}${path}`
   if (!query) return base
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {

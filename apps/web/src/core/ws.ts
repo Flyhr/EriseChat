@@ -2,7 +2,7 @@
 // 只负责连接与帧收发，不做业务分发；业务帧统一通过 'frame' 事件交给上层（M2 起由 store/sync 消费）。
 // 全项目唯一连接入口：业务代码不得直接 new WebSocket（docs/project-overview.md §10）。
 
-import { config, reconnectDelayMs } from './config'
+import { config, reconnectDelayMs, resolveWsUrl } from './config'
 import type { ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types/frames'
 
 /** 连接状态：idle 未连接 / connecting 首次连接中 / authed 认证完成 / reconnecting 退避重连中 / closed 已关闭 */
@@ -46,13 +46,16 @@ export interface WsClientOptions {
 
 export class ChatWsClient {
   state: WsState = 'idle'
-  readonly url: string
+  /** 当前连接地址：未显式注入时每次 connect() 按 resolveWsUrl() 重新解析（M4-01）。 */
+  url: string
   readonly protocolVersion: number
   readonly heartbeatSec: number
   readonly heartbeatTimeoutSec: number
   readonly requestTimeoutMs: number
 
   private readonly createSocket: (url: string) => WebSocket
+  /** 构造时显式指定的地址（测试/特殊场景）；存在时 connect() 不重新解析服务器地址。 */
+  private readonly urlOverride?: string
   private socket: WebSocket | null = null
   private readonly pending = new Map<string, PendingRequest>()
   private readonly handlers = new Map<keyof WsEventMap, Set<(payload: never) => void>>()
@@ -69,7 +72,8 @@ export class ChatWsClient {
   private deviceId: string | null = null
 
   constructor(options: WsClientOptions = {}) {
-    this.url = options.url ?? config.wsUrl
+    this.urlOverride = options.url
+    this.url = options.url ?? resolveWsUrl()
     this.protocolVersion = options.protocolVersion ?? config.protocolVersion
     this.heartbeatSec = options.heartbeatSec ?? config.heartbeatSec
     this.heartbeatTimeoutSec = options.heartbeatTimeoutSec ?? config.heartbeatTimeoutSec
@@ -104,6 +108,10 @@ export class ChatWsClient {
   connect(): void {
     if (this.state === 'connecting' || this.state === 'authed') return
     this.clearReconnectTimer()
+    // M4-01：每次建连重新解析服务器地址，设置页修改后 disconnect→connect 即生效。
+    if (!this.urlOverride) {
+      this.url = resolveWsUrl()
+    }
     this.manualClose = false
     this.fatalEmitted = false
     this.setState(this.reconnectAttempt > 0 ? 'reconnecting' : 'connecting')
