@@ -8,6 +8,7 @@ using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
+using Chat.Server.Modules.Messages;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Data.Sqlite;
@@ -16,7 +17,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 // EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；
-// M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接；M1-07 单聊会话创建与列表）。
+// M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接；M1-07 单聊会话创建与列表；
+// M1-08 消息收发（seq/幂等/ack/广播）、sync 补拉与历史分页）。
 // 配置来源优先级：secrets.json（可选，gitignore）> 环境变量 > appsettings.{Environment}.json > appsettings.json；
 // 端口、数据/文件目录、上传上限、注册开关、邮箱域名白名单、JWT、邮件、限流阈值均走配置。
 // 业务模块（认证、消息、WS 帧处理）从 M1 后续批次逐步接入。
@@ -69,7 +71,11 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddSingleton<ConversationRealtimeNotifier>();
 
-// 实时通信（M1-06）：WS 握手/心跳/单活动连接；消息/同步等业务帧在 M1-07+ 接入。
+// 消息（M1-08）：发送/补拉业务在 MessageService，WS 帧编排在 Realtime.MessageHub。
+builder.Services.AddScoped<MessageService>();
+builder.Services.AddScoped<MessageHub>();
+
+// 实时通信（M1-06）：WS 握手/心跳/单活动连接；M1-08 起接入 message.send / sync.request。
 builder.Services.AddSingleton<ConnectionManager>();
 builder.Services.AddSingleton<WebSocketConnectionHandler>();
 builder.Services.AddScoped<WsAuthenticator>();
@@ -200,6 +206,9 @@ app.MapUserEndpoints();
 
 // 会话 REST（M1-07）：创建单聊、会话列表、单会话读取。
 app.MapConversationsEndpoints();
+
+// 消息 REST（M1-08）：历史分页（正常收发走 WebSocket）。
+app.MapMessageEndpoints();
 
 // 健康检查：部署与发版检查使用（docs/project-overview.md §13.3）；db 探活执行 SELECT 1。
 app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options) =>

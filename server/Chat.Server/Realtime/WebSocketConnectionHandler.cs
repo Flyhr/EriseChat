@@ -236,11 +236,17 @@ public sealed class WebSocketConnectionHandler
                 case ConvListRequestFrame convListRequest:
                     await HandleConvListAsync(connection, convListRequest, connectionAborted);
                     break;
+                case MessageSendFrame messageSend:
+                    await HandleMessageSendAsync(connection, messageSend, connectionAborted);
+                    break;
+                case SyncRequestFrame syncRequest:
+                    await HandleSyncAsync(connection, syncRequest, connectionAborted);
+                    break;
                 case AuthFrame:
                     _logger.LogDebug("WS 已认证连接重复发送 auth 帧，已忽略（连接 {ConnectionId}）", connection.ConnectionId);
                     break;
                 default:
-                    // message.send / sync.request 等业务帧在 M1-07+ 逐批接入；当前忽略但不断连。
+                    // read.update / typing / presence 等业务帧在 M1-10+ 逐批接入；当前忽略但不断连。
                     _logger.LogDebug(
                         "WS 帧类型 {FrameType} 暂未实现，已忽略（连接 {ConnectionId}）",
                         parsed.Frame.Type,
@@ -270,6 +276,28 @@ public sealed class WebSocketConnectionHandler
             list.Count,
             connection.ConnectionId,
             request.ReqId);
+    }
+
+    /// <summary>message.send（M1-08）：落库/幂等回执/广播由 MessageHub 处理；校验失败只回 error，不断连。</summary>
+    private async Task HandleMessageSendAsync(
+        WsConnection connection,
+        MessageSendFrame request,
+        CancellationToken connectionAborted)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
+        await hub.HandleSendAsync(connection, request, connectionAborted);
+    }
+
+    /// <summary>sync.request（M1-08）：只读补拉，reqId 原样回传。</summary>
+    private async Task HandleSyncAsync(
+        WsConnection connection,
+        SyncRequestFrame request,
+        CancellationToken connectionAborted)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
+        await hub.HandleSyncAsync(connection, request, connectionAborted);
     }
 
     private async Task KickExistingAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)
