@@ -3,13 +3,16 @@ import { computed, ref } from 'vue'
 import { conversationsApi } from '../api/conversations'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from './Avatar.vue'
+import PresenceDot from './PresenceDot.vue'
 import { ApiError } from '../core/http'
 import { sortMembers } from '../core/groupChat'
+import { usePresenceStore } from '../stores/presence'
 import type { Conversation, ConversationMember } from '../types/frames'
 
 // 群成员管理面板（M3-08）：成员列表（群主优先）、邀请成员、移除成员（仅群主）、退出群聊（非群主）。
 // 所有操作以服务端为准：成功后重新 GET 会话并 emit updated，由 Chat 页写回 store；
 // 被移出/退出由服务端 conv.updated.removedConversationIds 推送（本面板主动退出时也直接 emit left）。
+// M3-09：成员行展示在线状态圆点，头部展示在线人数。
 const props = defineProps<{
   conversation: Conversation
   selfUserId: string
@@ -21,6 +24,8 @@ const emit = defineEmits<{
   left: [conversationId: string]
 }>()
 
+const presence = usePresenceStore()
+
 const busy = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -31,6 +36,10 @@ const selectedInviteIds = ref<string[]>([])
 const searching = ref(false)
 
 const members = computed(() => sortMembers(props.conversation.members))
+/** 已知在线的成员数（未知状态不计入，v1 无初始查询，M3-09）。 */
+const onlineCount = computed(
+  () => members.value.filter((member) => presence.stateOf(member.userId) === true).length,
+)
 
 const selfMember = computed(() =>
   props.conversation.members.find((member) => member.userId === props.selfUserId),
@@ -152,7 +161,9 @@ async function leaveGroup(): Promise<void> {
         <header class="group-panel__header">
           <div>
             <h3 class="group-panel__title">{{ conversation.title || '群聊' }}</h3>
-            <p class="group-panel__subtitle">{{ members.length }} 位成员</p>
+            <p class="group-panel__subtitle">
+              {{ members.length }} 位成员 · 在线 {{ onlineCount }} 人
+            </p>
           </div>
           <button type="button" class="group-panel__close" @click="emit('close')">关闭</button>
         </header>
@@ -165,6 +176,7 @@ async function leaveGroup(): Promise<void> {
             <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
             <span class="group-panel__member-info">
               <span class="group-panel__member-name">
+                <PresenceDot :online="presence.stateOf(member.userId)" />
                 {{ member.displayName }}
                 <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
               </span>

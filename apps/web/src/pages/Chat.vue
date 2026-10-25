@@ -5,17 +5,20 @@ import ConversationItem from '../components/ConversationItem.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
+import PresenceDot from '../components/PresenceDot.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
+import { presenceLabelOf } from '../core/presence'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
 import { chatWs } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
+import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
 import type { Conversation } from '../types/frames'
 
@@ -27,6 +30,7 @@ const auth = useAuthStore()
 const conversations = useConversationsStore()
 const messages = useMessagesStore()
 const typing = useTypingStore()
+const presence = usePresenceStore()
 /** typing 帧的客户端节流（同一会话 3 秒最多一次，protocol.md §4.7）。 */
 const typingThrottle = new TypingThrottle()
 
@@ -81,6 +85,9 @@ const peerReadSeqForDisplay = computed(() =>
     ? conversations.peerReadSeqOf(activeId.value, peerUserId.value)
     : undefined,
 )
+
+/** 单聊对端在线状态（M3-09）：undefined 表示未知（v1 无初始查询，不显示成离线）。 */
+const peerPresence = computed(() => presence.stateOf(peerUserId.value))
 
 /** 当前会话「输入中」提示（M3-09）：单聊「对方正在输入…」、群聊「X 正在输入…」/多人。 */
 const typingText = computed(() => {
@@ -296,6 +303,10 @@ async function handleFileSelected(file: File): Promise<void> {
       <template v-if="activeConversation">
         <header class="chat-page__main-header">
           <span class="chat-page__main-title" :title="activeTitle">{{ activeTitle }}</span>
+          <template v-if="!isGroup">
+            <PresenceDot :online="peerPresence" />
+            <span class="chat-page__presence">{{ presenceLabelOf(peerPresence) }}</span>
+          </template>
           <span v-if="isGroup" class="chat-page__member-count">{{ memberCount }} 人</span>
           <button
             v-if="isGroup"
@@ -434,6 +445,13 @@ async function handleFileSelected(file: File): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-page__presence {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .chat-page__member-count {

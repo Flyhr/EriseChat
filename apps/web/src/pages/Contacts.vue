@@ -3,12 +3,15 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from '../components/Avatar.vue'
+import PresenceDot from '../components/PresenceDot.vue'
 import { ApiError } from '../core/http'
 import { useConversationsStore } from '../stores/conversations'
+import { usePresenceStore } from '../stores/presence'
 
-// 通讯录页（M2-04 单聊 / M3-08 建群）：搜索用户 → 发起单聊或勾选成员创建群聊 → 进入 /chat/:conversationId。
+// 通讯录页（M2-04 单聊 / M3-08 建群 / M3-09 在线状态）：搜索用户 → 发起单聊或勾选成员创建群聊 → 进入 /chat/:conversationId。
 const router = useRouter()
 const conversations = useConversationsStore()
+const presence = usePresenceStore()
 
 const mode = ref<'direct' | 'group'>('direct')
 const keyword = ref('')
@@ -197,7 +200,10 @@ function toMessage(error: unknown): string {
       <li v-for="user in results" :key="user.userId" class="contacts-page__item">
         <Avatar :display-name="user.displayName" :avatar-file-id="user.avatarFileId" :size="36" />
         <span class="contacts-page__info">
-          <span class="contacts-page__name">{{ user.displayName }}</span>
+          <span class="contacts-page__name">
+            <PresenceDot :online="presence.stateOf(user.userId)" />
+            {{ user.displayName }}
+          </span>
           <span class="contacts-page__email">{{ user.email }}</span>
         </span>
         <button
