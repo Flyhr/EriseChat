@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Conversation } from '../types/frames'
+import { filterConversations, type ConversationFilter } from '../core/chatLayout'
 import { useConversationsStore } from '../stores/conversations'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
 
 // 会话列表（UI-02 批次1，计划 §5.2）：头部标题 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
 // 只消费现有 store 数据（不新增请求）；未读数以 unreadOf 为唯一口径（当前打开的会话传 0）。
-export type ConversationFilter = 'all' | 'unread' | 'group'
+// 筛选规则在 core/chatLayout.ts 的 filterConversations（纯函数，单测覆盖）。
 
 const props = defineProps<{
   conversations: readonly Conversation[]
@@ -31,17 +32,9 @@ const filters: { key: ConversationFilter; label: string }[] = [
   { key: 'group', label: '群聊' },
 ]
 
-const visible = computed(() => {
-  if (props.filter === 'unread') {
-    return props.conversations.filter(
-      (conversation) => conversationsStore.unreadOf(conversation.conversationId) > 0,
-    )
-  }
-  if (props.filter === 'group') {
-    return props.conversations.filter((conversation) => conversation.type === 'group')
-  }
-  return [...props.conversations]
-})
+const visible = computed(() =>
+  filterConversations(props.conversations, props.filter, conversationsStore.unreadOf),
+)
 
 const emptyText = computed(() => {
   if (props.filter === 'unread') return '没有未读会话'

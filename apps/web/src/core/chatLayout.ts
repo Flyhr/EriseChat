@@ -1,7 +1,7 @@
-import type { Message } from '../types/frames'
+import type { Conversation, Message } from '../types/frames'
 
-// 聊天渲染纯函数（UI-02 批次2，计划 §5.4 / §16.4）：日期分隔与渲染项组装。
-// 无 Vue/DOM 依赖，便于单测（UI-02 批次5 继续扩展筛选与浮标判定）。
+// 聊天渲染纯函数（UI-02 批次2/批次5，计划 §5.2 / §5.4 / §16.4）：日期分隔、渲染项组装、
+// 会话列表本地筛选与「有新消息」浮标判定。无 Vue/DOM 依赖，便于单测。
 
 export interface DateSeparatorItem {
   kind: 'separator'
@@ -63,4 +63,33 @@ export function buildMessageItems(
     items.push({ kind: 'message', key: message.messageId, message })
   }
   return items
+}
+
+/** 会话列表本地筛选类型（UI-02）：全部 / 未读 / 群聊。 */
+export type ConversationFilter = 'all' | 'unread' | 'group'
+
+/**
+ * 本地筛选会话：不请求、不改顺序（沿用调用方顺序，store.sorted 已按最近消息倒序）。
+ * 未读以 unreadOf 为唯一口径；all 返回副本，避免组件意外修改传入数组。
+ */
+export function filterConversations(
+  conversations: readonly Conversation[],
+  filter: ConversationFilter,
+  unreadOf: (conversationId: string) => number = () => 0,
+): Conversation[] {
+  if (filter === 'unread') {
+    return conversations.filter((conversation) => unreadOf(conversation.conversationId) > 0)
+  }
+  if (filter === 'group') {
+    return conversations.filter((conversation) => conversation.type === 'group')
+  }
+  return [...conversations]
+}
+
+/** 「有新消息 ↓」浮标：仅在用户未贴底且累计到新消息时显示，贴底后不打扰。 */
+export function shouldShowNewMessageBadge(
+  stickToBottom: boolean,
+  newMessageCount: number,
+): boolean {
+  return !stickToBottom && newMessageCount > 0
 }

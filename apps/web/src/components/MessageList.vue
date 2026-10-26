@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import type { ConversationMember, Message } from '../types/frames'
 import type { PendingMessage } from '../stores/messages'
-import { buildMessageItems } from '../core/chatLayout'
+import { buildMessageItems, shouldShowNewMessageBadge } from '../core/chatLayout'
 import { lastOwnMessageOf, readStateOf, type ReadReceiptState } from '../core/readReceipt'
 import MessageBubble from './MessageBubble.vue'
 
@@ -195,7 +195,7 @@ defineExpose({ scrollToBottom })
     </div>
 
     <button
-      v-if="newMessageCount > 0"
+      v-if="shouldShowNewMessageBadge(stickToBottom, newMessageCount)"
       type="button"
       class="message-list__badge"
       @click="jumpToBottom"
