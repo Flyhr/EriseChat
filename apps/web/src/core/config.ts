@@ -26,6 +26,12 @@ export interface AppConfig {
 /** 运行时服务器地址的 localStorage 键（只保存 origin，如 https://chat.example.com）。 */
 export const SERVER_URL_STORAGE_KEY = 'eisechat.serverUrl'
 
+/**
+ * 单条文本消息最大字符数（protocol/protocol.md §4.3：服务端校验同值）。
+ * 输入框、草稿存储与发送入口统一引用该常量，避免多处魔法数字漂移。
+ */
+export const MAX_TEXT_LENGTH = 4096
+
 function defaultWsUrl(): string {
   if (typeof window === 'undefined') return '/ws'
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

@@ -13,7 +13,7 @@ import type {
 import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
 import { messagesApi } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
-import { config } from '../core/config'
+import { MAX_TEXT_LENGTH, config } from '../core/config'
 import {
   deletePending,
   deleteRecord,
@@ -45,8 +45,8 @@ import { useSettingsStore } from './settings'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
 const PAGE_SIZE = 50
-/** 单条文本消息最大字符数（服务端校验同值；输入框与发送入口双重拦截）。 */
-export const MAX_TEXT_LENGTH = 4096
+// 文本上限常量下沉到 core/config（F-04）；此处保留 re-export 兼容既有 import。
+export { MAX_TEXT_LENGTH }
 /** 首次发送后等待 ack 的时长；超时进入重试（2s/5s/10s，同一 clientMsgId 幂等）。 */
 const ACK_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [2000, 5000, 10000] as const
