@@ -40,6 +40,7 @@
 | **README.md（本文件）** | **项目介绍与入口**：项目是什么/给谁用、技术栈概览、文档索引、里程碑、目标目录、重要边界 |
 | [docs/internal-plan.md](docs/internal-plan.md) | **现行主计划（V2.3.5）**：协议设计、数据模型、Windows/Android/服务器方案（iPhone 仅方案）、安装程序、云端部署、6~7 周路线、成本与风险 |
 | [docs/project-overview.md](docs/project-overview.md) | **项目说明与目录架构**：项目定位/范围/技术栈/总体架构 + 文件级目录规划、模块职责、依赖方向；M0 建骨架按此执行 |
+| [docs/ui-upgrade-plan.md](docs/ui-upgrade-plan.md) | **UI 改造专项计划（V1.1，待批准）**：设计方向与 Token、页面规格、UI-00~UI-06 阶段与闸门、占位策略、验收与打包回归；不替代主计划 |
 | [AGENTS.md](AGENTS.md) | **项目约束**：技术栈、硬规则（许可/架构/范围）、协议可靠性要求、工作流、测试与提交规范、DoD，AI/开发代理开工前必读 |
 | （历史文档） | 旧计划、可行性分析、research 技术底稿已清理，只保留本计划、项目说明与约束文档 |
 

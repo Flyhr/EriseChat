@@ -592,6 +592,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| —（UI 专项计划入库） | 2026-10-26 | 新增 `docs/ui-upgrade-plan.md`（V1.1，待批准）并按实际状态修订（M1～M5 已完成、M6 前置暂缓、UI 排在 M5 后内测前）；同步 README 文档索引与 `docs/project-overview.md` §1 文档表；不改需求、范围、协议与计划版本（V2.3.5） |
 | —（M5 收尾状态同步） | 2026-10-26 | §13「当前仓库状态」更新为 M5 已完成：Android APK 1.0.0 产出（`com.eisechat.mobile`、`versionCode=10000`、minSdk 26 / targetSdk 36、v2 自签名、3,276,544 B、SHA256 `dee0898…984d14`）、图标/启动页、release 签名与 `infra/build-apk.sh`、`GET /download` 下载页可下载、`docs/mobile.md` 安装联调说明；M6（稳定性/备份恢复演练）未开始；需求、范围、部署参数与计划版本（V2.3.5）未变 |
 | —（M4 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M4 已完成：Windows 安装包 1.0.0（NSIS，免签名）、运行时服务器地址配置、Electron 桌面壳（托盘/关闭到托盘/窗口记忆/系统通知/开机自启/单实例）、`GET /download` 下载页与安装包分发、`infra/` 发布/安装/Caddy/备份/恢复脚本与 `docs/deploy.md`；M5（Android APK）与 M6（稳定性/恢复演练）未开始；需求、范围、部署参数与计划版本（V2.3.5）未变 |
 | —（M3 收尾状态同步） | 2026-10-25 | §13「当前仓库状态」更新为 M3 已完成（服务端 + Web）：群聊/成员管理/系统消息、图片文件、已读、typing、presence 与 M3 Web UI 全部落地；服务端 40 个 xUnit 用例、前端累计 91 个 Vitest 用例（M3 新增 57）、M3 端到端验收脚本 77 项检查与 `dotnet build`/`npm run build` 通过；`README.md` 当前状态/快速开始/下一步同步；`protocol/` 无帧变更、库表无变更；需求、范围与计划版本（V2.3.5）未变 |
