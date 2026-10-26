@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import type { Message } from '../types/frames'
+import type { ConversationMember, Message } from '../types/frames'
 import type { PendingMessage } from '../stores/messages'
+import { buildMessageItems } from '../core/chatLayout'
 import { lastOwnMessageOf, readStateOf, type ReadReceiptState } from '../core/readReceipt'
 import MessageBubble from './MessageBubble.vue'
 
-// 消息列表（纯展示）：按 seq 升序渲染，自身消息靠右；pending 为尚未收到 ack 的本地乐观消息。
-// M3-09：向上 emit near-bottom-change（父组件据此推进已读）；单聊中自己发出的最新一条显示对端「已读/未读」。
+// 消息列表（纯展示，UI-02 批次2）：按 seq 升序渲染（输入即有序），跨天插入日期分隔；
+// 群聊他人消息展示头像+昵称；用户向上翻阅时收到新消息只累加「有新消息 ↓」浮标，不强制滚底。
+// 会话切换/自己发送/pending 增加/图片加载仍按既有规则贴底（M2-05/M3-09 行为保留）。
 const props = defineProps<{
   messages: readonly Message[]
   pending?: readonly PendingMessage[]
   selfUserId?: string
   conversationId?: string | null
+  /** 会话成员（群聊用于发送者昵称；单聊可不传）。 */
+  members?: readonly ConversationMember[]
+  /** 是否群聊：群聊才展示发送者头像/昵称。 */
+  isGroup?: boolean
   /** 单聊对端已上报的已读 seq（无记录时 undefined，展示「未读」）。 */
   peerReadSeq?: number
   /** 是否展示已读回执（仅单聊；群聊 v1 无已读详情）。 */
@@ -29,15 +35,35 @@ const emit = defineEmits<{
 const container = ref<HTMLDivElement | null>(null)
 /** 用户是否停留在底部附近（新消息到达/图片撑高列表时只在此状态自动滚到底，不打断向上翻阅）。 */
 const stickToBottom = ref(true)
+/** 未贴底期间累计收到的新消息条数（>0 时显示「有新消息 ↓」浮标）。 */
+const newMessageCount = ref(0)
+
+const items = computed(() => buildMessageItems(props.messages))
 
 /** 自己发出的最新一条消息 ID（单聊只在该条后展示已读/未读）。 */
 const lastOwnMessageId = computed(
   () => lastOwnMessageOf(props.messages, props.selfUserId)?.messageId ?? '',
 )
 
+const memberNameById = computed(() => {
+  const map = new Map<string, string>()
+  for (const member of props.members ?? []) {
+    map.set(member.userId, member.displayName)
+  }
+  return map
+})
+
 function receiptOf(message: Message): ReadReceiptState | undefined {
   if (!props.showReadReceipt || message.messageId !== lastOwnMessageId.value) return undefined
   return readStateOf(props.peerReadSeq, message.seq)
+}
+
+function showSenderOf(message: Message): boolean {
+  return Boolean(props.isGroup) && message.senderId !== props.selfUserId
+}
+
+function senderNameOf(message: Message): string {
+  return memberNameById.value.get(message.senderId) ?? ''
 }
 
 function scrollToBottom(): void {
@@ -58,7 +84,18 @@ function emitNearBottom(atBottom: boolean): void {
 
 function onScroll(): void {
   stickToBottom.value = isNearBottom()
+  if (stickToBottom.value) newMessageCount.value = 0
   emitNearBottom(stickToBottom.value)
+}
+
+/** 点击「有新消息 ↓」：回到最新消息并清零浮标。 */
+function jumpToBottom(): void {
+  stickToBottom.value = true
+  newMessageCount.value = 0
+  void nextTick(() => {
+    scrollToBottom()
+    emitNearBottom(true)
+  })
 }
 
 /** 图片缩略图加载完成后：用户原本在底部则跟随滚到底，否则保持当前位置。 */
@@ -67,11 +104,12 @@ function onImageLoaded(): void {
   void nextTick(scrollToBottom)
 }
 
-// 切换会话：重新贴底并上报，父组件据此推进新会话的已读。
+// 切换会话：重新贴底、清浮标并上报，父组件据此推进新会话的已读。
 watch(
   () => props.conversationId ?? '',
   () => {
     stickToBottom.value = true
+    newMessageCount.value = 0
     void nextTick(() => {
       scrollToBottom()
       emitNearBottom(true)
@@ -79,21 +117,27 @@ watch(
   },
 )
 
-// 收到新消息/加载历史：只有用户原本在底部附近才自动滚到底，向上翻阅旧消息时不打断。
+// 消息数量变化：贴底时跟随滚到底；向上翻阅时累计「有新消息」浮标（不强制滚动，计划 §4.3）。
 watch(
   () => props.messages.length,
-  () => {
-    if (!stickToBottom.value) return
-    void nextTick(scrollToBottom)
+  (next, previous) => {
+    const delta = next - previous
+    if (delta <= 0) return
+    if (stickToBottom.value) {
+      void nextTick(scrollToBottom)
+      return
+    }
+    newMessageCount.value += delta
   },
 )
 
-// 自己发送新消息（pending 增加）时总是贴底。
+// 自己发送新消息（pending 增加）时总是贴底并清浮标。
 watch(
   () => props.pending?.length ?? 0,
   (next, previous) => {
     if (next <= previous) return
     stickToBottom.value = true
+    newMessageCount.value = 0
     void nextTick(() => {
       scrollToBottom()
       emitNearBottom(true)
@@ -110,57 +154,85 @@ onMounted(() => {
 </script>
 
 <template>
-  <div ref="container" class="message-list" @scroll="onScroll">
-    <button
-      v-if="hasMore"
-      class="message-list__more"
-      type="button"
-      :disabled="loading"
-      @click="emit('loadMore')"
-    >
-      {{ loading ? '加载中…' : '加载更早消息' }}
-    </button>
-    <p v-else-if="messages.length > 0" class="message-list__top">没有更早的消息了</p>
+  <div class="message-list-wrap">
+    <div ref="container" class="message-list" @scroll="onScroll">
+      <button
+        v-if="hasMore"
+        class="message-list__more"
+        type="button"
+        :disabled="loading"
+        @click="emit('loadMore')"
+      >
+        {{ loading ? '加载中…' : '加载更早消息' }}
+      </button>
+      <p v-else-if="messages.length > 0" class="message-list__top">没有更早的消息了</p>
 
-    <MessageBubble
-      v-for="message in messages"
-      :key="message.messageId"
-      :message="message"
-      :self="message.senderId === selfUserId"
-      :receipt="receiptOf(message)"
-      @image-loaded="onImageLoaded"
-    />
-    <MessageBubble
-      v-for="item in pending ?? []"
-      :key="item.clientMsgId"
-      :message="item"
-      :self="true"
-      :status="item.status"
-      @retry="emit('retry', item.clientMsgId)"
-      @image-loaded="onImageLoaded"
-    />
+      <template v-for="item in items" :key="item.key">
+        <div v-if="item.kind === 'separator'" class="message-list__date">
+          <span>{{ item.label }}</span>
+        </div>
+        <MessageBubble
+          v-else
+          :message="item.message"
+          :self="item.message.senderId === selfUserId"
+          :show-sender="showSenderOf(item.message)"
+          :sender-name="senderNameOf(item.message)"
+          :receipt="receiptOf(item.message)"
+          @image-loaded="onImageLoaded"
+        />
+      </template>
+
+      <MessageBubble
+        v-for="item in pending ?? []"
+        :key="item.clientMsgId"
+        :message="item"
+        :self="true"
+        :status="item.status"
+        @retry="emit('retry', item.clientMsgId)"
+        @image-loaded="onImageLoaded"
+      />
+    </div>
+
+    <button
+      v-if="newMessageCount > 0"
+      type="button"
+      class="message-list__badge"
+      @click="jumpToBottom"
+    >
+      有新消息（{{ newMessageCount }}）↓
+    </button>
   </div>
 </template>
 
 <style scoped>
+.message-list-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .message-list {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--ec-space-3);
   min-height: 0;
-  padding: var(--space-4);
+  padding: var(--ec-space-4) var(--ec-space-5);
   overflow-y: auto;
+  background: var(--ec-chat-gradient);
 }
 
 .message-list__more {
   align-self: center;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  padding: var(--ec-space-1) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
 }
 
 .message-list__more:disabled {
@@ -170,7 +242,48 @@ onMounted(() => {
 
 .message-list__top {
   margin: 0 auto;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+/* 日期分隔：居中细字 + 两侧渐隐线（计划 §5.4）。 */
+.message-list__date {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  margin: var(--ec-space-1) 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.message-list__date::before,
+.message-list__date::after {
+  flex: 1;
+  height: 1px;
+  background: var(--ec-border);
+  content: '';
+}
+
+/* 「有新消息 ↓」浮标：绝对定位在列表底部（不遮挡输入区）。 */
+.message-list__badge {
+  position: absolute;
+  bottom: var(--ec-space-3);
+  left: 50%;
+  padding: var(--ec-space-1) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface);
+  box-shadow: var(--ec-shadow-md);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+@media (max-width: 800px) {
+  .message-list {
+    padding: var(--ec-space-3);
+  }
 }
 </style>

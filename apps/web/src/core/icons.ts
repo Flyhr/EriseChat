@@ -20,6 +20,7 @@ export type AppIconName =
   | 'user'
   | 'logout'
   | 'check'
+  | 'back'
 
 export interface AppIconShape {
   paths?: string[]
@@ -72,4 +73,5 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
   },
   logout: { paths: ['M15 4h4v16h-4', 'M4 12h11', 'M11.5 8.5L15 12l-3.5 3.5'] },
   check: { paths: ['M5 12.5l4.5 4.5L19 6.5'] },
+  back: { paths: ['M15 5l-7 7 7 7'] },
 }

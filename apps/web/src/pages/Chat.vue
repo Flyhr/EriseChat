@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList, { type ConversationFilter } from '../components/ConversationList.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
-import PresenceDot from '../components/PresenceDot.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
-import { presenceLabelOf } from '../core/presence'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
 import { chatWs } from '../core/ws'
@@ -312,22 +311,13 @@ async function handleFileSelected(file: File): Promise<void> {
       </p>
 
       <template v-if="activeConversation">
-        <header class="chat-page__main-header">
-          <span class="chat-page__main-title" :title="activeTitle">{{ activeTitle }}</span>
-          <template v-if="!isGroup">
-            <PresenceDot :online="peerPresence" />
-            <span class="chat-page__presence">{{ presenceLabelOf(peerPresence) }}</span>
-          </template>
-          <span v-if="isGroup" class="chat-page__member-count">{{ memberCount }} 人</span>
-          <button
-            v-if="isGroup"
-            type="button"
-            class="chat-page__members-button"
-            @click="showMembersPanel = true"
-          >
-            群成员
-          </button>
-        </header>
+        <ChatHeader
+          :title="activeTitle"
+          :is-group="isGroup"
+          :member-count="memberCount"
+          :peer-presence="peerPresence"
+          @open-group="showMembersPanel = true"
+        />
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
         <MessageList
@@ -335,6 +325,8 @@ async function handleFileSelected(file: File): Promise<void> {
           :pending="activePending"
           :self-user-id="selfUserId"
           :conversation-id="activeId"
+          :members="activeConversation.members"
+          :is-group="isGroup"
           :peer-read-seq="peerReadSeqForDisplay"
           :show-read-receipt="!isGroup"
           :has-more="activeHasMore"
@@ -410,51 +402,6 @@ async function handleFileSelected(file: File): Promise<void> {
 
 .chat-page__notice-close {
   border: none;
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.chat-page__main-header {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  height: var(--header-height);
-  padding: 0 var(--space-4);
-  font-weight: 600;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.chat-page__main-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-page__presence {
-  flex: none;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.chat-page__member-count {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  background: var(--color-surface-hover);
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.chat-page__members-button {
-  flex: none;
-  margin-left: auto;
-  padding: 4px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-primary);
   font-size: 12px;

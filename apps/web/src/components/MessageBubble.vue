@@ -2,14 +2,14 @@
 import { computed, ref } from 'vue'
 import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
-import MessageAttachment from './MessageAttachment.vue'
-import ImagePreview from './ImagePreview.vue'
 import { systemMessageText } from '../core/groupChat'
+import Avatar from './Avatar.vue'
+import ImagePreview from './ImagePreview.vue'
+import MessageAttachment from './MessageAttachment.vue'
 
-// 消息气泡（纯展示）。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3 安全要求）。
-// pending 消息显示「发送中/失败重发」状态；失败时点击气泡上的按钮重发（复用 clientMsgId）。
-// M3-07：image/file 消息改用 MessageAttachment（鉴权 blob 渲染），点击图片打开 ImagePreview 大图。
-// M3-08：system 消息（群事件）不带气泡、居中灰色小字；文案优先 content.text，缺失时按事件名兜底。
+// 消息气泡（纯展示，UI-02 批次2 按 D-05 调整）：自己蓝底白字、对方白底描边；时间与状态移到气泡下方；
+// 群聊他人消息左侧 32px 字母头像 + 昵称。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3）。
+// pending 消息显示「发送中/失败重发」；system 消息居中灰字，不带气泡。
 const props = withDefaults(
   defineProps<{
     message: Message | PendingMessage
@@ -17,8 +17,11 @@ const props = withDefaults(
     status?: PendingStatus
     /** 单聊已读回执（M3-09）：仅自己发出的最新一条展示；群聊不展示。 */
     receipt?: 'read' | 'unread'
+    /** 群聊中展示发送者头像与昵称（非自己消息）。 */
+    showSender?: boolean
+    senderName?: string
   }>(),
-  { self: false },
+  { self: false, showSender: false, senderName: '' },
 )
 
 const emit = defineEmits<{
@@ -74,37 +77,48 @@ const timeText = computed(() =>
   </div>
   <div
     v-else
-    class="message-bubble"
-    :class="{
-      'message-bubble--self': self,
-      'message-bubble--sending': status === 'sending',
-      'message-bubble--failed': status === 'failed',
-    }"
+    class="message-row"
+    :class="{ 'message-row--self': self, 'message-row--sender': showSender }"
   >
-    <MessageAttachment
-      v-if="showAttachment"
-      :message="message"
-      @preview="onPreview"
-      @loaded="emit('imageLoaded')"
-    />
-    <p v-else class="message-bubble__text">{{ contentText }}</p>
-    <time class="message-bubble__time">{{ timeText }}</time>
-    <span
-      v-if="receipt"
-      class="message-bubble__receipt"
-      :class="`message-bubble__receipt--${receipt}`"
-    >
-      {{ receipt === 'read' ? '已读' : '未读' }}
-    </span>
-    <span v-if="status === 'sending'" class="message-bubble__pending">发送中…</span>
-    <button
-      v-else-if="status === 'failed'"
-      class="message-bubble__retry"
-      type="button"
-      @click="emit('retry')"
-    >
-      发送失败，点击重发
-    </button>
+    <Avatar v-if="showSender" class="message-row__avatar" :display-name="senderName || '?'" :size="32" />
+    <div class="message-row__body">
+      <span v-if="showSender && senderName" class="message-row__sender">{{ senderName }}</span>
+      <div
+        class="message-bubble"
+        :class="{
+          'message-bubble--self': self,
+          'message-bubble--sending': status === 'sending',
+          'message-bubble--failed': status === 'failed',
+        }"
+      >
+        <MessageAttachment
+          v-if="showAttachment"
+          :message="message"
+          @preview="onPreview"
+          @loaded="emit('imageLoaded')"
+        />
+        <p v-else class="message-bubble__text">{{ contentText }}</p>
+      </div>
+      <div class="message-row__meta">
+        <time class="message-row__time">{{ timeText }}</time>
+        <span
+          v-if="receipt"
+          class="message-row__receipt"
+          :class="`message-row__receipt--${receipt}`"
+        >
+          {{ receipt === 'read' ? '已读' : '未读' }}
+        </span>
+        <span v-if="status === 'sending'" class="message-row__pending">发送中…</span>
+        <button
+          v-else-if="status === 'failed'"
+          class="message-row__retry"
+          type="button"
+          @click="emit('retry')"
+        >
+          发送失败，点击重发
+        </button>
+      </div>
+    </div>
     <ImagePreview
       :open="previewOpen"
       :url="previewUrl"
@@ -118,27 +132,63 @@ const timeText = computed(() =>
 .message-system {
   display: flex;
   justify-content: center;
-  padding: 0 var(--space-2);
+  padding: 0 var(--ec-space-2);
 }
 
 .message-system__text {
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
   text-align: center;
   word-break: break-word;
 }
 
+.message-row {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: flex-start;
+}
+
+/* 自己消息靠右：行方向反转，meta 右对齐。 */
+.message-row--self {
+  flex-direction: row-reverse;
+}
+
+.message-row__avatar {
+  margin-top: 2px;
+}
+
+.message-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(520px, 78%);
+  min-width: 0;
+}
+
+.message-row--self .message-row__body {
+  align-items: flex-end;
+}
+
+.message-row__sender {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+/* D-05：自己 brand-600 蓝底白字；对方白底 + 边框；圆角 14px。 */
 .message-bubble {
-  max-width: 72%;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--color-bubble-other);
-  box-shadow: var(--shadow-sm);
+  max-width: 100%;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-bubble);
+  background: var(--ec-bubble-other);
+  color: var(--ec-text-primary);
+  box-shadow: var(--ec-shadow-sm);
 }
 
 .message-bubble--self {
-  margin-left: auto;
-  background: var(--color-bubble-self);
+  border-color: var(--ec-brand-600);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
 }
 
 .message-bubble--sending {
@@ -146,7 +196,7 @@ const timeText = computed(() =>
 }
 
 .message-bubble--failed {
-  border: 1px solid var(--color-danger);
+  border-color: var(--ec-danger);
 }
 
 .message-bubble__text {
@@ -155,40 +205,32 @@ const timeText = computed(() =>
   word-break: break-word;
 }
 
-.message-bubble__time {
-  display: block;
-  margin-top: var(--space-1);
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  text-align: right;
+.message-row__meta {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
 }
 
-.message-bubble__receipt {
-  display: block;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  text-align: right;
+.message-row__receipt--read {
+  color: var(--ec-brand-600);
 }
 
-.message-bubble__receipt--read {
-  color: var(--color-primary);
-}
-
-.message-bubble__pending {
-  display: block;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  text-align: right;
-}
-
-.message-bubble__retry {
-  display: block;
-  margin-left: auto;
+.message-row__retry {
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-danger);
-  font-size: 11px;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
   cursor: pointer;
+}
+
+/* ≤800：气泡最大宽放宽，避免窄屏消息过短。 */
+@media (max-width: 800px) {
+  .message-row__body {
+    max-width: 84%;
+  }
 }
 </style>
