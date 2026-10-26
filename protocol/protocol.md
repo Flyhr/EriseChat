@@ -47,7 +47,7 @@
 - 认证完成前只接受 `auth` 帧；收到其它帧 → `error`（`AUTH_REQUIRED`）并关闭 `4002`。
 - `seq` 由服务端在事务内分配，客户端不得携带、不得修改；消息落库后不可变。
 
-## 3. 帧总表（与计划 §4.2 一一对应，共 17 个 type）
+## 3. 帧总表（与计划 §4.2 一一对应，共 18 个 type）
 
 | type | 方向 | 用途 | 备注 |
 |---|---|---|---|
@@ -65,7 +65,8 @@
 | `read.update` | C→S | 上报已读游标 | 打开会话滚到底部时上报 |
 | `read.updated` | S→C | 已读广播 | 仅单聊推送给对方 |
 | `typing` | 双向 | 正在输入 | 3 秒节流，不落库 |
-| `presence` | S→C | 在线状态 | 有共同会话的成员 |
+| `presence` | S→C | 在线状态 | 有共同会话或好友关系 |
+| `friend.changed` | S→C | 好友/申请变更推送 | 客户端按 `kind` 更新本地好友与申请状态 |
 | `kicked` | S→C | 被踢下线 | 随后关闭连接 |
 | `error` | S→C | 统一错误 | 错误码见 §5 |
 
@@ -326,7 +327,7 @@ batch 对象：
 | `userId` | string | 是 | 用户 ID |
 | `online` | boolean | 是 | 是否在线 |
 
-规则：仅在该用户连接数 **0→1** 时推送 `online=true`、**1→0** 时推送 `online=false`；推送给与其有共同会话的其他在线用户（去重），不落库、不查询离线状态；客户端方向错误（如 C→S 发送 `presence`）按「忽略并记 debug」处理，不断连；v1 不做频繁状态刷新。
+规则：仅在该用户连接数 **0→1** 时推送 `online=true`、**1→0** 时推送 `online=false`；推送给与其有共同会话或好友关系的其他在线用户（去重），不落库、不查询离线状态；客户端方向错误（如 C→S 发送 `presence`）按「忽略并记 debug」处理，不断连；v1 不做频繁状态刷新。
 
 ### 4.8 `kicked` / `error`
 
@@ -349,6 +350,63 @@ batch 对象：
 | `reqId` | string | 否 | 回传对应请求的 `reqId` |
 
 规则：非致命错误只回 `error`，连接保持；致命错误先回 `error`（若连接仍可写），再关闭（close code 见 §5）。
+
+### 4.9 `friend.changed`（好友/申请变更推送）
+
+`friend.changed`（S→C）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `friend.changed` |
+| `kind` | string | 是 | 变更类型，见下表 |
+| `friend` | object / null | 否 | 好友对象快照，见下表；`kind` 为 `request.*` 时可缺省 |
+| `request` | object / null | 否 | 申请对象快照，见下表；`kind` 为 `friend.*` 时可缺省 |
+
+`kind` 取值：
+
+| kind | 含义 | 附带对象 | 客户端处理 |
+|---|---|---|---|
+| `request.received` | 收到新的好友申请 | `request` | 加入「收到的申请」列表，提示一次 |
+| `request.accepted` | 自己发出的申请被接受 | `request` + `friend` | 移出「发出的申请」，加入好友列表 |
+| `request.rejected` | 自己发出的申请被拒绝 | `request` | 移出「发出的申请」 |
+| `request.cancelled` | 对方撤销了发给自己的申请 | `request` | 移出「收到的申请」 |
+| `friend.added` | 新增好友关系 | `friend` | 加入好友列表 |
+| `friend.removed` | 好友关系被删除（任意一方删除） | `friend`（移除前快照） | 移出好友列表 |
+| `friend.updated` | 自己的好友备注/分组变更 | `friend` | 更新对应好友行 |
+
+**好友对象（Friend）**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `userId` | string | 是 | 好友用户 ID |
+| `displayName` | string | 是 | 好友昵称 |
+| `email` | string | 是 | 好友邮箱（内部版可直接下发） |
+| `remark` | string / null | 否 | 我对该好友的备注（空表示无备注） |
+| `groupName` | string / null | 否 | 我对该好友的分组名（空表示未分组） |
+| `avatarFileId` | string | 否 | 头像文件 ID |
+| `createdAt` | integer | 是 | 成为好友的时间（UTC 毫秒） |
+
+**申请对象（FriendRequest）**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `requestId` | string | 是 | 申请 ID |
+| `fromUserId` | string | 是 | 申请人用户 ID |
+| `fromDisplayName` | string | 是 | 申请人昵称 |
+| `toUserId` | string | 是 | 被申请人用户 ID |
+| `toDisplayName` | string | 是 | 被申请人昵称 |
+| `message` | string / null | 否 | 附言（≤100 字符） |
+| `status` | string | 是 | `pending` / `accepted` / `rejected` / `cancelled` |
+| `createdAt` | integer | 是 | 申请时间（UTC 毫秒） |
+| `handledAt` | integer / null | 否 | 处理时间（UTC 毫秒） |
+
+规则：
+
+1. `friend.changed` 是**推送帧，不落库**；服务端在好友/申请数据变化的事务提交后推送，离线用户不补推，客户端重连/启动后用 REST（计划 §7）全量拉取并覆盖本地状态。
+2. 未知 `kind` 或未知字段按忽略处理，不报错、不断连（§8.2）。
+3. 同一变化可能产生多条推送（如自动接受会推 `request.accepted` + `friend.added`），客户端需按 `kind` 幂等处理。
+4. `request.accepted` 推给申请人（附 `friend`），`request.rejected` 推给申请人；`request.cancelled` 推给被申请人；`friend.added` / `friend.removed` 推给双方；`friend.updated` 仅推给发起修改的一方。
+5. 好友关系与申请数据由服务端维护，客户端不得仅本地修改（数据归属见 `AGENTS.md` §2.8）。
 
 ## 5. 错误码
 
@@ -472,6 +530,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 - 新增**可选**字段（接收方必须忽略未知字段）；
 - 新增 `type`（接收方必须忽略未知 `type` 且不断连）；
+- 新增推送帧的枚举取值（如 `friend.changed` 的 `kind`），接收方必须忽略未知取值；
 - 新增错误码（未知错误码按通用错误提示，不崩溃）；
 - 现有字段的取值增加（枚举新增值），但不改变已有值语义。
 
@@ -518,3 +577,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M3-03 校准） | 2026-10-25 | 明确文件消息的 fileId 归属校验、content 以 files 记录为准、messages.file_id 落库；帧格式与 protocolVersion 不变 |
 | v1（M3-04 校准） | 2026-10-25 | 新增 conv.updated.removedConversationIds；系统消息事件名 group.created/member.joined/member.left/member.removed；群聊 REST 行为与推送时序；帧格式与 protocolVersion 不变 |
 | v1（M3-05 校准） | 2026-10-25 | 明确已读语义（新成员 last_read_seq=加入前 lastSeq；只增不减、越界校验）、typing 服务端 1 秒/连接/会话节流、presence 仅在 0↔1 连接时推送、移出/退出只收 removedConversationIds；帧格式与 protocolVersion 不变 |
+| v1（F-17 好友关系） | 2026-10-27 | 新增 `friend.changed` 推送帧（共 18 个 type，§4.9）及 Friend/FriendRequest 对象、7 种 `kind`；presence 推送范围扩展为「有共同会话或好友关系」；新增好友/申请相关 REST（计划 §7）；`protocolVersion` 仍为 1 |

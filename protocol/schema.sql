@@ -211,3 +211,51 @@ CREATE TABLE app_settings (
     key   TEXT PRIMARY KEY NOT NULL,
     value TEXT NOT NULL
 );
+
+-- ------------------------------------------------------------
+-- friends：好友关系（F-17，单向行）
+-- owner_user_id  : 关系拥有者（「我的好友」）
+-- friend_user_id : 好友用户
+-- remark         : 我对该好友的备注（空表示无备注）
+-- group_name     : 我对该好友的分组名（空表示未分组）
+-- 说明：单向行便于每个人独立维护备注/分组；服务端在成为好友时事务内插入双向两行，
+--       删除好友时删除双向两行（不删除会话与消息）。
+-- ------------------------------------------------------------
+CREATE TABLE friends (
+    owner_user_id  TEXT NOT NULL,
+    friend_user_id TEXT NOT NULL,
+    remark         TEXT,
+    group_name     TEXT,
+    created_at     INTEGER NOT NULL,
+    PRIMARY KEY (owner_user_id, friend_user_id),
+    FOREIGN KEY (owner_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (friend_user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_friends_owner ON friends (owner_user_id);
+CREATE INDEX idx_friends_friend ON friends (friend_user_id);
+
+-- ------------------------------------------------------------
+-- friend_requests：好友申请（F-17）
+-- status     : pending / accepted / rejected / cancelled
+-- message    : 附言（≤100 字符，可空）
+-- handled_at : 处理时间；pending 时为 NULL
+-- 说明：部分唯一索引只约束 pending，允许同一对用户保留多条历史申请记录。
+-- ------------------------------------------------------------
+CREATE TABLE friend_requests (
+    id           TEXT PRIMARY KEY NOT NULL,
+    from_user_id TEXT NOT NULL,
+    to_user_id   TEXT NOT NULL,
+    message      TEXT,
+    status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'cancelled')),
+    created_at   INTEGER NOT NULL,
+    handled_at   INTEGER,
+    FOREIGN KEY (from_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (to_user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX ux_friend_requests_pending
+    ON friend_requests (from_user_id, to_user_id)
+    WHERE status = 'pending';
+CREATE INDEX idx_friend_requests_to_status ON friend_requests (to_user_id, status);
+CREATE INDEX idx_friend_requests_from_status ON friend_requests (from_user_id, status);
