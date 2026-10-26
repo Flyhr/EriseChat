@@ -174,8 +174,8 @@ function formatTime(timestamp: number): string {
   font-size: var(--ec-font-size-small);
 }
 
-/* 801~1099：紧凑行高 64（Electron 最小 960×640 仍可用）。 */
-@media (max-width: 1099px) {
+/* 801~1199：紧凑行高 64（Electron 最小 960×640 仍可用）。 */
+@media (max-width: 1199px) {
   .conversation-item {
     min-height: 64px;
   }

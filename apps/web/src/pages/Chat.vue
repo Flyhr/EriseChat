@@ -467,6 +467,13 @@ async function handleFileSelected(file: File): Promise<void> {
               />
             </div>
           </div>
+          <!-- 801~1199 覆盖式成员面板的遮罩；≥1200 推挤与 ≤800 全宽时由 CSS 隐藏。 -->
+          <div
+            v-if="membersOpen"
+            class="chat-page__members-mask"
+            aria-hidden="true"
+            @click="activeDrawer = null"
+          />
           <!-- 群成员面板：位于聊天顶栏下方的同层右侧栏（不遮罩、不盖住「群资料」），默认隐藏。 -->
           <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群成员">
             <header class="chat-page__members-header">
@@ -516,8 +523,8 @@ async function handleFileSelected(file: File): Promise<void> {
   background: var(--ec-bg-canvas);
 }
 
-/* UI-01/UI-02：801~1099 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
-@media (max-width: 1099px) {
+/* UI-01/UI-02/UI-04：801~1199 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
+@media (max-width: 1199px) {
   .chat-page {
     grid-template-columns: 260px minmax(0, 1fr);
   }
@@ -536,6 +543,7 @@ async function handleFileSelected(file: File): Promise<void> {
 
 /* 聊天主区内容行：消息/输入区占剩余宽度，群成员面板固定宽度并列在右侧。 */
 .chat-page__content {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -603,6 +611,33 @@ async function handleFileSelected(file: File): Promise<void> {
   min-height: 0;
   padding: var(--ec-space-4);
   overflow-y: auto;
+}
+
+/* 801~1199 覆盖式成员面板的遮罩；默认隐藏（仅该档显示）。 */
+.chat-page__members-mask {
+  display: none;
+}
+
+/* 801~1199（窄桌面/小窗口）：成员面板改为覆盖式——绝对定位在聊天区右侧并加遮罩，
+   聊天列保持全宽，避免四栏硬挤导致输入区过窄；点遮罩、Esc 或关闭按钮均可关闭。 */
+@media (min-width: 801px) and (max-width: 1199px) {
+  .chat-page__members-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 14;
+    display: block;
+    background: var(--ec-scrim);
+  }
+
+  .chat-page__members {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 15;
+    width: var(--ec-drawer-width);
+    box-shadow: var(--ec-shadow-lg);
+  }
 }
 
 /* 底部输入区容器：为悬浮 Emoji 面板提供定位基准（面板绝对定位，不占文档流高度）。 */

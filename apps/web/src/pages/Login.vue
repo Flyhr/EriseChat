@@ -364,7 +364,7 @@ function clearServerUrl(): void {
   background: var(--ec-bg-canvas);
 }
 
-/* 桌面端（≥1100px）：左侧品牌说明区 + 右侧登录卡片（计划 §5.7）。 */
+/* 桌面端（≥1200px）：左侧品牌说明区 + 右侧登录卡片（计划 §5.7）。 */
 .login-brand {
   display: none;
   flex: 1 1 0;
@@ -711,14 +711,14 @@ function clearServerUrl(): void {
   font-size: var(--ec-font-size-small);
 }
 
-/* 平板/窄屏（≤1099px）：隐藏品牌区，单栏居中卡片。 */
-@media (max-width: 1099px) {
+/* 平板/窄屏（≤1199px）：隐藏品牌区，单栏居中卡片。 */
+@media (max-width: 1199px) {
   .login-panel {
     padding: var(--ec-space-4);
   }
 }
 
-@media (min-width: 1100px) {
+@media (min-width: 1200px) {
   .login-brand {
     display: flex;
   }

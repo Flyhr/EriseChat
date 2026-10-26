@@ -7,7 +7,7 @@ import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
-// ≥1200：172px 图标+文字；801~1099：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
+// ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
 // 群聊入口（UI-02）：/chat?group=all 进入会话列表的「群聊」筛选；高亮时群聊优先于消息。
 interface NavItem {
   key: string
@@ -187,8 +187,8 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
   white-space: nowrap;
 }
 
-/* 801~1099：收为 72px 图标栏（Electron 最小窗口 960×640 下可用），文字隐藏、保留 title。 */
-@media (max-width: 1099px) {
+/* 801~1199：收为 72px 图标栏（Electron 最小窗口 960×640 下可用），文字隐藏、保留 title。 */
+@media (max-width: 1199px) {
   .ec-sidenav {
     width: var(--ec-nav-width-compact);
     align-items: center;
