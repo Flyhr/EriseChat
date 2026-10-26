@@ -6,7 +6,7 @@
   "author": "EiseChat",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "npm run build && electron .",
+    "dev": "node scripts/dev.mjs",
     "build": "tsc -p electron/tsconfig.json",
     "typecheck": "tsc -p electron/tsconfig.json --noEmit",
     "dist": "npm run build && electron-builder --win nsis"
