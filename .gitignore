@@ -81,3 +81,12 @@ apps/mobile/android/app/src/main/assets/public/
 
 # ==== 测试与临时文件（AGENTS §4/§11：测试文件统一放 docs/test/，不入库，可随时删除） ====
 /docs/test/
+
+# ==== 计划与过程文档（AGENTS §2.11/§4：只提交说明类文档，计划/报告/截图等本地保留不入库） ====
+/docs/internal-plan.md
+/docs/ui-upgrade-plan.md
+/docs/ui/ui-00-review.md
+/docs/ui/*/
+/docs/ui/*.png
+/docs/EiseChat_UI_*/
+
