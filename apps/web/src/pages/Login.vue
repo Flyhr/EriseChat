@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { chatWs } from '../core/ws'
-import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
+import { getServerUrl, normalizeServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -40,6 +40,16 @@ const serverUrlError = ref('')
 const serverUrlLabel = computed(
   () => serverUrl.value.trim() || (isFileShell ? '未配置，请点此填写' : '与当前页面同源'),
 )
+
+/** UI-03 批次3：桌面壳注入的服务器地址存在时，地址由桌面端配置，页面只读展示。 */
+const injectedServerUrl = normalizeServerUrl(
+  typeof window !== 'undefined'
+    ? (window as Window & { eisechatDesktop?: { serverUrl?: string } }).eisechatDesktop?.serverUrl
+    : null,
+)
+
+/** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
+const passwordVisible = ref(false)
 
 const mode = ref<Mode>('code')
 const email = ref('')
@@ -213,103 +223,136 @@ function clearServerUrl(): void {
 
 <template>
   <main class="login-page">
-    <section class="login-card">
-      <h1 class="login-card__title">EiseChat</h1>
-      <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
-
-      <div class="login-server">
-        <button class="login-server__toggle" type="button" @click="toggleServerEditor">
-          服务器地址：{{ serverUrlLabel }}{{ serverUrlOpen ? '（收起）' : '（修改）' }}
-        </button>
-        <div v-if="serverUrlOpen" class="login-server__panel">
-          <input
-            v-model="serverUrl"
-            type="url"
-            :placeholder="
-              isFileShell
-                ? 'http://127.0.0.1:8080（本机）或 https://你的域名'
-                : 'https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）'
-            "
-          />
-          <div class="login-server__actions">
-            <button class="login-server__save" type="button" @click="saveServerUrl">保存</button>
-            <button class="login-server__reset" type="button" @click="clearServerUrl">恢复默认</button>
-          </div>
-          <p v-if="serverUrlError" class="login-server__error" role="alert">{{ serverUrlError }}</p>
-        </div>
+    <section class="login-brand" aria-hidden="true">
+      <div class="login-brand__inner">
+        <span class="login-brand__logo">E</span>
+        <h1 class="login-brand__title">EiseChat</h1>
+        <p class="login-brand__desc">团队内部使用的轻量聊天工具：消息实时送达，历史随时可查。</p>
+        <ul class="login-brand__list">
+          <li>邮箱验证码登录，无需额外注册流程</li>
+          <li>单聊与群聊，支持图片和文件</li>
+          <li>断线自动重连，消息不丢失</li>
+        </ul>
       </div>
+    </section>
 
-      <div class="login-modes" role="tablist" aria-label="登录方式">
-        <button
-          v-for="item in modes"
-          :key="item"
-          class="login-modes__item"
-          :class="{ 'login-modes__item--active': mode === item }"
-          type="button"
-          role="tab"
-          :aria-selected="mode === item"
-          @click="switchMode(item)"
-        >
-          {{ MODE_LABELS[item] }}
-        </button>
-      </div>
+    <section class="login-panel">
+      <div class="login-card">
+        <h2 class="login-card__title">{{ mode === 'register' ? '创建账号' : '欢迎回来' }}</h2>
+        <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
 
-      <form class="login-form" @submit.prevent="submit">
-        <label class="login-form__field">
-          <span class="login-form__label">邮箱</span>
-          <input v-model="email" type="email" autocomplete="email" placeholder="you@company.com" />
-        </label>
-
-        <label v-if="mode === 'register'" class="login-form__field">
-          <span class="login-form__label">昵称</span>
-          <input
-            v-model="displayName"
-            type="text"
-            maxlength="32"
-            autocomplete="nickname"
-            placeholder="聊天中显示的名字"
-          />
-        </label>
-
-        <label v-if="mode !== 'password'" class="login-form__field">
-          <span class="login-form__label">验证码</span>
-          <div class="login-form__code-row">
-            <input v-model="code" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
-            <button
-              class="login-form__send"
-              type="button"
-              :disabled="sending || cooldown > 0"
-              @click="sendCode"
-            >
-              {{ sendButtonLabel }}
+        <div class="login-server">
+          <p v-if="injectedServerUrl" class="login-server__locked">
+            服务器地址：{{ injectedServerUrl }}（由桌面端配置）
+          </p>
+          <template v-else>
+            <button class="login-server__toggle" type="button" @click="toggleServerEditor">
+              服务器地址：{{ serverUrlLabel }}{{ serverUrlOpen ? '（收起）' : '（修改）' }}
             </button>
+            <div v-if="serverUrlOpen" class="login-server__panel">
+              <input
+                v-model="serverUrl"
+                type="url"
+                aria-label="服务器地址"
+                :placeholder="
+                  isFileShell
+                    ? 'http://127.0.0.1:8080（本机）或 https://你的域名'
+                    : 'https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）'
+                "
+              />
+              <div class="login-server__actions">
+                <button class="login-server__save" type="button" @click="saveServerUrl">保存</button>
+                <button class="login-server__reset" type="button" @click="clearServerUrl">恢复默认</button>
+              </div>
+              <p v-if="serverUrlError" class="login-server__error" role="alert">{{ serverUrlError }}</p>
+            </div>
+          </template>
+        </div>
+
+        <div class="login-modes" role="tablist" aria-label="登录方式">
+          <button
+            v-for="item in modes"
+            :key="item"
+            class="login-modes__item"
+            :class="{ 'login-modes__item--active': mode === item }"
+            type="button"
+            role="tab"
+            :aria-selected="mode === item"
+            @click="switchMode(item)"
+          >
+            {{ MODE_LABELS[item] }}
+          </button>
+        </div>
+
+        <form class="login-form" @submit.prevent="submit">
+          <label class="login-form__field">
+            <span class="login-form__label">邮箱</span>
+            <input v-model="email" type="email" autocomplete="email" placeholder="you@company.com" />
+          </label>
+
+          <label v-if="mode === 'register'" class="login-form__field">
+            <span class="login-form__label">昵称</span>
+            <input
+              v-model="displayName"
+              type="text"
+              maxlength="32"
+              autocomplete="nickname"
+              placeholder="聊天中显示的名字"
+            />
+          </label>
+
+          <label v-if="mode !== 'password'" class="login-form__field">
+            <span class="login-form__label">验证码</span>
+            <div class="login-form__code-row">
+              <input v-model="code" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+              <button
+                class="login-form__send"
+                type="button"
+                :disabled="sending || cooldown > 0"
+                @click="sendCode"
+              >
+                {{ sendButtonLabel }}
+              </button>
+            </div>
+          </label>
+
+          <div v-if="mode !== 'code'" class="login-form__field">
+            <label class="login-form__label" for="login-password">
+              {{ mode === 'register' ? '密码（可选，设置后可用密码登录）' : '密码' }}
+            </label>
+            <div class="login-form__password">
+              <input
+                id="login-password"
+                v-model="password"
+                :type="passwordVisible ? 'text' : 'password'"
+                autocomplete="current-password"
+                minlength="8"
+                maxlength="128"
+                placeholder="8~128 个字符"
+              />
+              <button
+                class="login-form__toggle-password"
+                type="button"
+                :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
+                :aria-pressed="passwordVisible"
+                @click="passwordVisible = !passwordVisible"
+              >
+                {{ passwordVisible ? '隐藏' : '显示' }}
+              </button>
+            </div>
           </div>
-        </label>
 
-        <label v-if="mode !== 'code'" class="login-form__field">
-          <span class="login-form__label">
-            {{ mode === 'register' ? '密码（可选，设置后可用密码登录）' : '密码' }}
-          </span>
-          <input
-            v-model="password"
-            type="password"
-            autocomplete="current-password"
-            minlength="8"
-            maxlength="128"
-            placeholder="8~128 个字符"
-          />
-        </label>
+          <p v-if="noticeMessage" class="login-form__notice" role="status">{{ noticeMessage }}</p>
+          <p v-if="devCodeHint" class="login-form__hint">
+            Development 测试码：<strong>{{ devCodeHint }}</strong>（生产环境不返回）
+          </p>
+          <p v-if="errorMessage" class="login-form__error" role="alert">{{ errorMessage }}</p>
 
-        <p v-if="noticeMessage" class="login-form__notice" role="status">{{ noticeMessage }}</p>
-        <p v-if="devCodeHint" class="login-form__hint">
-          Development 测试码：<strong>{{ devCodeHint }}</strong>（生产环境不返回）
-        </p>
-        <p v-if="errorMessage" class="login-form__error" role="alert">{{ errorMessage }}</p>
-
-        <button class="login-form__submit" type="submit" :disabled="submitting">
-          {{ submitting ? '处理中…' : submitLabel }}
-        </button>
-      </form>
+          <button class="login-form__submit" type="submit" :disabled="submitting">
+            {{ submitting ? '处理中…' : submitLabel }}
+          </button>
+        </form>
+      </div>
     </section>
   </main>
 </template>
@@ -317,154 +360,265 @@ function clearServerUrl(): void {
 <style scoped>
 .login-page {
   display: flex;
+  min-height: 100%;
+  background: var(--ec-bg-canvas);
+}
+
+/* 桌面端（≥1100px）：左侧品牌说明区 + 右侧登录卡片（计划 §5.7）。 */
+.login-brand {
+  display: none;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  min-height: 100%;
-  padding: var(--space-5);
+  padding: var(--ec-space-8);
+  background: var(--ec-chat-gradient);
+  border-right: 1px solid var(--ec-border);
+}
+
+.login-brand__inner {
+  width: 100%;
+  max-width: 360px;
+}
+
+.login-brand__logo {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.login-brand__title {
+  margin: var(--ec-space-4) 0 var(--ec-space-2);
+  color: var(--ec-text-primary);
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.login-brand__desc {
+  margin: 0 0 var(--ec-space-5);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-body);
+  line-height: 1.7;
+}
+
+.login-brand__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-brand__list li {
+  position: relative;
+  padding-left: var(--ec-space-4);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.login-brand__list li::before {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-600);
+  content: '';
+}
+
+.login-panel {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ec-space-6);
 }
 
 .login-card {
   width: 100%;
-  max-width: 360px;
-  padding: var(--space-6);
-  background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  max-width: 400px;
+  padding: var(--ec-space-6);
+  background: var(--ec-surface);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-panel);
+  box-shadow: var(--ec-shadow-md);
 }
 
 .login-card__title {
-  margin: 0 0 var(--space-2);
-  font-size: 24px;
-  color: var(--color-primary);
+  margin: 0 0 var(--ec-space-1);
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-page-title);
+  font-weight: var(--ec-font-weight-semibold);
 }
 
 .login-card__subtitle {
-  margin: 0 0 var(--space-5);
-  font-size: 13px;
-  color: var(--color-text-secondary);
-}
-
-.login-modes {
-  display: flex;
-  gap: var(--space-1);
-  margin-bottom: var(--space-4);
-  padding: var(--space-1);
-  background: var(--color-bg);
-  border-radius: var(--radius-sm);
-}
-
-.login-modes__item {
-  flex: 1;
-  padding: var(--space-2) var(--space-1);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.login-modes__item--active {
-  background: var(--color-surface);
-  color: var(--color-primary);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm);
+  margin: 0 0 var(--ec-space-5);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .login-server {
-  margin: 0 0 var(--space-3);
+  margin-bottom: var(--ec-space-4);
 }
 
 .login-server__toggle {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  display: block;
+  width: 100%;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  overflow: hidden;
+  border: 1px dashed var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+.login-server__toggle:hover {
+  border-color: var(--ec-brand-500);
+  color: var(--ec-brand-600);
+}
+
+.login-server__locked {
+  margin: 0;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px dashed var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  word-break: break-all;
+}
+
 .login-server__panel {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  margin-top: var(--ec-space-2);
 }
 
 .login-server__panel input {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: 8px var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
   outline: none;
+  font-size: var(--ec-font-size-secondary);
   box-sizing: border-box;
 }
 
 .login-server__panel input:focus {
-  border-color: var(--color-primary);
+  border-color: var(--ec-brand-600);
 }
 
 .login-server__actions {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
+}
+
+.login-server__save,
+.login-server__reset {
+  padding: 6px var(--ec-space-3);
+  border-radius: var(--ec-radius-sm);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
 }
 
 .login-server__save {
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  font-size: 12px;
-  cursor: pointer;
+  border: 1px solid var(--ec-brand-600);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
 }
 
 .login-server__reset {
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--ec-border);
   background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
+  color: var(--ec-text-secondary);
 }
 
 .login-server__error {
   margin: 0;
-  color: var(--color-danger);
-  font-size: 12px;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
+}
+
+.login-modes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: var(--ec-space-4);
+  padding: 4px;
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-nav-bg);
+}
+
+.login-modes__item {
+  padding: 8px 4px;
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.login-modes__item--active {
+  background: var(--ec-surface);
+  color: var(--ec-brand-600);
+  font-weight: var(--ec-font-weight-semibold);
+  box-shadow: var(--ec-shadow-sm);
 }
 
 .login-form {
-  display: grid;
-  gap: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-3);
 }
 
 .login-form__field {
-  display: grid;
-  gap: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .login-form__label {
-  font-size: 13px;
-  color: var(--color-text-secondary);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
 }
 
-.login-form input {
+.login-form__field input {
   width: 100%;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: 10px var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
   outline: none;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
   box-sizing: border-box;
+  transition: border-color var(--ec-transition-fast) var(--ec-transition-ease);
 }
 
-.login-form input:focus {
-  border-color: var(--color-primary);
+.login-form__field input::placeholder {
+  color: var(--ec-text-tertiary);
+}
+
+.login-form__field input:focus {
+  border-color: var(--ec-brand-600);
 }
 
 .login-form__code-row {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
 }
 
 .login-form__code-row input {
@@ -474,60 +628,110 @@ function clearServerUrl(): void {
 
 .login-form__send {
   flex: none;
-  padding: 0 var(--space-3);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 13px;
-  white-space: nowrap;
+  min-width: 108px;
+  padding: 0 var(--ec-space-3);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
   cursor: pointer;
 }
 
 .login-form__send:disabled {
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-.login-form__hint {
-  margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 13px;
+.login-form__password {
+  position: relative;
+}
+
+.login-form__password input {
+  padding-right: 64px;
+}
+
+.login-form__toggle-password {
+  position: absolute;
+  top: 50%;
+  right: var(--ec-space-2);
+  padding: 4px;
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.login-form__toggle-password:hover {
+  background: var(--ec-brand-050);
+}
+
+.login-form__submit {
+  margin-top: var(--ec-space-1);
+  padding: 11px;
+  border: none;
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+  font-size: var(--ec-font-size-body);
+  font-weight: var(--ec-font-weight-semibold);
+  cursor: pointer;
+}
+
+.login-form__submit:hover:not(:disabled) {
+  background: var(--ec-brand-700);
+}
+
+.login-form__submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .login-form__notice {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 13px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+}
+
+.login-form__hint {
+  margin: 0;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
 }
 
 .login-form__error {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--color-danger);
-  color: var(--color-text-inverse);
-  font-size: 13px;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
 }
 
-.login-form__submit {
-  padding: var(--space-3);
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
-  cursor: pointer;
+/* 平板/窄屏（≤1099px）：隐藏品牌区，单栏居中卡片。 */
+@media (max-width: 1099px) {
+  .login-panel {
+    padding: var(--ec-space-4);
+  }
 }
 
-.login-form__submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+@media (min-width: 1100px) {
+  .login-brand {
+    display: flex;
+  }
+
+  .login-panel {
+    flex: 0 0 46%;
+    padding: var(--ec-space-8);
+  }
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: var(--ec-space-5) var(--ec-space-4);
+  }
 }
 </style>
