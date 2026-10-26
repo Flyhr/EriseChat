@@ -106,8 +106,10 @@ cd /d D:\Code\EriseChat
 
 ### 5.4 静态校验（可选）
 
+校验前先设置 `JAVA_HOME`（`apksigner.bat` 依赖 java，默认 `D:/softWare/jdk21`）：
+
 ```bash
-export JAVA_HOME=D:/softWare/jdk21   # apksigner.bat 依赖 java
+export JAVA_HOME=D:/softWare/jdk21
 SDK=D:/softWare/android-sdk
 "$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EiseChat-1.0.0.apk | head
 "$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EiseChat-1.0.0.apk
@@ -123,10 +125,12 @@ unzip -l data/downloads/EiseChat-1.0.0.apk | grep assets/public/index.html
 **A. USB + adb（开发联调最推荐，无需传文件）**
 
 ```bat
-D:\softWare\android-sdk\platform-tools\adb.exe devices          :: 应显示 device（unauthorized 时在手机上点「允许」）
+D:\softWare\android-sdk\platform-tools\adb.exe devices
 D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EiseChat-1.0.0.apk
 D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.eisechat.mobile | findstr "versionName versionCode"
 ```
+
+`devices` 应显示一行 `device`（显示 `unauthorized` 时在手机上点「允许 USB 调试」）。
 
 看到 `Success` 即安装完成；`versionName=1.0.0`、`versionCode=10000` 为当前包。覆盖安装不会清 `IndexedDB` 缓存，聊天数据始终以服务端为准。
 
@@ -142,9 +146,18 @@ D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downl
 
 ```bat
 cd /d D:\Code\EriseChat\server\Chat.Server
-dotnet run --urls http://0.0.0.0:8080     :: 开发默认只监听 127.0.0.1，手机访问不到
-ipconfig                                   :: 记下「IPv4 地址」，例如 192.168.1.23
+dotnet run --urls http://0.0.0.0:8080
 ```
+
+开发模式默认只监听 `127.0.0.1`，手机访问不到，所以启动时必须加 `--urls http://0.0.0.0:8080`。
+
+另开一个终端查看本机 IP：
+
+```bat
+ipconfig
+```
+
+记下「IPv4 地址」一行，例如 `192.168.1.23`。
 
 - Windows 防火墙需放行 8080（首次运行会弹窗，选「允许」；或手动在「Windows Defender 防火墙 → 允许应用通过防火墙」放行 dotnet）。
 - 手机浏览器打开 `http://<电脑IPv4>:8080/download` → 下载 APK → 安装。
@@ -169,8 +182,10 @@ ipconfig                                   :: 记下「IPv4 地址」，例如 1
 
    ```bat
    D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
-   D:\softWare\android-sdk\platform-tools\adb.exe reverse --list    :: 应出现 tcp:8080 tcp:8080
+   D:\softWare\android-sdk\platform-tools\adb.exe reverse --list
    ```
+
+   `reverse --list` 的输出里应出现 `tcp:8080 tcp:8080`。
 
    App 登录页「服务器地址」保持默认 `http://127.0.0.1:8080` 即可。
    **注意**：拔插 USB、重启 adb 或电脑后映射会失效，需要重新执行；手机端提示「无法连接服务器」时先查这一步。
@@ -210,24 +225,34 @@ ipconfig                                   :: 记下「IPv4 地址」，例如 1
 
 ### 5.8 一键流程速查（复制即用）
 
+**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EiseChat-1.0.0.apk`）
+
 ```bat
-:: ① Git Bash：打包（含最新 Web UI）；成功后在 data\downloads\EiseChat-1.0.0.apk
 cd /d/Code/EriseChat
 "D:\Git\bin\bash.exe" infra/build-apk.sh 1.0.0
+```
 
-:: ② cmd：USB 安装到已连接的手机（adb 在 D:\softWare\android-sdk\platform-tools\）
+**② cmd：USB 安装到已连接的手机**（adb 在 `D:\softWare\android-sdk\platform-tools\`）
+
+```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
 D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EiseChat-1.0.0.apk
+```
 
-:: ③ 另开终端：启动服务端（开发模式，验证码固定 123456）
+**③ 另开终端：启动服务端**（开发模式，验证码固定 `123456`）
+
+```bat
 cd /d D:\Code\EriseChat\server\Chat.Server
 dotnet run
-
-:: ④ 回到 cmd：USB 端口反向映射（App 服务器地址保持 127.0.0.1:8080）
-D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
-
-:: ⑤ 手机打开 EiseChat → 注册/登录 → 按 §5.7 清单验收
 ```
+
+**④ 回到 cmd：USB 端口反向映射**（App 服务器地址保持 `127.0.0.1:8080`）
+
+```bat
+D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
+```
+
+**⑤ 手机打开 EiseChat → 注册/登录 → 按 §5.7 清单验收。**
 
 > 若走局域网而不接 USB：③ 改为 `dotnet run --urls http://0.0.0.0:8080`、放行防火墙 8080，④ 跳过，App 内服务器地址改填 `http://<电脑IPv4>:8080`。
 
