@@ -2,36 +2,37 @@
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AppIcon from './AppIcon.vue'
-import ComingSoonHint from './ComingSoonHint.vue'
 import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1099：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
-// 群聊入口本阶段没有群聊列表路由，灰显占位 + 「即将上线」（附录 A 登记），不提交请求。
+// 群聊入口（UI-02）：/chat?group=all 进入会话列表的「群聊」筛选；高亮时群聊优先于消息。
 interface NavItem {
   key: string
   label: string
   icon: AppIconName
-  to?: string
+  to: string
 }
 
 const items: NavItem[] = [
   { key: 'chat', label: '消息', icon: 'chat', to: '/chat' },
   { key: 'contacts', label: '联系人', icon: 'contacts', to: '/contacts' },
-  { key: 'groups', label: '群聊', icon: 'groups' },
+  { key: 'groups', label: '群聊', icon: 'groups', to: '/chat?group=all' },
   { key: 'settings', label: '设置', icon: 'settings', to: '/settings' },
 ]
 
 const route = useRoute()
 const auth = useAuthStore()
 
-/** 当前一级导航高亮：按路由前缀判断（聊天详情仍在“消息”下）。 */
+/** 当前一级导航高亮：按路由前缀 + 聊天页群聊筛选（?group=all）判断。 */
 const activeKey = computed(() => {
   if (route.path.startsWith('/contacts')) return 'contacts'
   if (route.path.startsWith('/settings')) return 'settings'
-  if (route.path.startsWith('/chat')) return 'chat'
+  if (route.path.startsWith('/chat')) {
+    return route.query.group === 'all' ? 'groups' : 'chat'
+  }
   return ''
 })
 
@@ -48,7 +49,6 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
     <ul class="ec-sidenav__items">
       <li v-for="item in items" :key="item.key">
         <RouterLink
-          v-if="item.to"
           :to="item.to"
           class="ec-sidenav__item"
           :class="{ 'ec-sidenav__item--active': activeKey === item.key }"
@@ -58,15 +58,6 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
           <AppIcon :name="item.icon" />
           <span class="ec-sidenav__label">{{ item.label }}</span>
         </RouterLink>
-        <ComingSoonHint
-          v-else
-          class="ec-sidenav__item ec-sidenav__item--soon"
-          :label="item.label"
-          :show-hint="false"
-        >
-          <AppIcon :name="item.icon" />
-          <span class="ec-sidenav__label">{{ item.label }}</span>
-        </ComingSoonHint>
       </li>
     </ul>
 

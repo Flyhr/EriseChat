@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import ConversationItem from '../components/ConversationItem.vue'
+import ConversationList, { type ConversationFilter } from '../components/ConversationList.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
@@ -55,6 +55,29 @@ const activeTitle = computed(() => {
 const pageNotice = ref('')
 // 群成员管理面板（仅群聊可用）。
 const showMembersPanel = ref(false)
+
+// 会话列表筛选（UI-02）：全部/未读/群聊。群聊由左导航「群聊」(?group=all) 驱动；
+// 未读为本地筛选状态，不写入 URL；切换筛选只改展示，不产生任何请求。
+const listFilter = ref<ConversationFilter>(route.query.group === 'all' ? 'group' : 'all')
+watch(
+  () => route.query.group,
+  (group) => {
+    if (group === 'all') listFilter.value = 'group'
+    else if (listFilter.value === 'group') listFilter.value = 'all'
+  },
+)
+
+function changeListFilter(filter: ConversationFilter): void {
+  listFilter.value = filter
+  const query = { ...route.query }
+  if (filter === 'group') query.group = 'all'
+  else delete query.group
+  void router.replace({ query })
+}
+
+function openContacts(): void {
+  void router.push('/contacts')
+}
 
 // 当前会话的消息缓存（已落库事实消息 + 乐观发送中的本地消息）与历史分页状态。
 const activeMessages = computed(() =>
@@ -271,28 +294,16 @@ async function handleFileSelected(file: File): Promise<void> {
 
 <template>
   <main class="chat-page">
-    <aside class="chat-page__sidebar">
-      <header class="chat-page__sidebar-header">
-        <span>消息</span>
-        <RouterLink class="chat-page__new" to="/contacts">发起聊天</RouterLink>
-      </header>
-
-      <p v-if="conversations.loading" class="chat-page__hint">加载中…</p>
-      <p v-else-if="conversations.sorted.length === 0" class="chat-page__hint">
-        还没有会话，去「通讯录」搜索用户发起单聊或创建群聊。
-      </p>
-      <nav v-else class="chat-page__list" aria-label="会话列表">
-        <ConversationItem
-          v-for="conversation in conversations.sorted"
-          :key="conversation.conversationId"
-          :conversation="conversation"
-          :self-user-id="selfUserId"
-          :active="conversation.conversationId === activeId"
-          :unread="conversation.conversationId === activeId ? 0 : conversations.unreadOf(conversation.conversationId)"
-          @select="selectConversation"
-        />
-      </nav>
-    </aside>
+    <ConversationList
+      :conversations="conversations.sorted"
+      :self-user-id="selfUserId"
+      :active-id="activeId"
+      :loading="conversations.loading"
+      :filter="listFilter"
+      @select="selectConversation"
+      @update:filter="changeListFilter"
+      @create="openContacts"
+    />
 
     <section class="chat-page__main">
       <p v-if="pageNotice" class="chat-page__notice" role="status">
@@ -365,57 +376,23 @@ async function handleFileSelected(file: File): Promise<void> {
 <style scoped>
 .chat-page {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: var(--ec-list-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: var(--color-surface);
+  background: var(--ec-bg-canvas);
 }
 
-/* UI-01：801~1099 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
+/* UI-01/UI-02：801~1099 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
 @media (max-width: 1099px) {
   .chat-page {
     grid-template-columns: 260px minmax(0, 1fr);
   }
 }
 
-.chat-page__sidebar {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-right: 1px solid var(--color-border);
-}
-
-.chat-page__sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--header-height);
-  padding: 0 var(--space-4);
-  font-weight: 600;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.chat-page__new {
-  color: var(--color-primary);
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.chat-page__list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.chat-page__hint {
-  margin: var(--space-4);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-}
-
 .chat-page__main {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 

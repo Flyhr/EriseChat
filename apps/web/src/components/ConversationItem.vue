@@ -5,8 +5,8 @@ import { conversationLabel, systemMessageText } from '../core/groupChat'
 import Avatar from './Avatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
 
-// 会话列表项（纯展示）：标题（单聊显示对方昵称/群聊显示群名与成员数）、最后一条消息摘要、
-// 时间、未读角标。群聊消息摘要区分 system/image/file（M3-08）。
+// 会话列表项（UI-02 批次1，计划 §5.2）：行高桌面 72 / 紧凑 64 / 移动 44；头像 44；
+// 选中浅蓝底 + 左侧 3px 品牌色指示条；hover 浅灰蓝；标题单行、摘要一行、时间与未读角标保留。
 const props = defineProps<{
   conversation: Conversation
   /** 当前登录用户 ID：用于单聊时找出对方昵称 */
@@ -56,7 +56,7 @@ const preview = computed(() => {
 const timeText = computed(() => formatTime(props.conversation.lastMessage?.createdAt ?? props.conversation.createdAt))
 
 function truncate(text: string, max = 80): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
+  const normalized = text.replace(/\\s+/g, ' ').trim()
   return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized
 }
 
@@ -82,9 +82,10 @@ function formatTime(timestamp: number): string {
     type="button"
     class="conversation-item"
     :class="{ 'conversation-item--active': active }"
+    :aria-current="active ? 'true' : undefined"
     @click="emit('select', conversation.conversationId)"
   >
-    <Avatar :display-name="title" :avatar-file-id="avatarFileId" :size="40" />
+    <Avatar :display-name="title" :avatar-file-id="avatarFileId" :size="44" />
     <span class="conversation-item__body">
       <span class="conversation-item__title">{{ title }}</span>
       <span class="conversation-item__preview">{{ preview }}</span>
@@ -98,56 +99,93 @@ function formatTime(timestamp: number): string {
 
 <style scoped>
 .conversation-item {
+  position: relative;
   display: flex;
-  gap: var(--space-3);
+  gap: var(--ec-space-3);
   align-items: center;
   width: 100%;
-  padding: var(--space-3) var(--space-4);
+  min-height: 72px;
+  padding: var(--ec-space-2) var(--ec-space-4);
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
-.conversation-item:hover,
+.conversation-item:hover:not(.conversation-item--active) {
+  background: var(--ec-surface-hover);
+}
+
 .conversation-item--active {
-  background: var(--color-surface-hover);
+  background: var(--ec-brand-050);
+}
+
+/* 选中会话左侧 3px 品牌色指示条（计划 §5.2）。 */
+.conversation-item--active::before {
+  position: absolute;
+  top: var(--ec-space-2);
+  bottom: var(--ec-space-2);
+  left: 0;
+  width: 3px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-600);
+  content: '';
 }
 
 .conversation-item__body {
   display: flex;
-  flex-direction: column;
   flex: 1;
+  flex-direction: column;
   gap: 2px;
+  min-width: 0;
   overflow: hidden;
 }
 
 .conversation-item__title {
-  font-weight: 600;
   overflow: hidden;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  font-weight: var(--ec-font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .conversation-item__preview {
   overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .conversation-item__meta {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  align-self: flex-start;
   flex: none;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  align-items: flex-end;
+  align-self: stretch;
+  justify-content: center;
 }
 
 .conversation-item__time {
-  color: var(--color-text-secondary);
-  font-size: 11px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+/* 801~1099：紧凑行高 64（Electron 最小 960×640 仍可用）。 */
+@media (max-width: 1099px) {
+  .conversation-item {
+    min-height: 64px;
+  }
+}
+
+/* ≤800：移动单栏列表行高 44，压缩内边距。 */
+@media (max-width: 800px) {
+  .conversation-item {
+    min-height: 44px;
+    padding: var(--ec-space-1) var(--ec-space-3);
+  }
 }
 </style>
