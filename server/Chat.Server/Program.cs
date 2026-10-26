@@ -10,6 +10,7 @@ using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
+using Chat.Server.Modules.Friends;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Modules.Realtime;
 using Chat.Server.Realtime;
@@ -84,6 +85,10 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<SystemMessageWriter>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddSingleton<ConversationRealtimeNotifier>();
+
+// F-17：好友关系（好友申请/好友列表/备注分组）与 friend.changed 推送。
+builder.Services.AddScoped<FriendService>();
+builder.Services.AddSingleton<FriendRealtimeNotifier>();
 
 // 消息（M1-08）：发送/补拉业务在 MessageService，WS 帧编排在 Realtime.MessageHub。
 builder.Services.AddScoped<MessageService>();
@@ -240,6 +245,7 @@ app.UseStaticFiles();
 // 认证/用户 REST：M1-04 发码、M1-05 注册/登录/注销与当前用户资料。
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
+app.MapFriendEndpoints();
 
 // 会话 REST（M1-07）：创建单聊、会话列表、单会话读取。
 app.MapConversationsEndpoints();

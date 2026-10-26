@@ -78,19 +78,34 @@ public sealed class PresenceService
         }
     }
 
-    /// <summary>共同会话的其他成员（DISTINCT），即需要收到该用户在线状态的用户集合。</summary>
+    /// <summary>
+    /// 需要收到该用户在线状态的用户集合（DISTINCT）：共同会话的其他成员 ∪ 好友（F-17）。
+    /// </summary>
     /// <remarks>M3-06：改为 internal 以便单测（Chat.Server.csproj 的 InternalsVisibleTo）直接验证查询；运行时行为不变。</remarks>
     internal async Task<List<string>> FindPeerUserIdsAsync(string userId, CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
 
-        return await db.ConversationMembers.AsNoTracking()
+        var conversationPeers = await db.ConversationMembers.AsNoTracking()
             .Where(other => other.UserId != userId &&
                             db.ConversationMembers.Any(mine =>
                                 mine.UserId == userId && mine.ConversationId == other.ConversationId))
             .Select(other => other.UserId)
             .Distinct()
             .ToListAsync(cancellationToken);
+
+        // F-17：好友关系也推送在线状态（无需共同会话）；双向行取对端。
+        var friendPeers = await db.Friends.AsNoTracking()
+            .Where(friend => friend.OwnerUserId == userId || friend.FriendUserId == userId)
+            .Select(friend => friend.OwnerUserId == userId ? friend.FriendUserId : friend.OwnerUserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return conversationPeers
+            .Concat(friendPeers)
+            .Where(peerUserId => !string.Equals(peerUserId, userId, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 }

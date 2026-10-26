@@ -74,18 +74,45 @@ public static class UserEndpoints
             .Take(SearchLimit)
             .ToListAsync(cancellationToken);
 
-        var users = rows.Select(ToResponse).ToList();
+        // F-17：附带与当前用户的关系（friend/outgoing/incoming），供联系人页决定「加为好友」等操作。
+        var userIds = rows.Select(user => user.Id).ToList();
+        var friendIds = (await db.Friends.AsNoTracking()
+                .Where(friend => friend.OwnerUserId == currentUserId && userIds.Contains(friend.FriendUserId))
+                .Select(friend => friend.FriendUserId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+        var pendingRequests = await db.FriendRequests.AsNoTracking()
+            .Where(request => request.Status == Chat.Protocol.FriendRequestStatus.Pending &&
+                             (request.FromUserId == currentUserId || request.ToUserId == currentUserId) &&
+                             (userIds.Contains(request.FromUserId) || userIds.Contains(request.ToUserId)))
+            .ToListAsync(cancellationToken);
+        var outgoingIds = pendingRequests
+            .Where(request => request.FromUserId == currentUserId)
+            .Select(request => request.ToUserId)
+            .ToHashSet(StringComparer.Ordinal);
+        var incomingIds = pendingRequests
+            .Where(request => request.ToUserId == currentUserId)
+            .Select(request => request.FromUserId)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var users = rows.Select(user => ToResponse(
+            user,
+            friendIds.Contains(user.Id) ? "friend"
+            : outgoingIds.Contains(user.Id) ? "outgoing"
+            : incomingIds.Contains(user.Id) ? "incoming"
+            : null)).ToList();
         return Results.Json(new UsersSearchResponse(users));
     }
 
-    private static MeResponse ToResponse(User user) => new(
+    private static MeResponse ToResponse(User user, string? relation = null) => new(
         user.Id,
         user.Email,
         user.DisplayName,
         user.AvatarFileId,
         user.Role.ToString().ToLowerInvariant(),
         user.Status.ToString().ToLowerInvariant(),
-        user.CreatedAt);
+        user.CreatedAt,
+        relation);
 
     /// <summary>SQLite LIKE 通配符转义（配合 EF.Functions.Like 的 escape 参数 '\'）。</summary>
     private static string EscapeLikePattern(string value) =>
@@ -101,7 +128,9 @@ public static class UserEndpoints
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AvatarFileId,
         string Role,
         string Status,
-        long CreatedAt);
+        long CreatedAt,
+        /// <summary>F-17：与当前用户的关系（friend/outgoing/incoming），仅 /api/users 搜索时返回。</summary>
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Relation = null);
 
     /// <summary>用户搜索结果（字段与 apps/web/src/api/users.ts 的 SearchUsersResponse 对齐）。</summary>
     public sealed record UsersSearchResponse(IReadOnlyList<MeResponse> Users);
