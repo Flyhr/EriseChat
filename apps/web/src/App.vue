@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import ConnectionBanner from './components/ConnectionBanner.vue'
 import AppToast from './components/AppToast.vue'
+import MobileTabBar from './components/MobileTabBar.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import { useAuthStore } from './stores/auth'
@@ -18,6 +19,14 @@ const wsState = ref<WsState>(chatWs.state)
 let unsubscribe: (() => void) | null = null
 
 const isBlankLayout = computed(() => route.meta.layout === 'blank')
+
+// UI-04：移动端底部导航仅在 ≤800 显示（组件内 CSS 控制），进入会话详情时隐藏，
+// 把完整高度留给聊天区；登录页（blank 布局）不显示。
+const isConversationDetail = computed(() => {
+  const conversationId = route.params.conversationId
+  return route.name === 'chat' && typeof conversationId === 'string' && conversationId.length > 0
+})
+const showMobileTabBar = computed(() => auth.isLoggedIn && !isBlankLayout.value && !isConversationDetail.value)
 
 onMounted(() => {
   presence.subscribeRealtime()
@@ -44,6 +53,7 @@ function reconnect(): void {
       <main class="ec-app-main">
         <RouterView />
       </main>
+      <MobileTabBar v-if="showMobileTabBar" />
     </div>
     <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
     <AppToast />
@@ -70,6 +80,14 @@ function reconnect(): void {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ≤800（UI-04）：单列外壳 + 底部导航行；主导航 SideNav 由自身媒体查询隐藏。 */
+@media (max-width: 800px) {
+  .ec-app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
 }
 
 /* blank 布局（登录页）铺满外壳高度；页面自身仍在内容区居中（计划 §2.2 / §5.7）。 */
