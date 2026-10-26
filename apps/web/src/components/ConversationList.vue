@@ -134,8 +134,11 @@ function unreadOf(conversationId: string): number {
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-conversation-list__create:hover {
   background: var(--ec-brand-050);
+}
 }
 
 .ec-conversation-list__filters {
@@ -158,16 +161,22 @@ function unreadOf(conversationId: string): number {
     color var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-conversation-list__chip:hover {
   background: var(--ec-surface-hover);
   color: var(--ec-text-primary);
 }
+}
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-conversation-list__chip--active,
 .ec-conversation-list__chip--active:hover {
   background: var(--ec-brand-050);
   color: var(--ec-brand-600);
   font-weight: var(--ec-font-weight-semibold);
+}
 }
 
 .ec-conversation-list__items {
@@ -187,6 +196,14 @@ function unreadOf(conversationId: string): number {
   .ec-conversation-list {
     width: 100%;
     border-right: none;
+  }
+}
+
+/* UI-04 批次4：移动端发起聊天/筛选按钮触控热区。 */
+@media (max-width: 800px) {
+  .ec-conversation-list__create,
+  .ec-conversation-list__chip {
+    min-height: 44px;
   }
 }
 </style>

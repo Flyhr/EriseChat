@@ -158,8 +158,11 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-chat-header__action--text:hover {
   background: var(--ec-brand-050);
+}
 }
 
 .ec-chat-header__icon-button {
@@ -179,6 +182,16 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
     height: 32px;
     border-radius: var(--ec-radius-sm);
     color: var(--ec-text-secondary);
+  }
+}
+
+/* UI-04 批次4：移动端顶栏按钮触控热区 ≥44×44。 */
+@media (max-width: 800px) {
+  .ec-chat-header__icon-button,
+  .ec-chat-header__action,
+  .ec-chat-header__action--text {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 </style>

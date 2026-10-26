@@ -484,9 +484,12 @@ function clearServerUrl(): void {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .login-server__toggle:hover {
   border-color: var(--ec-brand-500);
   color: var(--ec-brand-600);
+}
 }
 
 .login-server__locked {
@@ -665,8 +668,11 @@ function clearServerUrl(): void {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .login-form__toggle-password:hover {
   background: var(--ec-brand-050);
+}
 }
 
 .login-form__submit {
@@ -681,8 +687,11 @@ function clearServerUrl(): void {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .login-form__submit:hover:not(:disabled) {
   background: var(--ec-brand-700);
+}
 }
 
 .login-form__submit:disabled {
@@ -732,6 +741,18 @@ function clearServerUrl(): void {
 @media (max-width: 480px) {
   .login-card {
     padding: var(--ec-space-5) var(--ec-space-4);
+  }
+}
+
+/* UI-04 批次4：触屏按钮触控热区 ≥44px。 */
+@media (max-width: 800px) {
+  .login-form__toggle-password {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .login-form__submit {
+    min-height: 44px;
   }
 }
 </style>

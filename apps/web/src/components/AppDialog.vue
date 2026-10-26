@@ -177,8 +177,11 @@ function onConfirm(): void {
   transition: background-color var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-dialog__btn:hover:not(:disabled) {
   background: var(--ec-surface-hover);
+}
 }
 
 .ec-dialog__btn:focus-visible {
@@ -197,12 +200,22 @@ function onConfirm(): void {
   color: var(--ec-text-inverse);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .ec-dialog__btn--primary:hover:not(:disabled) {
   background: var(--ec-brand-700);
+}
 }
 
 .ec-dialog__btn--danger {
   border-color: var(--ec-danger);
   background: var(--ec-danger);
+}
+
+/* UI-04 批次4：触屏按钮可点区域 ≥44px。 */
+@media (max-width: 800px) {
+  .ec-dialog__btn {
+    min-height: 44px;
+  }
 }
 </style>

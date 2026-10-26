@@ -201,9 +201,12 @@ function onEnter(event: KeyboardEvent): void {
     color var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .send-box__icon:hover:not(:disabled) {
   background: var(--ec-brand-050);
   color: var(--ec-brand-600);
+}
 }
 
 .send-box__icon:disabled {
@@ -312,8 +315,11 @@ function onEnter(event: KeyboardEvent): void {
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .send-box__send:hover:not(:disabled) {
   background: var(--ec-brand-700);
+}
 }
 
 .send-box__send:disabled {
@@ -328,13 +334,14 @@ function onEnter(event: KeyboardEvent): void {
       calc(var(--ec-space-2) + env(safe-area-inset-bottom));
   }
 
+  /* UI-04 批次4：触屏点按目标 ≥44×44（桌面保持紧凑）。 */
   .send-box__icon {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
   }
 
   .send-box__send {
-    height: 32px;
+    height: 44px;
     padding: 0 var(--ec-space-3);
   }
 }

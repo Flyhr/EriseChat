@@ -614,9 +614,12 @@ async function handleFileSelected(file: File): Promise<void> {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .chat-page__members-close:hover {
   background: var(--ec-surface-hover);
   color: var(--ec-text-primary);
+}
 }
 
 .chat-page__members-body {
@@ -728,6 +731,14 @@ async function handleFileSelected(file: File): Promise<void> {
     right: var(--ec-space-3);
     left: var(--ec-space-3);
     width: auto;
+  }
+}
+
+/* UI-04 批次4：移动端群成员面板关闭按钮触控热区。 */
+@media (max-width: 800px) {
+  .chat-page__members-close {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 </style>

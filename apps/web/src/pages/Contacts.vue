@@ -233,8 +233,11 @@ function onGroupCreated(conversation: Conversation): void {
   transition: background-color var(--ec-transition-fast) var(--ec-ease);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .contacts-page__new-group:hover {
   background: var(--ec-brand-050);
+}
 }
 
 .contacts-page__search {
@@ -308,8 +311,11 @@ function onGroupCreated(conversation: Conversation): void {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .contacts-page__result:hover {
   background: var(--ec-surface-hover);
+}
 }
 
 .contacts-page__result--active {

@@ -331,8 +331,11 @@ async function confirmLogout(): Promise<void> {
   font-size: var(--ec-font-size-secondary);
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .settings-row__link:hover {
   text-decoration: underline;
+}
 }
 
 .settings-server {

@@ -87,9 +87,16 @@ const emit = defineEmits<{ pick: [emoji: string] }>()
   cursor: pointer;
 }
 
-.ec-emoji-panel__item:hover,
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 .ec-emoji-panel__item:focus-visible {
   background: var(--ec-brand-050);
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+.ec-emoji-panel__item:hover {
+  background: var(--ec-brand-050);
+}
 }
 
 @media (max-width: 800px) {
@@ -98,9 +105,10 @@ const emit = defineEmits<{ pick: [emoji: string] }>()
     max-height: 260px;
   }
 
+  /* UI-04 批次4：触屏点按目标不小于 44×44。 */
   .ec-emoji-panel__item {
-    width: 36px;
-    height: 36px;
+    width: 44px;
+    height: 44px;
     font-size: 20px;
   }
 }

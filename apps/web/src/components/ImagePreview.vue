@@ -101,9 +101,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 .image-preview__download:hover,
 .image-preview__close:hover {
   background: var(--ec-overlay-hover);
+}
 }
 
 .image-preview__download:focus-visible,

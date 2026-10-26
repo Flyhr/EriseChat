@@ -42,8 +42,11 @@ a {
   text-decoration: none;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 a:hover {
   text-decoration: underline;
+}
 }
 
 button,
@@ -104,9 +107,12 @@ video {
   background-clip: padding-box;
 }
 
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
 *::-webkit-scrollbar-thumb:hover {
   background: var(--ec-brand-500);
   background-clip: padding-box;
+}
 }
 
 /* 滚动容器工具类：独立滚动，不把滚动链传给页面（§4.3 滚动与状态保留）。 */
