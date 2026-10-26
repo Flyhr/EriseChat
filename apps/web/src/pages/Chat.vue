@@ -60,8 +60,6 @@ const pageNotice = ref('')
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
-/** 消息列表实例：Emoji 面板内嵌占位会让消息区收缩，开合后保持贴底不打断阅读。 */
-const messageListRef = ref<{ scrollToBottom: () => void } | null>(null)
 
 // 连接状态页内提示（UI-02 批次4）：断线/重连就地提示，恢复后短暂显示 3 秒；
 // 只读取 core/ws.ts 的真实状态，不替代全局 ConnectionBanner，也不伪造连接状态。
@@ -242,6 +240,8 @@ onBeforeUnmount(() => {
     recoveredTimer = null
   }
   document.removeEventListener('visibilitychange', markActiveConversationRead)
+  document.removeEventListener('mousedown', onEmojiOutsidePointer)
+  document.removeEventListener('keydown', onEmojiEscape)
 })
 
 function selectConversation(conversationId: string): void {
@@ -287,12 +287,34 @@ function onLeftGroup(conversationId: string): void {
   conversations.handleRemovedConversations([conversationId])
 }
 
-// 表情面板互斥切换（UI-02）：再点同一按钮收起。表情面板内嵌在聊天区（非抽屉），
-// 打开会挤压消息区，因此开合后让消息列表保持贴底，避免阅读位置跳动。
+// 表情面板悬浮在发送框上方（UI-02）：绝对定位不参与文档流，开合不挤动聊天内容；
+// 点击面板外任意位置或按 Esc 收起（不需要面板内关闭按钮）。
 function toggleEmojiDrawer(): void {
   activeDrawer.value = activeDrawer.value === 'emoji' ? null : 'emoji'
-  void nextTick(() => messageListRef.value?.scrollToBottom())
 }
+
+/** 点击表情面板内部或触发按钮不算「点击外部」（触发按钮自身负责开合切换）。 */
+function isEmojiLayerTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('.ec-emoji-panel, [data-emoji-trigger]'))
+}
+
+function onEmojiOutsidePointer(event: MouseEvent): void {
+  if (!isEmojiLayerTarget(event.target)) activeDrawer.value = null
+}
+
+function onEmojiEscape(event: KeyboardEvent): void {
+  if (event.key === 'Escape') activeDrawer.value = null
+}
+
+watch(activeDrawer, (drawer) => {
+  if (drawer === 'emoji') {
+    document.addEventListener('mousedown', onEmojiOutsidePointer)
+    document.addEventListener('keydown', onEmojiEscape)
+    return
+  }
+  document.removeEventListener('mousedown', onEmojiOutsidePointer)
+  document.removeEventListener('keydown', onEmojiEscape)
+})
 
 function toggleGroupDrawer(): void {
   if (!isGroup.value) return
@@ -396,7 +418,6 @@ async function handleFileSelected(file: File): Promise<void> {
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
         <MessageList
-          ref="messageListRef"
           :messages="activeMessages"
           :pending="activePending"
           :self-user-id="selfUserId"
@@ -411,23 +432,24 @@ async function handleFileSelected(file: File): Promise<void> {
           @retry="retryMessage"
           @near-bottom-change="onNearBottomChange"
         />
-        <!-- 表情面板与输入框同层内嵌在聊天区（非遮罩抽屉）：打开时消息区收缩、输入框随之上移。 -->
-        <EmojiPanel
-          v-if="activeDrawer === 'emoji'"
-          class="chat-page__emoji"
-          @pick="onEmojiPick"
-          @close="activeDrawer = null"
-        />
-        <SendBox
-          ref="sendBoxRef"
-          :uploading="uploadBusy"
-          :upload-error="uploadError"
-          :emoji-open="activeDrawer === 'emoji'"
-          @send="sendMessage"
-          @file-selected="handleFileSelected"
-          @typing="sendTyping"
-          @pick-emoji="toggleEmojiDrawer"
-        />
+        <div class="chat-page__composer">
+          <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
+          <EmojiPanel
+            v-if="activeDrawer === 'emoji'"
+            class="chat-page__emoji"
+            @pick="onEmojiPick"
+          />
+          <SendBox
+            ref="sendBoxRef"
+            :uploading="uploadBusy"
+            :upload-error="uploadError"
+            :emoji-open="activeDrawer === 'emoji'"
+            @send="sendMessage"
+            @file-selected="handleFileSelected"
+            @typing="sendTyping"
+            @pick-emoji="toggleEmojiDrawer"
+          />
+        </div>
         <DrawerShell
           v-if="activeConversation.type === 'group'"
           :open="activeDrawer === 'group'"
@@ -479,6 +501,20 @@ async function handleFileSelected(file: File): Promise<void> {
   min-height: 0;
 }
 
+/* 底部输入区容器：为悬浮 Emoji 面板提供定位基准（面板绝对定位，不占文档流高度）。 */
+.chat-page__composer {
+  position: relative;
+  flex: none;
+}
+
+/* 悬浮表情面板：锚定在发送框上方，开合不会改变消息区高度、不挤动聊天内容。 */
+.chat-page__emoji {
+  position: absolute;
+  bottom: calc(100% + var(--ec-space-2));
+  left: var(--ec-space-4);
+  z-index: 20;
+}
+
 .chat-page__main-hint {
   margin: var(--ec-space-4);
   color: var(--ec-text-secondary);
@@ -519,6 +555,12 @@ async function handleFileSelected(file: File): Promise<void> {
 
   .chat-page:not(.chat-page--conversation) .chat-page__main {
     display: none;
+  }
+
+  .chat-page__emoji {
+    right: var(--ec-space-3);
+    left: var(--ec-space-3);
+    width: auto;
   }
 }
 </style>

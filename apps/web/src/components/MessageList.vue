@@ -151,7 +151,6 @@ onMounted(() => {
     emitNearBottom(true)
   })
 })
-defineExpose({ scrollToBottom })
 </script>
 
 <template>

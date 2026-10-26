@@ -1,27 +1,13 @@
 <script setup lang="ts">
-import AppIcon from './AppIcon.vue'
 import { EMOJI_GROUPS } from '../core/emoji'
 
-// UI-02：聊天区内的 Emoji 面板（同层内嵌，非遮罩抽屉）。
-// 面板占据消息区与输入框之间的正常文档流空间，打开时消息区自动收缩、输入框位置上移；
-// 只负责展示分组与派发选择，不做输入框操作、不发送消息、不发请求；开合由 Chat 页负责。
-const emit = defineEmits<{ pick: [emoji: string]; close: [] }>()
+// UI-02：聊天输入框上方的悬浮 Emoji 面板（不参与文档流、不挤出聊天内容）。
+// 只负责展示分组与派发选择；开合、点击外部关闭由 Chat 页负责，不做输入框操作、不发请求。
+const emit = defineEmits<{ pick: [emoji: string] }>()
 </script>
 
 <template>
-  <div class="ec-emoji-panel">
-    <header class="ec-emoji-panel__header">
-      <span class="ec-emoji-panel__title">表情</span>
-      <button
-        type="button"
-        class="ec-emoji-panel__close"
-        aria-label="收起表情"
-        @click="emit('close')"
-      >
-        <AppIcon name="close" :size="16" />
-      </button>
-    </header>
-
+  <div class="ec-emoji-panel" role="dialog" aria-label="表情面板">
     <div class="ec-emoji-panel__body">
       <section v-for="group in EMOJI_GROUPS" :key="group.label" class="ec-emoji-panel__group">
         <h3 class="ec-emoji-panel__label">{{ group.label }}</h3>
@@ -43,45 +29,18 @@ const emit = defineEmits<{ pick: [emoji: string]; close: [] }>()
 </template>
 
 <style scoped>
-/* 内嵌面板：固定高度占位，消息区（flex:1）自动收缩，输入框随之上移。 */
+/* 悬浮卡片：绝对定位于发送框上方（定位由 Chat 页提供），打开/关闭不改变消息区高度。 */
 .ec-emoji-panel {
   display: flex;
-  flex: none;
   flex-direction: column;
-  height: 240px;
-  min-height: 0;
-  border-top: 1px solid var(--ec-border);
+  width: 360px;
+  max-width: calc(100vw - var(--ec-space-8));
+  max-height: 300px;
+  overflow: hidden;
   background: var(--ec-surface);
-}
-
-.ec-emoji-panel__header {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--ec-space-2) var(--ec-space-3) 0 var(--ec-space-4);
-}
-
-.ec-emoji-panel__title {
-  color: var(--ec-text-secondary);
-  font-size: 12px;
-  font-weight: var(--ec-font-weight-semibold);
-}
-
-.ec-emoji-panel__close {
-  display: grid;
-  padding: 4px;
-  border: none;
-  border-radius: var(--ec-radius-sm);
-  background: transparent;
-  color: var(--ec-text-secondary);
-  cursor: pointer;
-  place-items: center;
-}
-
-.ec-emoji-panel__close:hover,
-.ec-emoji-panel__close:focus-visible {
-  background: var(--ec-surface-hover);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-panel);
+  box-shadow: var(--ec-shadow-lg);
 }
 
 .ec-emoji-panel__body {
@@ -90,7 +49,7 @@ const emit = defineEmits<{ pick: [emoji: string]; close: [] }>()
   flex-direction: column;
   gap: var(--ec-space-3);
   min-height: 0;
-  padding: var(--ec-space-2) var(--ec-space-4) var(--ec-space-3);
+  padding: var(--ec-space-3) var(--ec-space-4);
   overflow-y: auto;
 }
 
@@ -135,7 +94,8 @@ const emit = defineEmits<{ pick: [emoji: string]; close: [] }>()
 
 @media (max-width: 800px) {
   .ec-emoji-panel {
-    height: 200px;
+    width: auto;
+    max-height: 260px;
   }
 
   .ec-emoji-panel__item {

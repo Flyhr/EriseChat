@@ -137,6 +137,7 @@ function onEnter(event: KeyboardEvent): void {
       aria-haspopup="dialog"
       :aria-expanded="emojiOpen"
       :disabled="uploading"
+      data-emoji-trigger
       @click="emit('pick-emoji')"
     >
       <AppIcon name="emoji" :size="20" />
