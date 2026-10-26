@@ -554,9 +554,10 @@ export const useMessagesStore = defineStore('messages', () => {
     const body = previewOf(message)
     const notifier = getDesktopNotifier()
     if (notifier) {
-      void notifier.notify({ title, body })
+      // F-01：带上会话 ID，点击系统通知时由 App.vue 跳转到对应会话。
+      void notifier.notify({ title, body, conversationId: message.conversationId })
     } else {
-      showWebNotification(title, body)
+      showWebNotification(title, body, message.conversationId)
     }
   }
 

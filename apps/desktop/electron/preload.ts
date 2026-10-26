@@ -1,7 +1,8 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 // preload 只通过 contextBridge 暴露白名单能力，不暴露 Node/Electron 原始对象。
 // M4-02：服务器地址（启动时同步注入只读值 + 读写接口）、系统通知接口；页面通过 window.eisechatDesktop 访问。
+// F-01/F-02：通知点击回调（主进程校验会话 ID 后转发）与全局未读数同步（托盘/任务栏指示）。
 const desktopApi = {
   platform: process.platform,
   versions: {
@@ -15,9 +16,29 @@ const desktopApi = {
   /** 保存服务器地址（返回是否保存成功与规范化后的地址）。 */
   setServerUrl: (url: string): Promise<{ ok: boolean; serverUrl: string }> =>
     ipcRenderer.invoke('settings:set-server-url', url),
-  /** 系统通知（窗口不可见时由 Web 调用；点击通知聚焦主窗口）。 */
-  notify: (payload: { title?: string; body?: string }): Promise<boolean> =>
-    ipcRenderer.invoke('window:notify', payload),
+  /** 系统通知（窗口不可见时由 Web 调用；conversationId 用于点击后打开对应会话，主进程会校验）。 */
+  notify: (payload: {
+    title?: string
+    body?: string
+    conversationId?: string
+  }): Promise<boolean> => ipcRenderer.invoke('window:notify', payload),
+  /** 同步全局未读数到桌面壳（托盘提示 + 任务栏标题/角标）。 */
+  setUnreadTotal: (count: number): void => {
+    if (typeof count !== 'number' || !Number.isFinite(count)) return
+    ipcRenderer.send('unread:total', count)
+  },
+  /** 订阅系统通知点击（主进程已校验会话 ID 形态），返回取消订阅函数。 */
+  onNotificationClick: (callback: (conversationId: string) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, conversationId: unknown): void => {
+      if (typeof conversationId === 'string' && conversationId.length > 0) {
+        callback(conversationId)
+      }
+    }
+    ipcRenderer.on('notification:click', handler)
+    return () => {
+      ipcRenderer.removeListener('notification:click', handler)
+    }
+  },
 } as const
 
 contextBridge.exposeInMainWorld('eisechatDesktop', desktopApi)

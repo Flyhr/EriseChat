@@ -101,6 +101,18 @@ export const useConversationsStore = defineStore('conversations', () => {
   }
 
   /**
+   * 全部会话的未读总数（F-02）：左导航徽标与桌面托盘/任务栏指示共用。
+   * 逐会话复用 unreadOf（服务端 last_read_seq 与本地游标取较大值），不使用未读消息明细。
+   */
+  const totalUnread = computed(() => {
+    let total = 0
+    for (const conversation of items.value) {
+      total += unreadOf(conversation.conversationId)
+    }
+    return total
+  })
+
+  /**
    * 标记会话已读（打开会话/在会话内收到新消息时调用）：更新本地游标用于即时展示，
    * 并上报服务端 read.update（protocol.md §4.6）——服务端 last_read_seq 是事实源，
    * 重新登录/换设备后未读数以它为准（否则每次登录都会把历史消息算成未读）。
@@ -357,6 +369,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     applyMessage,
     getById,
     unreadOf,
+    totalUnread,
     markRead,
     readSeqOf,
     peerReadSeqOf,

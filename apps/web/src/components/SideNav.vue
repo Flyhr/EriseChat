@@ -5,6 +5,7 @@ import AppIcon from './AppIcon.vue'
 import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
+import { useConversationsStore } from '../stores/conversations'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
@@ -25,6 +26,11 @@ const items: NavItem[] = [
 
 const route = useRoute()
 const auth = useAuthStore()
+const conversations = useConversationsStore()
+
+// F-02：全局未读数（左导航「消息」徽标；桌面壳另由 App.vue 同步到托盘/任务栏）。
+const totalUnread = computed(() => conversations.totalUnread)
+const unreadBadgeText = computed(() => (totalUnread.value > 99 ? '99+' : String(totalUnread.value)))
 
 /** 当前一级导航高亮：按路由前缀 + 聊天页群聊筛选（?group=all）判断。 */
 const activeKey = computed(() => {
@@ -54,9 +60,19 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
           :class="{ 'ec-sidenav__item--active': activeKey === item.key }"
           :title="item.label"
           :aria-current="activeKey === item.key ? 'page' : undefined"
+          :aria-label="
+            item.key === 'chat' && totalUnread > 0
+              ? `${item.label}（${totalUnread} 条未读）`
+              : item.label
+          "
         >
           <AppIcon :name="item.icon" />
           <span class="ec-sidenav__label">{{ item.label }}</span>
+          <span
+            v-if="item.key === 'chat' && totalUnread > 0"
+            class="ec-sidenav__badge"
+            aria-hidden="true"
+          >{{ unreadBadgeText }}</span>
         </RouterLink>
       </li>
     </ul>
@@ -124,6 +140,7 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
 }
 
 .ec-sidenav__item {
+  position: relative;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -151,14 +168,30 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
 }
 }
 
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
+/* 选中态与 hover 无关，触屏/窄栏同样需要可见（不能放进 hover 媒体查询）。 */
 .ec-sidenav__item--active,
 .ec-sidenav__item--active:hover:not(:disabled) {
   background: var(--ec-brand-050);
   color: var(--ec-brand-600);
   font-weight: var(--ec-font-weight-semibold);
 }
+
+/* F-02：全局未读徽标（消息入口）；紧凑图标栏时贴到图标右上角。 */
+.ec-sidenav__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+  font-size: 11px;
+  font-weight: var(--ec-font-weight-semibold);
+  line-height: 1;
 }
 
 .ec-sidenav__item--soon {
@@ -221,6 +254,18 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
   .ec-sidenav__item,
   .ec-sidenav__account {
     justify-content: center;
+  }
+
+  /* 紧凑图标栏：徽标收成图标右上角小圆点，不撑开 72px 栏宽。 */
+  .ec-sidenav__badge {
+    position: absolute;
+    top: 5px;
+    right: 7px;
+    min-width: 16px;
+    height: 16px;
+    margin-left: 0;
+    padding: 0 4px;
+    font-size: 10px;
   }
 
   .ec-sidenav__account {

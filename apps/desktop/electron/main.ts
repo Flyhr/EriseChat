@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { getSettings, registerIpcHandlers } from './ipc'
+import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc'
 
 // EiseChat Windows 桌面壳（M0 骨架 → M4-02 托盘/系统通知/窗口记忆/关闭到托盘）。
 // 只负责窗口生命周期、托盘、通知与白名单 IPC，不写聊天业务逻辑（AGENTS.md §3 / project-overview §7.3、§10）。
@@ -169,6 +169,35 @@ function createTray(): void {
   tray.on('click', () => showMainWindow())
 }
 
+/**
+ * 全局未读指示（F-02）：托盘提示始终可用；macOS/Linux 用系统角标；Windows 退化为窗口标题数字。
+ * 未读数由渲染进程经 IPC `unread:total` 推送，主进程只负责展示，不保存业务状态。
+ */
+function applyUnreadIndicator(count: number): void {
+  const total = Math.max(0, Math.min(9999, Math.trunc(count)))
+  if (tray) {
+    try {
+      tray.setToolTip(total > 0 ? `EiseChat — ${total} 条未读` : 'EiseChat')
+    } catch (error) {
+      console.warn('[desktop] 更新托盘提示失败', error)
+    }
+  }
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    try {
+      app.setBadgeCount(total)
+    } catch (error) {
+      console.warn('[desktop] 更新系统角标失败', error)
+    }
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.setTitle(total > 0 ? `EiseChat（${total} 条未读）` : 'EiseChat')
+    } catch (error) {
+      console.warn('[desktop] 更新窗口标题失败', error)
+    }
+  }
+}
+
 /** 开机自启（默认关闭，settings.json 的 autoLaunch 控制；Windows 写入登录启动项）。 */
 function applyAutoLaunch(): void {
   if (process.platform !== 'win32') return
@@ -192,6 +221,8 @@ if (!app.requestSingleInstanceLock()) {
     applyAutoLaunch()
     mainWindow = createMainWindow()
     createTray()
+    // F-02：渲染进程上报未读数后，由主进程更新托盘提示/任务栏标题（无窗口时也保留托盘提示）。
+    registerUnreadIndicator(applyUnreadIndicator)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

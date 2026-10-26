@@ -1,25 +1,31 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import ConnectionBanner from './components/ConnectionBanner.vue'
 import AppToast from './components/AppToast.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
+import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
 import { useAuthStore } from './stores/auth'
+import { useConversationsStore } from './stores/conversations'
 import { usePresenceStore } from './stores/presence'
 import { useVisualViewport } from './core/useVisualViewport'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
 // 其余路由为「左侧一级导航 + 内容区」外壳，页面自身负责内部滚动。
 // 全局连接横幅按 WS 状态提示断线/重连；在线状态（M3-09）全局订阅。
+// F-01：系统通知点击后按会话 ID 打开对应会话；F-02：全局未读数同步到桌面壳（托盘/任务栏）。
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
+const conversations = useConversationsStore()
 const presence = usePresenceStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
 const { keyboardOpen } = useVisualViewport()
 const wsState = ref<WsState>(chatWs.state)
 let unsubscribe: (() => void) | null = null
+let unsubscribeNotificationClick: (() => void) | null = null
 
 const isBlankLayout = computed(() => route.meta.layout === 'blank')
 
@@ -31,15 +37,32 @@ const isConversationDetail = computed(() => {
 })
 const showMobileTabBar = computed(() => auth.isLoggedIn && !isBlankLayout.value && !isConversationDetail.value)
 
+/** F-01：点击系统通知打开对应会话；已在该会话时不重复跳转。 */
+function openConversationFromNotification(conversationId: string): void {
+  if (!auth.isLoggedIn) return
+  if (route.name === 'chat' && route.params.conversationId === conversationId) return
+  void router.push({ name: 'chat', params: { conversationId } })
+}
+
 onMounted(() => {
   presence.subscribeRealtime()
   unsubscribe = chatWs.on('statechange', (state) => {
     wsState.value = state
   })
+  // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
+  unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)
 })
+
+// F-02：会话未读变化时同步到桌面壳（Web/移动端无桌面桥时静默跳过）。
+watch(
+  () => conversations.totalUnread,
+  (count) => setDesktopUnreadTotal(count),
+  { immediate: true },
+)
 
 onBeforeUnmount(() => {
   unsubscribe?.()
+  unsubscribeNotificationClick?.()
 })
 
 function reconnect(): void {
