@@ -26,7 +26,8 @@ import { toasts, dismissToast } from '../core/toast'
 <style scoped>
 .ec-toast {
   position: fixed;
-  top: var(--ec-space-5);
+  /* UI-04：刘海屏/状态栏安全区，避免提示被系统栏遮挡。 */
+  top: calc(var(--ec-space-5) + env(safe-area-inset-top, 0px));
   left: 50%;
   z-index: 80;
   display: flex;

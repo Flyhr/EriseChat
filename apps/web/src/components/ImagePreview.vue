@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue'
+import { createPanelHistoryGuard } from '../core/historyGuard'
 
 // 图片大图预览（M3-07；UI-03 批次4 token 化）：全屏遮罩，点击空白/Esc 关闭；
 // 下载复用已鉴权加载的 blob URL（<a download>），行为与旧版一致。
@@ -14,6 +15,9 @@ const emit = defineEmits<{
   close: []
 }>()
 
+/** 预览打开时压入 history 哨兵：Android 返回/浏览器后退先关预览（UI-04 批次3）。 */
+const panelGuard = createPanelHistoryGuard(() => emit('close'))
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') emit('close')
 }
@@ -24,8 +28,10 @@ watch(
     if (typeof document === 'undefined') return
     if (open) {
       document.addEventListener('keydown', onKeydown)
+      panelGuard.push()
     } else {
       document.removeEventListener('keydown', onKeydown)
+      panelGuard.dispose()
     }
   },
   { immediate: true },
@@ -33,6 +39,7 @@ watch(
 
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') document.removeEventListener('keydown', onKeydown)
+  panelGuard.dispose()
 })
 </script>
 

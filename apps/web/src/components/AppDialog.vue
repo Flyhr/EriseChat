@@ -114,13 +114,17 @@ function onConfirm(): void {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--ec-space-4);
+  /* UI-04 批次3：底部/顶部安全区，避免按钮被系统手势区遮挡。 */
+  padding: calc(var(--ec-space-4) + env(safe-area-inset-top, 0px))
+    var(--ec-space-4)
+    calc(var(--ec-space-4) + env(safe-area-inset-bottom, 0px));
   background: var(--ec-scrim);
 }
 
 .ec-dialog__panel {
   width: min(420px, calc(100vw - var(--ec-space-8)));
   max-height: calc(100vh - var(--ec-space-8));
+  max-height: calc(100dvh - var(--ec-space-8));
   display: flex;
   flex-direction: column;
   padding: var(--ec-space-5);

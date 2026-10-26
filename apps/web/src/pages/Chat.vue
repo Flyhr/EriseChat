@@ -15,6 +15,7 @@ import { isImageFile, validateAttachment } from '../core/attachments'
 import type { ConversationFilter } from '../core/chatLayout'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
+import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
 import { chatWs, type WsState } from '../core/ws'
@@ -58,6 +59,10 @@ const activeTitle = computed(() => {
 const pageNotice = ref('')
 // 右侧面板（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，group 由群聊顶栏触发。
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
+/** 面板打开时压入 history 哨兵：Android 返回/浏览器后退先关面板，不直接退出会话（UI-04）。 */
+const panelGuard = createPanelHistoryGuard(() => {
+  activeDrawer.value = null
+})
 /** 群成员面板改为与聊天窗口同层的右侧栏（内嵌 grid 列，不再用遮罩抽屉覆盖聊天区）。 */
 const membersOpen = computed(
   () =>
@@ -249,15 +254,21 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', markActiveConversationRead)
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
   document.removeEventListener('keydown', onEmojiEscape)
+  panelGuard.dispose()
 })
 
 function selectConversation(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
 }
 
-/** ≤800 移动布局：从聊天详情返回会话列表（不改变桌面端两栏行为）。 */
+/** ≤800 移动布局：从聊天详情返回——有站内历史则后退（保留列表滚动/筛选），否则回会话列表。 */
 function backToList(): void {
-  void router.push({ name: 'chat' })
+  const historyState = window.history.state as { back?: string | null } | null
+  if (historyState && typeof historyState.back === 'string' && historyState.back) {
+    router.back()
+    return
+  }
+  void router.replace({ name: 'chat' })
 }
 
 function sendMessage(text: string): void {
@@ -316,6 +327,8 @@ function onEmojiEscape(event: KeyboardEvent): void {
 watch(activeDrawer, (drawer) => {
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
   document.removeEventListener('keydown', onEmojiEscape)
+  if (drawer) panelGuard.push()
+  else panelGuard.dispose()
   if (drawer === 'emoji') {
     document.addEventListener('mousedown', onEmojiOutsidePointer)
     document.addEventListener('keydown', onEmojiEscape)

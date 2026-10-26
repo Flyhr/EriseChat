@@ -221,6 +221,9 @@ onMounted(() => {
   min-height: 0;
   padding: var(--ec-space-4) var(--ec-space-5);
   overflow-y: auto;
+  /* UI-04 批次3：移动端触摸滚动保持原生惯性，滚动链不传给页面。 */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   background: var(--ec-chat-gradient);
 }
 

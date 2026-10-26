@@ -115,6 +115,20 @@ video {
   overscroll-behavior: contain;
 }
 
+/* UI-04 批次3：移动端触控基础——禁止滚动链穿透与双指缩放延迟。 */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+button,
+a,
+input,
+textarea,
+[role='button'] {
+  touch-action: manipulation;
+}
+
 /* 尊重系统「减少动态效果」设置（§3.2 动画 120~200ms / prefers-reduced-motion）。 */
 @media (prefers-reduced-motion: reduce) {
   *,

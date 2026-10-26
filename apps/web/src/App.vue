@@ -8,6 +8,7 @@ import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import { useAuthStore } from './stores/auth'
 import { usePresenceStore } from './stores/presence'
+import { useVisualViewport } from './core/useVisualViewport'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
 // 其余路由为「左侧一级导航 + 内容区」外壳，页面自身负责内部滚动。
@@ -15,6 +16,8 @@ import { usePresenceStore } from './stores/presence'
 const route = useRoute()
 const auth = useAuthStore()
 const presence = usePresenceStore()
+// UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
+const { keyboardOpen } = useVisualViewport()
 const wsState = ref<WsState>(chatWs.state)
 let unsubscribe: (() => void) | null = null
 
@@ -45,7 +48,7 @@ function reconnect(): void {
 </script>
 
 <template>
-  <div class="ec-app-root">
+  <div class="ec-app-root" :class="{ 'ec-app-root--keyboard': keyboardOpen }">
     <ConnectionBanner v-if="auth.isLoggedIn" :state="wsState" @reconnect="reconnect" />
     <RouterView v-if="isBlankLayout" />
     <div v-else class="ec-app-shell">
@@ -53,7 +56,7 @@ function reconnect(): void {
       <main class="ec-app-main">
         <RouterView />
       </main>
-      <MobileTabBar v-if="showMobileTabBar" />
+      <MobileTabBar v-if="showMobileTabBar && !keyboardOpen" />
     </div>
     <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
     <AppToast />
@@ -66,6 +69,8 @@ function reconnect(): void {
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
+  /* UI-04 批次3：Android 软键盘弹出时用 visualViewport 实时高度，保证输入区可见。 */
+  height: var(--ec-vvh, 100dvh);
   overflow: hidden;
 }
 
