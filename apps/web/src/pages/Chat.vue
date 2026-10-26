@@ -59,6 +59,8 @@ const pageNotice = ref('')
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
+/** 消息列表实例：Emoji 面板内嵌占位会让消息区收缩，开合后保持贴底不打断阅读。 */
+const messageListRef = ref<{ scrollToBottom: () => void } | null>(null)
 
 // 连接状态页内提示（UI-02 批次4）：断线/重连就地提示，恢复后短暂显示 3 秒；
 // 只读取 core/ws.ts 的真实状态，不替代全局 ConnectionBanner，也不伪造连接状态。
@@ -284,9 +286,11 @@ function onLeftGroup(conversationId: string): void {
   conversations.handleRemovedConversations([conversationId])
 }
 
-// 右侧抽屉互斥切换（UI-02，计划 §5.6）：再点同一按钮收起；emoji 由发送框触发，group 由群聊顶栏触发。
+// 表情面板互斥切换（UI-02）：再点同一按钮收起。表情面板内嵌在聊天区（非抽屉），
+// 打开会挤压消息区，因此开合后让消息列表保持贴底，避免阅读位置跳动。
 function toggleEmojiDrawer(): void {
   activeDrawer.value = activeDrawer.value === 'emoji' ? null : 'emoji'
+  void nextTick(() => messageListRef.value?.scrollToBottom())
 }
 
 function toggleGroupDrawer(): void {
@@ -294,7 +298,7 @@ function toggleGroupDrawer(): void {
   activeDrawer.value = activeDrawer.value === 'group' ? null : 'group'
 }
 
-// Emoji 面板选择：插入到发送框光标处，不发送、不关闭抽屉（可连续选多个）。
+// Emoji 面板选择：插入到发送框光标处，不发送、不关闭面板（可连续选多个）。
 function onEmojiPick(emoji: string): void {
   sendBoxRef.value?.insertEmoji(emoji)
 }
@@ -391,6 +395,7 @@ async function handleFileSelected(file: File): Promise<void> {
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
         <MessageList
+          ref="messageListRef"
           :messages="activeMessages"
           :pending="activePending"
           :self-user-id="selfUserId"
@@ -405,6 +410,13 @@ async function handleFileSelected(file: File): Promise<void> {
           @retry="retryMessage"
           @near-bottom-change="onNearBottomChange"
         />
+        <!-- 表情面板与输入框同层内嵌在聊天区（非遮罩抽屉）：打开时消息区收缩、输入框随之上移。 -->
+        <EmojiPanel
+          v-if="activeDrawer === 'emoji'"
+          class="chat-page__emoji"
+          @pick="onEmojiPick"
+          @close="activeDrawer = null"
+        />
         <SendBox
           ref="sendBoxRef"
           :uploading="uploadBusy"
@@ -415,9 +427,6 @@ async function handleFileSelected(file: File): Promise<void> {
           @typing="sendTyping"
           @pick-emoji="toggleEmojiDrawer"
         />
-        <DrawerShell :open="activeDrawer === 'emoji'" title="表情" @close="activeDrawer = null">
-          <EmojiPanel @pick="onEmojiPick" />
-        </DrawerShell>
         <DrawerShell
           v-if="activeConversation.type === 'group'"
           :open="activeDrawer === 'group'"
