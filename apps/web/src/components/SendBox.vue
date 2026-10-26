@@ -110,38 +110,6 @@ function onEnter(event: KeyboardEvent): void {
 
 <template>
   <form class="send-box" @submit.prevent="submit">
-    <button
-      class="send-box__icon"
-      type="button"
-      title="发送图片或文件"
-      aria-label="发送图片或文件"
-      :disabled="uploading"
-      @click="pickFile"
-    >
-      <AppIcon name="paperclip" :size="20" />
-    </button>
-    <input
-      ref="fileInput"
-      class="send-box__file"
-      type="file"
-      :accept="accept"
-      :disabled="uploading"
-      @change="onFileChange"
-    />
-    <button
-      class="send-box__icon"
-      type="button"
-      title="插入表情"
-      aria-label="插入表情"
-      aria-haspopup="dialog"
-      :aria-expanded="emojiOpen"
-      :disabled="uploading"
-      data-emoji-trigger
-      @click="emit('pick-emoji')"
-    >
-      <AppIcon name="emoji" :size="20" />
-    </button>
-
     <div class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
       <textarea
         ref="input"
@@ -155,8 +123,39 @@ function onEnter(event: KeyboardEvent): void {
         @input="onInput"
         @keydown.enter.exact="onEnter"
       />
-      <!-- 字数/状态行始终占位：避免输入第一个字符时出现该行导致输入框高度跳动。 -->
-      <div class="send-box__footer">
+      <!-- 工具栏与正文同处一个输入框：图标放在输入框下侧，分隔线用浅色避免抢视觉。 -->
+      <div class="send-box__toolbar">
+        <button
+          class="send-box__icon"
+          type="button"
+          title="发送图片或文件"
+          aria-label="发送图片或文件"
+          :disabled="uploading"
+          @click="pickFile"
+        >
+          <AppIcon name="paperclip" :size="18" />
+        </button>
+        <input
+          ref="fileInput"
+          class="send-box__file"
+          type="file"
+          :accept="accept"
+          :disabled="uploading"
+          @change="onFileChange"
+        />
+        <button
+          class="send-box__icon"
+          type="button"
+          title="插入表情"
+          aria-label="插入表情"
+          aria-haspopup="dialog"
+          :aria-expanded="emojiOpen"
+          :disabled="uploading"
+          data-emoji-trigger
+          @click="emit('pick-emoji')"
+        >
+          <AppIcon name="emoji" :size="18" />
+        </button>
         <span v-if="uploading" class="send-box__status">上传中…</span>
         <span v-else-if="uploadError" class="send-box__status send-box__status--error">
           {{ uploadError }}
@@ -191,12 +190,12 @@ function onEnter(event: KeyboardEvent): void {
 .send-box__icon {
   display: grid;
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border: 1px solid var(--ec-border);
+  border: none;
   border-radius: var(--ec-radius-sm);
-  background: var(--ec-surface);
+  background: transparent;
   color: var(--ec-text-secondary);
   cursor: pointer;
   transition:
@@ -264,13 +263,14 @@ function onEnter(event: KeyboardEvent): void {
   cursor: not-allowed;
 }
 
-.send-box__footer {
+.send-box__toolbar {
   display: flex;
-  gap: var(--ec-space-2);
+  gap: 2px;
   /* 固定占位：没有字数/状态时也保留高度，输入首字不会引起输入框整体高度跳动。 */
-  min-height: 16px;
+  min-height: 32px;
   align-items: center;
-  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid var(--ec-border-subtle);
   line-height: 16px;
 }
 
@@ -327,8 +327,8 @@ function onEnter(event: KeyboardEvent): void {
   }
 
   .send-box__icon {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
   }
 
   .send-box__send {
