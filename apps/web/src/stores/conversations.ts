@@ -64,6 +64,8 @@ export const useConversationsStore = defineStore('conversations', () => {
   const lastRemovedConversationId = ref<string | null>(null)
   /** 最近一批被移出/退出的会话 ID（同一帧可能包含多个）。 */
   const removedConversationIds = ref<string[]>([])
+  /** 当前正在查看的会话（Chat 页监听路由写入；提示音/通知据此判断是否正在看该会话）。 */
+  const activeConversationId = ref<string | null>(null)
   const removedHandlers: ConversationRemovedHandler[] = []
   let unsubscribeFrame: (() => void) | null = null
   let unsubscribeState: (() => void) | null = null
@@ -322,6 +324,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     peerReadSeq.value = {}
     lastRemovedConversationId.value = null
     removedConversationIds.value = []
+    activeConversationId.value = null
     try {
       window.localStorage.removeItem(READ_SEQ_STORAGE_KEY)
     } catch {
@@ -337,11 +340,17 @@ export const useConversationsStore = defineStore('conversations', () => {
     }
   }
 
+  /** Chat 页监听路由变化时写入，供 messages store 判断提示音/通知是否需要提醒。 */
+  function setActiveConversation(conversationId: string | null): void {
+    activeConversationId.value = conversationId
+  }
+
   return {
     items,
     sorted,
     loading,
     loaded,
+    activeConversationId,
     lastRemovedConversationId,
     removedConversationIds,
     upsert,
@@ -355,6 +364,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     onConversationRemoved,
     handleRemovedConversations,
     clearRemovedNotice,
+    setActiveConversation,
     load,
     createDirect,
     createGroup,

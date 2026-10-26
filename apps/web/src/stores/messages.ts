@@ -23,8 +23,16 @@ import {
   STORE_CONVERSATIONS,
   STORE_MESSAGES,
 } from '../core/db'
+import {
+  getDesktopNotifier,
+  playIncomingSound,
+  shouldPlayIncomingSound,
+  shouldShowDesktopNotification,
+  showWebNotification,
+} from '../core/notify'
 import { useConversationsStore } from './conversations'
 import { useAuthStore } from './auth'
+import { useSettingsStore } from './settings'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
 const PAGE_SIZE = 50
@@ -516,23 +524,40 @@ export const useMessagesStore = defineStore('messages', () => {
    * 未打开的会话只更新会话摘要（conversations.applyMessage）；发现缺口时提示补拉。
    */
   /**
-   * 桌面壳系统通知（M4-02）：仅当运行在 Electron 桌面壳（window.eisechatDesktop.notify 存在）
-   * 且窗口不可见、且不是自己的消息时提示；Web 版无该对象直接忽略。
+   * 新消息提醒（本机）：提示音按设置与焦点状态播放；系统通知仅窗口不可见时弹出。
+   * 桌面壳（Electron preload 的 notify）优先，Web 版退回浏览器 Notification。
+   * 不是自己的消息才提醒；任何异常静默，不影响消息入库/展示。
    */
-  function notifyDesktopIncoming(message: Message): void {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return
-    const desktop = (window as Window & {
-      eisechatDesktop?: { notify?: (payload: { title?: string; body?: string }) => void }
-    }).eisechatDesktop
-    if (!desktop?.notify) return
-    if (document.visibilityState === 'visible') return
-
+  function notifyIncoming(message: Message): void {
+    if (typeof document === 'undefined') return
     const selfUserId = useAuthStore().user?.userId ?? ''
     if (message.senderId === selfUserId) return
 
-    const conversation = useConversationsStore().getById(message.conversationId)
+    const settings = useSettingsStore()
+    if (!settings.soundEnabled && !settings.desktopNotificationsEnabled) return
+
+    const conversationStore = useConversationsStore()
+    const state = {
+      isSelf: false,
+      documentVisible: document.visibilityState === 'visible',
+      activeConversationId: conversationStore.activeConversationId,
+      conversationId: message.conversationId,
+      soundEnabled: settings.soundEnabled,
+      desktopNotificationsEnabled: settings.desktopNotificationsEnabled,
+    } as const
+
+    if (shouldPlayIncomingSound(state)) playIncomingSound()
+    if (!shouldShowDesktopNotification(state)) return
+
+    const conversation = conversationStore.getById(message.conversationId)
     const title = conversation ? conversationTitleOf(conversation, selfUserId) : 'EiseChat 新消息'
-    desktop.notify({ title, body: previewOf(message) })
+    const body = previewOf(message)
+    const notifier = getDesktopNotifier()
+    if (notifier) {
+      void notifier.notify({ title, body })
+    } else {
+      showWebNotification(title, body)
+    }
   }
 
   function conversationTitleOf(
@@ -575,7 +600,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
     const result = merge(message.conversationId, [message])
     useConversationsStore().applyMessage(message.conversationId, message)
-    notifyDesktopIncoming(message)
+    notifyIncoming(message)
     if (result.hasGap) {
       // 缺口立即补拉（协议 §6.3）：syncAll 会以本地游标重新拉取缺失区间。
       void syncAll()

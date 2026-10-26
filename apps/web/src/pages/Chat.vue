@@ -42,6 +42,10 @@ const selfUserId = computed(() => auth.user?.userId ?? '')
 const activeId = computed(() =>
   typeof route.params.conversationId === 'string' ? route.params.conversationId : null,
 )
+// 告知 conversations store 当前打开的会话：messages store 的提示音/系统通知据此判断是否正在查看。
+watch(activeId, (conversationId) => conversations.setActiveConversation(conversationId), {
+  immediate: true,
+})
 const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
 )
@@ -247,6 +251,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   offWsState?.()
   offWsState = null
+  conversations.setActiveConversation(null)
   if (recoveredTimer) {
     clearTimeout(recoveredTimer)
     recoveredTimer = null

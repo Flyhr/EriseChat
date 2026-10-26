@@ -10,9 +10,11 @@ import { clearAllData } from '../core/db'
 import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { showToast } from '../core/toast'
 import { APP_VERSION } from '../core/version'
+import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
+import { useSettingsStore } from '../stores/settings'
 
 // 设置中心（UI-03 批次3，计划 §5.10）：分组卡片 = 账号与安全 / 外观与主题 / 通知 / 连接与关于。
 // 只展示真实可用的能力：未实现的通知、深色主题等一律 ComingSoonHint 灰显，不提供假开关、不发假请求。
@@ -20,6 +22,9 @@ const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
 const messages = useMessagesStore()
+const settings = useSettingsStore()
+/** 桌面通知开关请求进行中（防止重复点击/重复申请权限）。 */
+const notificationBusy = ref(false)
 
 const WS_STATE_LABELS: Record<WsState, string> = {
   idle: '未连接',
@@ -90,6 +95,52 @@ async function confirmLogout(): Promise<void> {
     loggingOut.value = false
   }
 }
+
+/** 是否运行在桌面壳：Electron preload 提供原生通知，不依赖浏览器通知授权。 */
+function isDesktopShell(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean((window as Window & { eisechatDesktop?: unknown }).eisechatDesktop)
+  )
+}
+
+/** 切换桌面通知：Web 版先申请浏览器通知权限；被拒绝/不支持时提示且保持关闭。 */
+async function toggleDesktopNotifications(): Promise<void> {
+  if (notificationBusy.value) return
+  if (settings.desktopNotificationsEnabled) {
+    settings.setDesktopNotificationsEnabled(false)
+    return
+  }
+  notificationBusy.value = true
+  try {
+    if (!isDesktopShell()) {
+      const permission = await ensureNotificationPermission()
+      if (permission !== 'granted') {
+        showToast(
+          permission === 'denied'
+            ? '浏览器已拒绝通知权限，请在站点设置中允许后重试'
+            : '当前浏览器不支持系统通知',
+          'error',
+        )
+        return
+      }
+    }
+    settings.setDesktopNotificationsEnabled(true)
+    showToast('桌面通知已开启', 'success')
+  } finally {
+    notificationBusy.value = false
+  }
+}
+
+/** 切换提示音（即时生效并持久化）。 */
+function toggleSound(): void {
+  settings.setSoundEnabled(!settings.soundEnabled)
+}
+
+/** 试听提示音：必须在用户点击回调里调用，满足浏览器自动播放策略。 */
+function previewSound(): void {
+  playIncomingSound()
+}
 </script>
 
 <template>
@@ -135,13 +186,47 @@ async function confirmLogout(): Promise<void> {
 
     <section class="settings-card">
       <h3 class="settings-card__title">通知</h3>
-      <p class="settings-row">
-        <ComingSoonHint label="桌面通知" layout="inline">桌面通知</ComingSoonHint>
+      <div class="settings-toggle">
+        <span class="settings-toggle__text">
+          <span class="settings-toggle__label">桌面通知</span>
+          <span class="settings-toggle__hint">窗口最小化或不在前台时，弹出新消息提醒</span>
+        </span>
+        <button
+          type="button"
+          role="switch"
+          class="settings-switch"
+          :class="{ 'settings-switch--on': settings.desktopNotificationsEnabled }"
+          :aria-checked="settings.desktopNotificationsEnabled"
+          :aria-label="settings.desktopNotificationsEnabled ? '关闭桌面通知' : '开启桌面通知'"
+          :disabled="notificationBusy"
+          @click="toggleDesktopNotifications"
+        >
+          <span class="settings-switch__thumb" aria-hidden="true" />
+        </button>
+      </div>
+      <div class="settings-toggle">
+        <span class="settings-toggle__text">
+          <span class="settings-toggle__label">提示音</span>
+          <span class="settings-toggle__hint">收到新消息且当前不在该会话时播放短提示音</span>
+        </span>
+        <span class="settings-toggle__actions">
+          <button type="button" class="settings-link-button" @click="previewSound">试听</button>
+          <button
+            type="button"
+            role="switch"
+            class="settings-switch"
+            :class="{ 'settings-switch--on': settings.soundEnabled }"
+            :aria-checked="settings.soundEnabled"
+            :aria-label="settings.soundEnabled ? '关闭提示音' : '开启提示音'"
+            @click="toggleSound"
+          >
+            <span class="settings-switch__thumb" aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+      <p class="settings-card__hint">
+        设置只保存在本机（localStorage），不同步到其他设备；清除浏览器数据后恢复默认值。
       </p>
-      <p class="settings-row">
-        <ComingSoonHint label="提示音" layout="inline">提示音</ComingSoonHint>
-      </p>
-      <p class="settings-card__hint">通知能力将在桌面客户端完善后提供，当前仅保留页面内提示。</p>
     </section>
 
     <section class="settings-card">
@@ -459,6 +544,111 @@ async function confirmLogout(): Promise<void> {
   .settings-server__row button {
     min-height: var(--ec-touch-target);
     border-radius: var(--ec-radius-mobile-input);
+  }
+}
+
+/* 通知开关（F-01）：自绘 switch；开启态用品牌色，关闭态用边框色，减小动态效果偏好时禁用过渡。 */
+.settings-toggle {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ec-space-2) 0;
+}
+
+.settings-toggle__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-toggle__label {
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.settings-toggle__hint {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  line-height: 1.4;
+}
+
+.settings-toggle__actions {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  flex: none;
+}
+
+.settings-link-button {
+  min-height: 32px;
+  padding: 0 var(--ec-space-2);
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+}
+
+.settings-switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-border);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.settings-switch--on {
+  background: var(--ec-brand-600);
+}
+
+.settings-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ec-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 18%);
+  transition: transform 150ms ease;
+}
+
+.settings-switch--on .settings-switch__thumb {
+  transform: translateX(20px);
+}
+
+.settings-switch:focus-visible {
+  outline: 2px solid var(--ec-brand-600);
+  outline-offset: 2px;
+}
+
+.settings-switch:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-switch,
+  .settings-switch__thumb {
+    transition: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .settings-toggle {
+    min-height: var(--ec-touch-target);
+  }
+
+  .settings-link-button {
+    min-height: var(--ec-touch-target);
   }
 }
 </style>
