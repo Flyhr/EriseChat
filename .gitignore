@@ -84,6 +84,7 @@ apps/mobile/android/app/src/main/assets/public/
 
 # ==== 计划与过程文档（AGENTS §2.11/§4：只提交说明类文档，计划/报告/截图等本地保留不入库） ====
 /docs/internal-plan.md
+/docs/chat-capability-plan.md
 /docs/ui-upgrade-plan.md
 /docs/ui/ui-00-review.md
 /docs/ui/*/
