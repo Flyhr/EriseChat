@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { Conversation } from '../types/frames'
 import { conversationLabel, systemMessageText } from '../core/groupChat'
 import Avatar from './Avatar.vue'
+import UnreadBadge from './UnreadBadge.vue'
 
 // 会话列表项（纯展示）：标题（单聊显示对方昵称/群聊显示群名与成员数）、最后一条消息摘要、
 // 时间、未读角标。群聊消息摘要区分 system/image/file（M3-08）。
@@ -90,7 +91,7 @@ function formatTime(timestamp: number): string {
     </span>
     <span class="conversation-item__meta">
       <span class="conversation-item__time">{{ timeText }}</span>
-      <span v-if="unread && unread > 0" class="conversation-item__unread">{{ unread > 99 ? '99+' : unread }}</span>
+      <UnreadBadge :count="unread" />
     </span>
   </button>
 </template>
@@ -148,16 +149,5 @@ function formatTime(timestamp: number): string {
 .conversation-item__time {
   color: var(--color-text-secondary);
   font-size: 11px;
-}
-
-.conversation-item__unread {
-  min-width: 18px;
-  padding: 0 5px;
-  border-radius: var(--radius-full);
-  background: var(--color-danger);
-  color: var(--color-text-inverse);
-  font-size: 11px;
-  line-height: 18px;
-  text-align: center;
 }
 </style>

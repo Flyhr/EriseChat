@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AppIcon from './AppIcon.vue'
+import ComingSoonHint from './ComingSoonHint.vue'
 import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
@@ -57,17 +58,15 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
           <AppIcon :name="item.icon" />
           <span class="ec-sidenav__label">{{ item.label }}</span>
         </RouterLink>
-        <button
+        <ComingSoonHint
           v-else
-          type="button"
           class="ec-sidenav__item ec-sidenav__item--soon"
-          disabled
-          :title="`${item.label}（即将上线）`"
-          :aria-label="`${item.label}（即将上线）`"
+          :label="item.label"
+          :show-hint="false"
         >
           <AppIcon :name="item.icon" />
           <span class="ec-sidenav__label">{{ item.label }}</span>
-        </button>
+        </ComingSoonHint>
       </li>
     </ul>
 

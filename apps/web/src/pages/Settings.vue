@@ -8,6 +8,7 @@ import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
+import ComingSoonHint from '../components/ComingSoonHint.vue'
 
 // 我的 / 设置页：M3-00 提供最简退出登录；M4-01 增加服务器地址运行时配置（桌面/APK 必需，Web 同源留空）。
 // 个人资料/通知开关按后续里程碑补。
@@ -78,6 +79,11 @@ async function logout(): Promise<void> {
       </li>
       <li class="settings-list__item">个人资料（后续里程碑）</li>
       <li class="settings-list__item">提示音 / 桌面通知（M4）</li>
+      <li class="settings-list__item">
+        <ComingSoonHint label="深色主题" hint="即将上线" layout="inline">
+          外观：深色主题（当前仅提供浅色主题）
+        </ComingSoonHint>
+      </li>
       <li class="settings-list__item settings-server">
         <span class="settings-server__title">服务器地址</span>
         <p class="settings-server__current">当前：{{ currentServerLabel }}</p>

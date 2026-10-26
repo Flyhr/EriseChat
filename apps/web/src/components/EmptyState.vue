@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 空状态占位（纯展示）：默认插槽放操作按钮。
+// 空状态占位（纯展示，UI-01 token 化）：默认插槽放操作按钮。
 defineProps<{
   title?: string
   description?: string
@@ -18,20 +18,25 @@ defineProps<{
 .empty-state {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
   align-items: center;
   justify-content: center;
-  padding: var(--space-6);
-  color: var(--color-text-secondary);
+  padding: var(--ec-space-6);
+  color: var(--ec-text-secondary);
+  text-align: center;
 }
 
 .empty-state__title {
   margin: 0;
+  color: var(--ec-text-primary);
   font-size: 15px;
+  font-weight: var(--ec-font-weight-medium);
 }
 
 .empty-state__description {
   margin: 0;
-  font-size: 13px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: var(--ec-line-height-body);
 }
 </style>

@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { WsState } from '../core/ws'
 
-// 全局连接横幅（App.vue 挂在路由出口上方）：按 chatWs 状态提示，断开可点击重连。
+// 全局连接横幅（App.vue 挂在路由出口上方，UI-01 token 化）：按 chatWs 状态提示，断开可点击重连。
 const props = defineProps<{
   state: WsState
 }>()
@@ -51,13 +51,13 @@ function onClick(): void {
   left: 0;
   z-index: 100;
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
   align-items: center;
   justify-content: center;
-  padding: var(--space-2);
-  background: var(--color-warning);
-  color: var(--color-text-inverse);
-  font-size: 13px;
+  padding: var(--ec-space-2);
+  background: var(--ec-warning);
+  color: var(--ec-text-inverse);
+  font-size: var(--ec-font-size-secondary);
   text-align: center;
 }
 
