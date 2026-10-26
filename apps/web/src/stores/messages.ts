@@ -15,14 +15,23 @@ import { messagesApi } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
 import { config } from '../core/config'
 import {
+  deletePending,
   deleteRecord,
+  getAllPending,
   getMessagesByConversation,
   getMeta,
   saveMessages,
+  savePending,
   setMeta,
+  clearPending,
   STORE_CONVERSATIONS,
   STORE_MESSAGES,
 } from '../core/db'
+import {
+  fromPendingRecord,
+  reconcileClientMsgIds,
+  toPendingRecord,
+} from '../core/pendingQueue'
 import {
   getDesktopNotifier,
   playIncomingSound,
@@ -142,6 +151,19 @@ export const useMessagesStore = defineStore('messages', () => {
 
   /** 合并服务端事实消息：去重 + 按 seq 升序，并持久化消息与游标。 */
   function merge(conversationId: string, incoming: readonly Message[]): GapCheckResult {
+    // F-03：「服务端已落库但 ack 丢失」时，补拉/历史里会出现同一 clientMsgId 的消息；
+    // 命中后清掉本地待发消息（含重试定时器与缓存记录），避免重复展示。
+    const pendingRecords = pendingOf(conversationId).map(toPendingRecord)
+    if (pendingRecords.length > 0) {
+      const resolved = reconcileClientMsgIds(incoming, pendingRecords)
+      for (const clientMsgId of resolved) {
+        const pending = findPending(conversationId, clientMsgId)
+        if (!pending) continue
+        clearTimers(clientMsgId)
+        removePending(conversationId, clientMsgId)
+      }
+    }
+
     const result = detectGap(lastSeqOf(conversationId), incoming)
     const merged = mergeMessages(messagesOf(conversationId), incoming)
     byConversation.value = { ...byConversation.value, [conversationId]: merged }
@@ -196,8 +218,80 @@ export const useMessagesStore = defineStore('messages', () => {
         setLastSeq(conversation.conversationId, maxSeq)
       }
       persistLastSeqMap()
+      await restorePendingFromCache(conversations.items.map((item) => item.conversationId))
+      // 恢复完成后再触发重发：此时 WS 可能已认证（刷新场景），也可能还没连上（首次进入由重连事件触发）。
+      resumePending()
     } catch (error) {
       console.warn('[messages] 读取本地缓存失败', error)
+    }
+  }
+
+  /**
+   * F-03：从 IndexedDB 恢复待发消息。
+   * - 脏数据 / 会话已不存在的孤儿记录直接删除；
+   * - status='sending' 保持 sending、'failed' 保持 failed；
+   * - 只恢复进内存，由 resumePending() 在 WS 已认证时重发，避免未连接时耗光重试次数。
+   */
+  async function restorePendingFromCache(conversationIds: readonly string[]): Promise<void> {
+    const stored = await getAllPending()
+    if (stored.length === 0) return
+    const aliveConversations = new Set(conversationIds)
+    const grouped: Record<string, PendingMessage[]> = {}
+    for (const raw of stored) {
+      const record = fromPendingRecord(raw)
+      if (!record) {
+        // 旧版本/被外部破坏的记录：能取到 clientMsgId 就顺手清掉，避免反复读取。
+        const maybe = raw as unknown as { clientMsgId?: unknown }
+        if (typeof maybe?.clientMsgId === 'string') forgetPendingRecord(maybe.clientMsgId)
+        continue
+      }
+      if (!aliveConversations.has(record.conversationId)) {
+        forgetPendingRecord(record.clientMsgId)
+        continue
+      }
+      const list = grouped[record.conversationId] ?? (grouped[record.conversationId] = [])
+      list.push({
+        clientMsgId: record.clientMsgId,
+        conversationId: record.conversationId,
+        senderId: record.senderId,
+        msgType: record.msgType,
+        content: record.content,
+        createdAt: record.createdAt,
+        status: record.status,
+        retries: record.retries,
+      })
+    }
+
+    const merged: Record<string, PendingMessage[]> = {}
+    for (const [conversationId, restored] of Object.entries(grouped)) {
+      const existing = pendingOf(conversationId)
+      const known = new Set(existing.map((item) => item.clientMsgId))
+      const list = [...existing]
+      for (const pending of restored) {
+        if (known.has(pending.clientMsgId)) continue
+        list.push(pending)
+      }
+      if (list.length > 0) merged[conversationId] = list
+    }
+    if (Object.keys(merged).length > 0) {
+      pendingByConversation.value = { ...pendingByConversation.value, ...merged }
+    }
+  }
+
+  /**
+   * F-03：把恢复出来、仍处于 sending 的待发消息重新发出（retries 归零，复用原 clientMsgId）。
+   * 仅在 WS 已认证时调用；已有 ack/重试定时器的消息跳过，避免重复排定时器。
+   */
+  function resumePending(): void {
+    if (chatWs.state !== 'authed') return
+    for (const list of Object.values(pendingByConversation.value)) {
+      for (const pending of list) {
+        if (pending.status !== 'sending') continue
+        if (ackTimers.has(pending.clientMsgId) || retryTimers.has(pending.clientMsgId)) continue
+        pending.retries = 0
+        persistPending(pending)
+        transmit(pending)
+      }
     }
   }
 
@@ -364,6 +458,22 @@ export const useMessagesStore = defineStore('messages', () => {
   function removePending(conversationId: string, clientMsgId: string): void {
     const rest = pendingOf(conversationId).filter((item) => item.clientMsgId !== clientMsgId)
     pendingByConversation.value = { ...pendingByConversation.value, [conversationId]: rest }
+    forgetPendingRecord(clientMsgId)
+  }
+
+  /** F-03：把待发消息写入 IndexedDB（失败静默，缓存只用于刷新后恢复，不影响发送主流程）。 */
+  function persistPending(pending: PendingMessage): void {
+    void savePending(toPendingRecord(pending)).catch(() => {
+      // 缓存写入失败不影响发送。
+    })
+  }
+
+  /** F-03：删除单条待发消息缓存。 */
+  function forgetPendingRecord(clientMsgId: string): void {
+    if (!clientMsgId) return
+    void deletePending(clientMsgId).catch(() => {
+      // 缓存写入失败不影响发送。
+    })
   }
 
   function clearTimers(clientMsgId: string): void {
@@ -420,6 +530,8 @@ export const useMessagesStore = defineStore('messages', () => {
     clearTimers(pending.clientMsgId)
     if (pending.retries >= RETRY_DELAYS_MS.length) {
       pending.status = 'failed'
+      // F-03：落库「失败」状态，刷新后仍显示可重发。
+      persistPending(pending)
       return
     }
     const delay = RETRY_DELAYS_MS[pending.retries]
@@ -453,6 +565,8 @@ export const useMessagesStore = defineStore('messages', () => {
       ...pendingByConversation.value,
       [conversationId]: [...pendingOf(conversationId), pending],
     }
+    // F-03：先落库再发送，刷新/崩溃后能恢复这条待发消息。
+    persistPending(pending)
     transmit(pending)
     return true
   }
@@ -495,6 +609,8 @@ export const useMessagesStore = defineStore('messages', () => {
     if (!pending || pending.status !== 'failed') return
     pending.status = 'sending'
     pending.retries = 0
+    // F-03：状态回到 sending 也要同步缓存，避免刷新后仍显示失败。
+    persistPending(pending)
     transmit(pending)
   }
 
@@ -624,6 +740,8 @@ export const useMessagesStore = defineStore('messages', () => {
         if (pending) {
           clearTimers(pending.clientMsgId)
           pending.status = 'failed'
+          // F-03：服务端明确拒绝，也要把失败状态落库。
+          persistPending(pending)
         }
         break
       }
@@ -658,7 +776,11 @@ export const useMessagesStore = defineStore('messages', () => {
     unsubscribers.push(chatWs.on('frame', handleFrame))
     unsubscribers.push(
       chatWs.on('statechange', (state: WsState) => {
-        if (state === 'authed') void handleAuthed()
+        if (state === 'authed') {
+          void handleAuthed()
+          // F-03：认证成功（刷新/重连）后恢复的待发消息才重发，避免提前耗光重试次数。
+          resumePending()
+        }
       }),
     )
 
@@ -668,7 +790,10 @@ export const useMessagesStore = defineStore('messages', () => {
     document.addEventListener('visibilitychange', visibilityHandler)
 
     // 订阅时若已认证（如从登录页跳转后路由已建连），立即刷新列表并补拉一次。
-    if (chatWs.state === 'authed') void handleAuthed()
+    if (chatWs.state === 'authed') {
+      void handleAuthed()
+      resumePending()
+    }
 
     return disposeRealtime
   }
@@ -698,6 +823,8 @@ export const useMessagesStore = defineStore('messages', () => {
   function removeConversation(conversationId: string): void {
     for (const pending of pendingByConversation.value[conversationId] ?? []) {
       clearTimers(pending.clientMsgId)
+      // F-03：会话被移出/退出时，一并删除其待发消息缓存（避免下次恢复出已不存在的会话）。
+      forgetPendingRecord(pending.clientMsgId)
     }
 
     byConversation.value = omitKey(byConversation.value, conversationId)
@@ -733,6 +860,8 @@ export const useMessagesStore = defineStore('messages', () => {
     const tracked = new Set([...ackTimers.keys(), ...retryTimers.keys()])
     for (const clientMsgId of tracked) clearTimers(clientMsgId)
     disposeRealtime()
+    // F-03：登出/切账号清空待发消息缓存，避免把上一个账号的发送中消息带到下一个账号。
+    void clearPending()
     byConversation.value = {}
     lastSeqByConversation.value = {}
     pendingByConversation.value = {}
