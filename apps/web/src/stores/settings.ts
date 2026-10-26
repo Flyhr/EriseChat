@@ -18,6 +18,19 @@ export const DEFAULT_SETTINGS: ClientSettings = {
   desktopNotificationsEnabled: false,
 }
 
+/** 是否运行在 Electron 桌面壳内（preload 暴露 window.eisechatDesktop）。 */
+function isDesktopShell(): boolean {
+  if (typeof window === 'undefined') return false
+  return Boolean((window as Window & { eisechatDesktop?: unknown }).eisechatDesktop)
+}
+
+/** 未保存过偏好时的默认设置：桌面壳的系统通知是原生能力、无需浏览器授权，默认开启。 */
+function defaultSettings(): ClientSettings {
+  const result = { ...DEFAULT_SETTINGS }
+  if (isDesktopShell()) result.desktopNotificationsEnabled = true
+  return result
+}
+
 /** 解析 localStorage 中保存的原始设置：缺失、损坏或类型不符时回退默认值。 */
 export function parseStoredSettings(raw: string | null | undefined): ClientSettings {
   const result: ClientSettings = { ...DEFAULT_SETTINGS }
@@ -37,9 +50,11 @@ export function parseStoredSettings(raw: string | null | undefined): ClientSetti
 
 function readStoredSettings(): ClientSettings {
   try {
-    return parseStoredSettings(window.localStorage.getItem(SETTINGS_STORAGE_KEY))
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+    // 没有保存过偏好时用默认值（桌面壳默认开启系统通知）；之后以用户保存的值为准。
+    return raw ? parseStoredSettings(raw) : defaultSettings()
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return defaultSettings()
   }
 }
 

@@ -20,6 +20,8 @@ extraResources:
     to: web-dist
   - from: build/icon.ico
     to: icon.ico
+  - from: build/tray-alert.png
+    to: tray-alert.png
 
 win:
   target:

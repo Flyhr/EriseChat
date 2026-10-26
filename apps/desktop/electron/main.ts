@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, Menu, Tray, nativeImage, shell, type NativeImage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc'
@@ -10,6 +10,11 @@ import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc
 const DEV_SERVER_URL = process.env.EISECHAT_DEV_SERVER_URL ?? 'http://127.0.0.1:5173'
 const MIN_WIDTH = 960
 const MIN_HEIGHT = 640
+
+// Windows 系统通知需要一个 Application User Model ID 才能正确归属到本应用；
+// 必须与 electron-builder.yml 的 appId 一致（开始菜单快捷方式的 AUMID 由安装包写入）。
+const APP_USER_MODEL_ID = 'com.eisechat.desktop'
+app.setAppUserModelId(APP_USER_MODEL_ID)
 
 interface WindowState {
   width: number
@@ -23,6 +28,14 @@ let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
 let windowState = loadWindowState()
+
+// 未读提醒（F-02）：托盘图标在「有未读且窗口不在前台」时闪烁，窗口回到前台或读完即停止。
+let unreadTotal = 0
+let trayNormalImage: NativeImage | null = null
+let trayAlertImage: NativeImage | null = null
+let trayBlinkTimer: NodeJS.Timeout | null = null
+let trayBlinkShowingAlert = false
+const TRAY_BLINK_INTERVAL_MS = 500
 
 function windowStatePath(): string {
   return path.join(app.getPath('userData'), 'window-state.json')
@@ -105,6 +118,15 @@ function createMainWindow(): BrowserWindow {
   if (windowState.maximized) window.maximize()
   window.once('ready-to-show', () => window.show())
 
+  // 窗口回到前台（显示/聚焦/还原）时停止托盘与任务栏闪烁；最小化/失焦后若仍有未读则继续提示。
+  const refreshUnreadAlert = (): void => applyUnreadIndicator(unreadTotal)
+  window.on('focus', refreshUnreadAlert)
+  window.on('show', refreshUnreadAlert)
+  window.on('restore', refreshUnreadAlert)
+  window.on('blur', refreshUnreadAlert)
+  window.on('minimize', refreshUnreadAlert)
+  window.on('hide', refreshUnreadAlert)
+
   // 内部应用：页面不得自行打开新窗口或跳转到未知来源；外链交给系统浏览器。
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -141,17 +163,21 @@ function createMainWindow(): BrowserWindow {
   return window
 }
 
-/** 系统托盘：显示主窗口 / 退出；点击托盘图标聚焦窗口。 */
-function createTray(): void {
-  const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'icon.ico')
-    : path.join(__dirname, '..', 'build', 'icon.ico')
-  let image = nativeImage.createFromPath(iconPath)
-  if (image.isEmpty()) {
-    image = nativeImage.createEmpty()
-  }
+/** 托盘图标路径：打包态在 resources/，开发态在 apps/desktop/build/。 */
+function trayIconPath(fileName: string): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, fileName)
+    : path.join(__dirname, '..', 'build', fileName)
+}
 
-  tray = new Tray(image)
+/** 系统托盘：显示主窗口 / 退出；点击托盘图标聚焦窗口；有未读且窗口不在前台时图标闪烁。 */
+function createTray(): void {
+  trayNormalImage = nativeImage.createFromPath(trayIconPath('icon.ico'))
+  trayAlertImage = nativeImage.createFromPath(trayIconPath('tray-alert.png'))
+  if (trayNormalImage.isEmpty()) trayNormalImage = nativeImage.createEmpty()
+  if (trayAlertImage.isEmpty()) trayAlertImage = null
+
+  tray = new Tray(trayNormalImage)
   tray.setToolTip('EiseChat')
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -169,15 +195,53 @@ function createTray(): void {
   tray.on('click', () => showMainWindow())
 }
 
+/** 主窗口是否在前台：可见、未最小化且已获得焦点。 */
+function isMainWindowActive(): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  return mainWindow.isVisible() && !mainWindow.isMinimized() && mainWindow.isFocused()
+}
+
+/** 停止托盘闪烁并恢复常态图标。 */
+function stopTrayBlink(): void {
+  if (trayBlinkTimer) {
+    clearInterval(trayBlinkTimer)
+    trayBlinkTimer = null
+  }
+  trayBlinkShowingAlert = false
+  if (tray && trayNormalImage) {
+    try {
+      tray.setImage(trayNormalImage)
+    } catch (error) {
+      console.warn('[desktop] 恢复托盘图标失败', error)
+    }
+  }
+}
+
+/** 有未读且窗口不在前台时，让托盘图标从未读提醒图标与常态图标之间闪烁。 */
+function startTrayBlink(): void {
+  if (trayBlinkTimer || !tray || !trayAlertImage) return
+  trayBlinkTimer = setInterval(() => {
+    if (!tray || !trayAlertImage || !trayNormalImage) return
+    trayBlinkShowingAlert = !trayBlinkShowingAlert
+    try {
+      tray.setImage(trayBlinkShowingAlert ? trayAlertImage : trayNormalImage)
+    } catch (error) {
+      console.warn('[desktop] 托盘图标闪烁失败', error)
+    }
+  }, TRAY_BLINK_INTERVAL_MS)
+}
+
 /**
  * 全局未读指示（F-02）：托盘提示始终可用；macOS/Linux 用系统角标；Windows 退化为窗口标题数字。
+ * 窗口不在前台时托盘图标闪烁 + 任务栏按钮闪烁，提示有新消息；回到前台或未读归零后停止。
  * 未读数由渲染进程经 IPC `unread:total` 推送，主进程只负责展示，不保存业务状态。
  */
 function applyUnreadIndicator(count: number): void {
   const total = Math.max(0, Math.min(9999, Math.trunc(count)))
+  unreadTotal = total
   if (tray) {
     try {
-      tray.setToolTip(total > 0 ? `EiseChat — ${total} 条未读` : 'EiseChat')
+      tray.setToolTip(total > 0 ? `EiseChat — ${total} 条未读消息（点击打开）` : 'EiseChat')
     } catch (error) {
       console.warn('[desktop] 更新托盘提示失败', error)
     }
@@ -194,6 +258,26 @@ function applyUnreadIndicator(count: number): void {
       mainWindow.setTitle(total > 0 ? `EiseChat（${total} 条未读）` : 'EiseChat')
     } catch (error) {
       console.warn('[desktop] 更新窗口标题失败', error)
+    }
+  }
+  const shouldAlert = total > 0 && !isMainWindowActive()
+  if (shouldAlert) {
+    startTrayBlink()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.flashFrame(true)
+      } catch (error) {
+        console.warn('[desktop] 任务栏闪烁失败', error)
+      }
+    }
+  } else {
+    stopTrayBlink()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.flashFrame(false)
+      } catch (error) {
+        console.warn('[desktop] 停止任务栏闪烁失败', error)
+      }
     }
   }
 }

@@ -31,5 +31,5 @@ if (!existsSync(electronBin)) {
   process.exit(1)
 }
 
-const app = run(electronBin, ['.'])
+const app = run(electronBin, ['.', ...process.argv.slice(2)])
 process.exit(app.status ?? 0)
