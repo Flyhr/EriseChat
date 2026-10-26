@@ -32,6 +32,10 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
 
+    public DbSet<Friend> Friends => Set<Friend>();
+
+    public DbSet<FriendRequest> FriendRequests => Set<FriendRequest>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -46,6 +50,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureInvites(modelBuilder);
         ConfigureAdminAuditLogs(modelBuilder);
         ConfigureAppSettings(modelBuilder);
+        ConfigureFriends(modelBuilder);
+        ConfigureFriendRequests(modelBuilder);
     }
 
     /// <summary>枚举 ↔ TEXT 小写转换（与 schema.sql 的 CHECK 值域一致）。</summary>
@@ -313,6 +319,72 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.HasKey(setting => setting.Key);
             entity.Property(setting => setting.Key).HasColumnName("key");
             entity.Property(setting => setting.Value).HasColumnName("value").IsRequired();
+        });
+    }
+
+    private static void ConfigureFriends(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Friend>(entity =>
+        {
+            entity.ToTable("friends");
+
+            // 单向关系：双向外键都指向 users；互为好友时双方各一行（F-17）。
+            entity.HasKey(friend => new { friend.OwnerUserId, friend.FriendUserId });
+            entity.Property(friend => friend.OwnerUserId).HasColumnName("owner_user_id").IsRequired();
+            entity.Property(friend => friend.FriendUserId).HasColumnName("friend_user_id").IsRequired();
+            entity.Property(friend => friend.Remark).HasColumnName("remark");
+            entity.Property(friend => friend.GroupName).HasColumnName("group_name");
+            entity.Property(friend => friend.CreatedAt).HasColumnName("created_at");
+
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(friend => friend.OwnerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(friend => friend.FriendUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(friend => friend.OwnerUserId).HasDatabaseName("idx_friends_owner");
+            entity.HasIndex(friend => friend.FriendUserId).HasDatabaseName("idx_friends_friend");
+        });
+    }
+
+    private static void ConfigureFriendRequests(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<FriendRequest>(entity =>
+        {
+            entity.ToTable("friend_requests", table =>
+                table.HasCheckConstraint(
+                    "ck_friend_requests_status",
+                    "status IN ('pending', 'accepted', 'rejected', 'cancelled')"));
+
+            entity.HasKey(request => request.Id);
+            entity.Property(request => request.Id).HasColumnName("id");
+            entity.Property(request => request.FromUserId).HasColumnName("from_user_id").IsRequired();
+            entity.Property(request => request.ToUserId).HasColumnName("to_user_id").IsRequired();
+            entity.Property(request => request.Message).HasColumnName("message");
+            entity.Property(request => request.Status)
+                .HasColumnName("status")
+                .HasConversion(LowercaseEnum<FriendRequestStatus>())
+                .HasDefaultValueSql("'pending'");
+            entity.Property(request => request.CreatedAt).HasColumnName("created_at");
+            entity.Property(request => request.HandledAt).HasColumnName("handled_at");
+
+            // 同一对用户 pending 期间至多一条（部分唯一索引）；历史申请可保留多条。
+            entity.HasIndex(request => new { request.FromUserId, request.ToUserId })
+                .IsUnique()
+                .HasFilter("status = 'pending'")
+                .HasDatabaseName("ux_friend_requests_pending");
+            entity.HasIndex(request => new { request.ToUserId, request.Status })
+                .HasDatabaseName("idx_friend_requests_to_status");
+            entity.HasIndex(request => new { request.FromUserId, request.Status })
+                .HasDatabaseName("idx_friend_requests_from_status");
+
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(request => request.FromUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(request => request.ToUserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

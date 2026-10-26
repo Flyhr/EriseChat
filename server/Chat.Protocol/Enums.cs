@@ -56,6 +56,22 @@ public enum UserStatus
     Disabled,
 }
 
+/// <summary>好友申请状态（storage: friend_requests.status，JSON 中为小写字符串）。</summary>
+public enum FriendRequestStatus
+{
+    /// <summary>待处理。</summary>
+    Pending,
+
+    /// <summary>已接受。</summary>
+    Accepted,
+
+    /// <summary>已拒绝。</summary>
+    Rejected,
+
+    /// <summary>申请人已撤销。</summary>
+    Cancelled,
+}
+
 /// <summary>协议版本常量（唯一来源：protocol/protocol.md §8）。</summary>
 public static class ProtocolVersion
 {

@@ -152,6 +152,8 @@ public static class FrameCodec
             ? element.Deserialize<TypingServerFrame>(JsonOptions)
             : element.Deserialize<TypingClientFrame>(JsonOptions),
         FrameTypes.Presence => element.Deserialize<PresenceFrame>(JsonOptions),
+        // F-17：好友/申请变更推送（S→C），不落库。
+        FrameTypes.FriendChanged => element.Deserialize<FriendChangedFrame>(JsonOptions),
         FrameTypes.Kicked => element.Deserialize<KickedFrame>(JsonOptions),
         FrameTypes.Error => element.Deserialize<ErrorFrame>(JsonOptions),
         _ => null,

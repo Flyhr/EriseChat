@@ -215,6 +215,93 @@ namespace Chat.Server.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Chat.Server.Data.Entities.Friend", b =>
+                {
+                    b.Property<string>("OwnerUserId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("owner_user_id");
+
+                    b.Property<string>("FriendUserId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("friend_user_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("GroupName")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("group_name");
+
+                    b.Property<string>("Remark")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("remark");
+
+                    b.HasKey("OwnerUserId", "FriendUserId");
+
+                    b.HasIndex("FriendUserId")
+                        .HasDatabaseName("idx_friends_friend");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("idx_friends_owner");
+
+                    b.ToTable("friends", (string)null);
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.FriendRequest", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FromUserId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("from_user_id");
+
+                    b.Property<long?>("HandledAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("handled_at");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("message");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("status")
+                        .HasDefaultValueSql("'pending'");
+
+                    b.Property<string>("ToUserId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("to_user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromUserId", "Status")
+                        .HasDatabaseName("idx_friend_requests_from_status");
+
+                    b.HasIndex("FromUserId", "ToUserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_friend_requests_pending")
+                        .HasFilter("status = 'pending'");
+
+                    b.HasIndex("ToUserId", "Status")
+                        .HasDatabaseName("idx_friend_requests_to_status");
+
+                    b.ToTable("friend_requests", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_friend_requests_status", "status IN ('pending', 'accepted', 'rejected', 'cancelled')");
+                        });
+                });
+
             modelBuilder.Entity("Chat.Server.Data.Entities.Invite", b =>
                 {
                     b.Property<string>("Code")
@@ -500,6 +587,36 @@ namespace Chat.Server.Data.Migrations
                     b.HasOne("Chat.Server.Data.Entities.User", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.Friend", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("FriendUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.FriendRequest", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("FromUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ToUserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

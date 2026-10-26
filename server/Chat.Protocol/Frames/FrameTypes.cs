@@ -1,7 +1,7 @@
 namespace Chat.Protocol.Frames;
 
 /// <summary>
-/// WebSocket 帧 type 常量（唯一来源：protocol/protocol.md §3，共 17 个）。
+/// WebSocket 帧 type 常量（唯一来源：protocol/protocol.md §3，共 18 个）。
 /// 帧 DTO 与处理逻辑在 M1 按协议补全，本批只固定 type 契约。
 /// </summary>
 public static class FrameTypes
@@ -50,6 +50,9 @@ public static class FrameTypes
 
     /// <summary>在线状态（S→C）。</summary>
     public const string Presence = "presence";
+
+    /// <summary>好友/申请变更推送（S→C，F-17）。</summary>
+    public const string FriendChanged = "friend.changed";
 
     /// <summary>被踢下线（S→C）。</summary>
     public const string Kicked = "kicked";
