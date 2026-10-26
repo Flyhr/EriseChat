@@ -104,6 +104,8 @@ async function download(): Promise<void> {
           :src="blobUrl"
           :alt="content.name"
           class="message-attachment__image"
+          loading="lazy"
+          decoding="async"
           @load="emit('loaded')"
         />
       </button>
