@@ -1,51 +1,134 @@
-/* EiseChat 设计变量（颜色/间距/圆角/字体）。
-   组件内统一使用 var(--xxx)，不要写死颜色或魔法数字；主题扩展（深色）在 M2+ 按需引入。 */
+/* EiseChat 设计变量（UI-01，依据 docs/ui-upgrade-plan.md §3.1 / §3.2 与 §16.5）。
+   规则：
+   1) 新代码统一使用 --ec-* token；旧组件通过文件末尾的 --color-* / --space-* 别名渐进迁移，
+      组件内不写死颜色与魔法数字。
+   2) 每个派生值在注释里标明来源（§3.1 定值 / 按 §3.1 同色系推导），避免散落硬编码。
+   3) 不捆绑字体文件；图标使用内联 SVG；深色主题只预留结构（计划 D-10），本阶段不实现。 */
 :root {
-  /* 品牌色 */
-  --color-primary: #2f7d5d;
-  --color-primary-hover: #276a4f;
-  --color-primary-soft: #e6f2ec;
+  /* ==================== 颜色（§3.1 定值） ==================== */
+  --ec-brand-500: #3d82f6; /* 品牌主色：图标/强调/悬停；不承载白字正文（约 3.7:1） */
+  --ec-brand-600: #1769d2; /* 主按钮/发送气泡/选中文字：白字约 5.3:1，达标 */
+  --ec-brand-050: #e8f2ff; /* 选中会话、菜单项背景 */
+  --ec-nav-bg: #f2f6fc; /* 全局导航底色 */
+  --ec-list-bg: #ffffff; /* 会话列表底色 */
+  --ec-chat-bg-a: #fcfeff; /* 聊天渐变起点 */
+  --ec-chat-bg-b: #edf5ff; /* 聊天渐变中间色 */
+  --ec-chat-bg-c: #f5f9ff; /* 聊天渐变过渡色 */
+  --ec-chat-bg-d: #eaf3ff; /* 聊天渐变终点 */
+  --ec-text-primary: #26364a; /* 主要文字 */
+  --ec-text-secondary: #5f6e80; /* 次要正文（时间/摘要；白底约 4.9:1） */
+  --ec-text-tertiary: #8290a3; /* 仅装饰性标签/禁用文本（白底约 3.3:1，不承载正文） */
+  --ec-border: #e7edf5; /* 分割线与边框 */
+  --ec-success: #34b985; /* 在线/成功状态（圆点等装饰性用法） */
+  --ec-danger: #c44747; /* 发送失败与危险操作文字（白底约 5.4:1） */
+  --ec-focus-ring: #1769d2; /* 键盘焦点环（2px，偏移 2px） */
+  --ec-disabled: #a8b2bf; /* 禁用文本/图标 */
+  --ec-scrim: rgba(20, 30, 45, 0.42); /* 抽屉/弹窗遮罩 */
 
-  /* 中性色 */
-  --color-bg: #f6f7f8;
-  --color-surface: #ffffff;
-  --color-surface-hover: #f0f2f3;
-  --color-border: #e3e6e8;
-  --color-text: #1f2328;
-  --color-text-secondary: #6b7280;
-  --color-text-inverse: #ffffff;
+  /* ============ 颜色（派生；按 §3.1 同色系推导，组件不得再自造色值） ============ */
+  --ec-brand-700: #1357b0; /* brand-600 加深一档：主按钮悬停/按下（白字约 6.6:1） */
+  --ec-bg-canvas: #f7fafe; /* 页面画布：nav-bg 与 list-bg 之间的浅色过渡 */
+  --ec-surface: #ffffff; /* 卡片/输入框/面板表面色（同 list-bg） */
+  --ec-surface-hover: #eff5fe; /* 列表项/按钮悬停浅蓝底（brand-050 与白之间） */
+  --ec-border-strong: #cbd8ea; /* 滚动条滑块/强分割线：border 加深一档 */
+  --ec-bubble-self: #e8f2ff; /* 自己的气泡暂用浅蓝（UI-02 按 D-05 改 brand-600 蓝底白字） */
+  --ec-bubble-other: #ffffff; /* 对方气泡白色（D-05） */
+  --ec-warning: #b45309; /* 警示文字：§3.1 未定义 warning，取可读深橙（白底约 4.8:1） */
+  --ec-text-inverse: #ffffff; /* 深色底上的文字（白字属可解释例外值） */
+  --ec-scrollbar-thumb: var(--ec-border-strong);
+  --ec-scrollbar-track: transparent;
+  --ec-chat-gradient: linear-gradient(
+    140deg,
+    var(--ec-chat-bg-a) 0%,
+    var(--ec-chat-bg-b) 47%,
+    var(--ec-chat-bg-c) 78%,
+    var(--ec-chat-bg-d) 100%
+  );
 
-  /* 状态色 */
-  --color-danger: #d64545;
-  --color-warning: #d9480f;
-  --color-success: #2f9e44;
+  /* ==================== 字体与排版（§3.2；不捆绑字体文件） ==================== */
+  --ec-font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
+    sans-serif;
+  --ec-font-mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  --ec-font-size-page-title: 20px; /* 页面标题 18–22px、600–700 字重 */
+  --ec-font-size-nav: 14px; /* 一级/二级导航 13–14px */
+  --ec-font-size-body: 14px; /* 聊天正文 14px / 1.5 */
+  --ec-font-size-secondary: 12px; /* 次要信息 11–12px */
+  --ec-font-size-small: 11px;
+  --ec-font-weight-regular: 400;
+  --ec-font-weight-medium: 500;
+  --ec-font-weight-semibold: 600;
+  --ec-line-height-body: 1.5;
+  --ec-line-height-compact: 1.35;
 
-  /* 消息气泡 */
-  --color-bubble-self: #d8f3e3;
-  --color-bubble-other: #ffffff;
+  /* ==================== 间距（4px 基数；常用 8/12/16/20/24/32） ==================== */
+  --ec-space-1: 4px;
+  --ec-space-2: 8px;
+  --ec-space-3: 12px;
+  --ec-space-4: 16px;
+  --ec-space-5: 20px;
+  --ec-space-6: 24px;
+  --ec-space-8: 32px;
 
-  /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-full: 9999px;
+  /* ============ 圆角（§3.2：输入框 12、气泡 14、面板/弹窗 12~16） ============ */
+  --ec-radius-sm: 8px;
+  --ec-radius-md: 12px;
+  --ec-radius-input: 12px;
+  --ec-radius-bubble: 14px;
+  --ec-radius-panel: 14px;
+  --ec-radius-lg: 16px;
+  --ec-radius-full: 9999px;
 
-  /* 间距（4 的倍数） */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
+  /* ==================== 阴影 / 焦点 / 禁用 / 动效 ==================== */
+  --ec-shadow-sm: 0 1px 2px rgba(20, 30, 45, 0.06);
+  --ec-shadow-md: 0 8px 24px rgba(20, 30, 45, 0.08);
+  --ec-shadow-lg: 0 16px 40px rgba(20, 30, 45, 0.12);
+  --ec-focus-width: 2px;
+  --ec-focus-offset: 2px;
+  --ec-transition-fast: 120ms;
+  --ec-transition-base: 160ms;
+  --ec-transition-slow: 200ms;
+  --ec-ease: cubic-bezier(0.2, 0, 0, 1);
 
-  /* 字体 */
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
-    'Microsoft YaHei', sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  /* ==================== 布局常量（§4.1 / §16.5 实现区间） ==================== */
+  --ec-nav-width: 172px; /* 左导航标准宽 168~176（≥1200 生效） */
+  --ec-nav-width-compact: 72px; /* 801~1099 收为图标栏 64~72 */
+  --ec-list-width: 300px; /* 会话列表 280~320 */
+  --ec-header-height: 64px; /* 顶栏 64~72 */
+  --ec-drawer-width: 288px; /* 右侧抽屉 280~300 */
 
-  /* 其它 */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --header-height: 56px;
+  /* ==================== 兼容别名（旧组件无需改结构即切换蓝白） ==================== */
+  --color-primary: var(--ec-brand-600);
+  --color-primary-hover: var(--ec-brand-700);
+  --color-primary-soft: var(--ec-brand-050);
+  --color-bg: var(--ec-bg-canvas);
+  --color-surface: var(--ec-surface);
+  --color-surface-hover: var(--ec-surface-hover);
+  --color-border: var(--ec-border);
+  --color-text: var(--ec-text-primary);
+  --color-text-secondary: var(--ec-text-secondary);
+  --color-text-inverse: var(--ec-text-inverse);
+  --color-danger: var(--ec-danger);
+  --color-warning: var(--ec-warning);
+  --color-success: var(--ec-success);
+  --color-bubble-self: var(--ec-bubble-self);
+  --color-bubble-other: var(--ec-bubble-other);
+
+  --radius-sm: var(--ec-radius-sm);
+  --radius-md: var(--ec-radius-md);
+  --radius-lg: var(--ec-radius-lg);
+  --radius-full: var(--ec-radius-full);
+
+  --space-1: var(--ec-space-1);
+  --space-2: var(--ec-space-2);
+  --space-3: var(--ec-space-3);
+  --space-4: var(--ec-space-4);
+  --space-5: var(--ec-space-6); /* 旧语义 24px，保持既有布局不回退 */
+  --space-6: var(--ec-space-8); /* 旧语义 32px */
+
+  --font-sans: var(--ec-font-sans);
+  --font-mono: var(--ec-font-mono);
+
+  --shadow-sm: var(--ec-shadow-sm);
+  --shadow-md: var(--ec-shadow-md);
+  --header-height: var(--ec-header-height);
 }

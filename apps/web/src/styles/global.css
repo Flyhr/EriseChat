@@ -1,29 +1,44 @@
-/* EiseChat 全局基础样式：重置 + 基础排版。业务样式一律放组件 scoped style。 */
+/* EiseChat 全局基础样式（UI-01，依据 docs/ui-upgrade-plan.md §3.2 / §4.3 / H-12）。
+   这里只放全局生效的最小规则：重置、字体与画布、滚动条、键盘焦点、动效降级。
+   业务样式一律放组件 scoped style；新组件类名使用 ec- 前缀（§16.4）。 */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-html,
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+  scrollbar-color: var(--ec-scrollbar-thumb) var(--ec-scrollbar-track);
+  scrollbar-width: thin;
+}
+
 body,
 #app {
   height: 100%;
+  min-height: 100%;
 }
 
 body {
   margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-primary);
+  font-family: var(--ec-font-sans);
+  font-size: var(--ec-font-size-body);
+  line-height: var(--ec-line-height-body);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
+::selection {
+  background: var(--ec-brand-050);
+  color: var(--ec-text-primary);
+}
+
 a {
-  color: var(--color-primary);
+  color: var(--ec-brand-600);
   text-decoration: none;
 }
 
@@ -43,9 +58,71 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  color: var(--ec-disabled);
+}
+
 ul,
 ol {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+img,
+svg,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+/* 键盘焦点统一 2px 焦点环 + 2px 偏移；鼠标点击不显示（:focus-visible 原生行为）。 */
+:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* 自定义滚动条（Chromium/WebView；Firefox 由 html 的 scrollbar-* 生效）。 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--ec-scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ec-brand-500);
+  background-clip: padding-box;
+}
+
+/* 滚动容器工具类：独立滚动，不把滚动链传给页面（§4.3 滚动与状态保留）。 */
+.ec-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 尊重系统「减少动态效果」设置（§3.2 动画 120~200ms / prefers-reduced-motion）。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
