@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { usersApi, type UserProfile } from '../api/users'
 import type { Conversation } from '../types/frames'
 import Avatar from '../components/Avatar.vue'
+import AppIcon from '../components/AppIcon.vue'
 import ContactProfile from '../components/ContactProfile.vue'
 import EmptyState from '../components/EmptyState.vue'
 import NewGroupDialog from '../components/NewGroupDialog.vue'
@@ -163,14 +164,14 @@ function onGroupCreated(conversation: Conversation): void {
     </aside>
 
     <section class="contacts-page__profile">
-      <button
-        v-if="selectedUser"
-        type="button"
-        class="contacts-page__back-list"
-        @click="clearSelection"
-      >
-        返回列表
-      </button>
+      <!-- 移动端：资料区顶部返回条（桌面隐藏，桌面用左栏列表切换）。 -->
+      <header v-if="selectedUser" class="contacts-page__profile-header">
+        <button type="button" class="contacts-page__back-list" @click="clearSelection">
+          <AppIcon name="back" :size="18" />
+          <span>返回</span>
+        </button>
+        <h3 class="contacts-page__profile-title">联系人资料</h3>
+      </header>
       <ContactProfile
         :user="selectedUser"
         :presence="selectedPresence"
@@ -356,28 +357,78 @@ function onGroupCreated(conversation: Conversation): void {
 
 .contacts-page__back-list {
   display: none;
-  align-self: flex-start;
-  margin: var(--ec-space-3) 0 0 var(--ec-space-3);
-  padding: 4px var(--ec-space-2);
-  border: none;
-  background: transparent;
-  color: var(--ec-brand-600);
-  font-size: var(--ec-font-size-secondary);
-  cursor: pointer;
+}
+
+.contacts-page__profile-header {
+  display: none;
 }
 
 .contacts-page__profile > .contact-profile {
   flex: 1;
 }
 
-/* ≤800：单列；列表与资料一次只显示一个（选中后显示资料，可用「返回列表」切换）。 */
+/* ≤800：单列；列表与资料一次只显示一个（选中后显示资料，可用「返回」切换）。
+   UI-05 移动端：标题放大、搜索/按钮 44px、结果行 68px 并加分隔线、资料区带返回条。 */
 @media (max-width: 800px) {
   .contacts-page {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .contacts-page__list {
+    gap: var(--ec-space-2);
+    padding: var(--ec-space-2) var(--ec-space-4) var(--ec-space-4);
     border-right: none;
+  }
+
+  .contacts-page__header {
+    gap: var(--ec-space-2);
+    height: var(--ec-header-height-mobile);
+  }
+
+  .contacts-page__title {
+    font-size: var(--ec-font-size-mobile-page-title);
+  }
+
+  .contacts-page__new-group {
+    padding: 0 var(--ec-space-3);
+    min-height: 36px;
+    border-radius: var(--ec-radius-full);
+    font-size: var(--ec-font-size-mobile-list-sub);
+  }
+
+  .contacts-page__search input {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .contacts-page__search button {
+    min-height: var(--ec-touch-target);
+    padding: 0 var(--ec-space-4);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .contacts-page__results {
+    gap: 0;
+  }
+
+  .contacts-page__result {
+    gap: var(--ec-space-3);
+    min-height: var(--ec-row-min-height-mobile);
+    padding: var(--ec-space-2) var(--ec-space-1);
+    border-bottom: 1px solid var(--ec-border);
+    border-radius: 0;
+  }
+
+  .contacts-page__result:last-child {
+    border-bottom: none;
+  }
+
+  .contacts-page__result-name {
+    font-size: var(--ec-font-size-mobile-list-title);
+  }
+
+  .contacts-page__result-email {
+    font-size: var(--ec-font-size-mobile-list-sub);
   }
 
   .contacts-page__profile {
@@ -392,8 +443,41 @@ function onGroupCreated(conversation: Conversation): void {
     display: flex;
   }
 
+  .contacts-page__profile-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    flex: none;
+    gap: var(--ec-space-2);
+    align-items: center;
+    height: var(--ec-header-height-mobile);
+    padding: 0 var(--ec-space-4);
+    border-bottom: 1px solid var(--ec-border);
+    background: var(--ec-surface);
+  }
+
   .contacts-page__back-list {
-    display: inline-block;
+    display: inline-flex;
+    gap: var(--ec-space-1);
+    align-items: center;
+    min-height: var(--ec-touch-target);
+    padding: 0 var(--ec-space-1) 0 0;
+    border: none;
+    background: transparent;
+    color: var(--ec-brand-600);
+    font-size: var(--ec-font-size-secondary);
+    cursor: pointer;
+  }
+
+  .contacts-page__profile-title {
+    overflow: hidden;
+    margin: 0;
+    color: var(--ec-text-primary);
+    font-size: var(--ec-font-size-mobile-header);
+    font-weight: var(--ec-font-weight-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>

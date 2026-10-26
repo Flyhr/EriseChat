@@ -392,4 +392,73 @@ async function confirmLogout(): Promise<void> {
   color: var(--ec-danger);
   font-size: var(--ec-font-size-small);
 }
+
+/* UI-05 移动端设置页：页面标题 22px、卡片通栏大圆角、行高 44px 便于点按，
+   服务器地址输入/保存按钮同步到 44px。 */
+@media (max-width: 800px) {
+  .settings-page {
+    padding: var(--ec-space-2) var(--ec-space-4) var(--ec-space-6);
+  }
+
+  .settings-page__header {
+    margin: var(--ec-space-2) 0 var(--ec-space-3);
+  }
+
+  .settings-page__title {
+    font-size: var(--ec-font-size-mobile-page-title);
+  }
+
+  .settings-card {
+    max-width: none;
+    gap: var(--ec-space-1);
+    margin-bottom: var(--ec-space-3);
+    padding: var(--ec-space-4);
+    border-radius: var(--ec-radius-mobile-card);
+  }
+
+  .settings-card__title {
+    margin-bottom: var(--ec-space-2);
+    font-size: var(--ec-font-size-mobile-list-sub);
+  }
+
+  .settings-account {
+    gap: var(--ec-space-2);
+  }
+
+  .settings-account__logout {
+    min-height: 40px;
+    padding: 0 var(--ec-space-3);
+    border-radius: var(--ec-radius-full);
+  }
+
+  .settings-theme__current {
+    min-height: 40px;
+    border-radius: var(--ec-radius-full);
+  }
+
+  .settings-row {
+    gap: var(--ec-space-2);
+    min-height: var(--ec-touch-target);
+  }
+
+  .settings-row__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--ec-touch-target);
+  }
+
+  .settings-server {
+    padding: var(--ec-space-3) 0;
+  }
+
+  .settings-server__row input {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .settings-server__row button {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+}
 </style>

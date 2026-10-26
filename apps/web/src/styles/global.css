@@ -135,6 +135,22 @@ textarea,
   touch-action: manipulation;
 }
 
+/* UI-05 移动端基础：去掉点击时系统高亮（改用组件自身 active 视觉），
+   输入字号保持 ≥16px，避免聚焦时浏览器缩放页面。 */
+@media (max-width: 800px) {
+  html,
+  body {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* 尊重系统「减少动态效果」设置（§3.2 动画 120~200ms / prefers-reduced-motion）。 */
 @media (prefers-reduced-motion: reduce) {
   *,

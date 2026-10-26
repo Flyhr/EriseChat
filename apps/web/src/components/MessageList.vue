@@ -284,9 +284,21 @@ onMounted(() => {
   transform: translateX(-50%);
 }
 
+/* UI-05 移动端：消息区左右留白收紧、行距略增，日期分隔与浮标保持可点。 */
 @media (max-width: 800px) {
   .message-list {
-    padding: var(--ec-space-3);
+    gap: var(--ec-space-2);
+    padding: var(--ec-space-3) var(--ec-space-3) var(--ec-space-2);
+  }
+
+  .message-list__badge {
+    bottom: var(--ec-space-2);
+    min-height: 36px;
+    padding: 0 var(--ec-space-4);
+  }
+
+  .message-list__date {
+    font-size: var(--ec-font-size-small);
   }
 }
 </style>

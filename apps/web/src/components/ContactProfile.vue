@@ -22,7 +22,7 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
 
 <template>
   <div class="contact-profile">
-    <template v-if="user">
+    <div v-if="user" class="contact-profile__card">
       <Avatar :display-name="user.displayName" :size="64" />
       <h3 class="contact-profile__name">{{ user.displayName }}</h3>
       <p class="contact-profile__presence">
@@ -38,7 +38,7 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
       >
         {{ busy ? '正在打开…' : '发送消息' }}
       </button>
-    </template>
+    </div>
     <EmptyState
       v-else
       icon="user"
@@ -58,6 +58,15 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   height: 100%;
   padding: var(--ec-space-6);
   text-align: center;
+}
+
+.contact-profile__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  align-items: center;
+  width: 100%;
+  max-width: 420px;
 }
 
 .contact-profile__name {
@@ -103,5 +112,42 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
 .contact-profile__action:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* UI-05 移动端：资料区改为卡片（白底/圆角/阴影），「发送消息」全宽 44px，触屏更易点。 */
+@media (max-width: 800px) {
+  .contact-profile {
+    justify-content: flex-start;
+    height: auto;
+    min-height: 100%;
+    padding: var(--ec-space-4);
+    background: var(--ec-bg-canvas);
+  }
+
+  .contact-profile__card {
+    margin-top: var(--ec-space-2);
+    padding: var(--ec-space-6) var(--ec-space-4);
+    border: 1px solid var(--ec-border);
+    border-radius: var(--ec-radius-mobile-card);
+    background: var(--ec-surface);
+    box-shadow: var(--ec-shadow-sm);
+  }
+
+  .contact-profile__name {
+    margin-top: 0;
+    font-size: var(--ec-font-size-mobile-page-title);
+  }
+
+  .contact-profile__email {
+    font-size: var(--ec-font-size-mobile-list-sub);
+    word-break: break-all;
+  }
+
+  .contact-profile__action {
+    align-self: stretch;
+    min-height: var(--ec-touch-target);
+    margin-top: var(--ec-space-4);
+    border-radius: var(--ec-radius-mobile-input);
+  }
 }
 </style>

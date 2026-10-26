@@ -156,3 +156,22 @@
     --ec-drawer-width: 300px;
   }
 }
+
+/* 移动端（≤800，UI-05）：与 §4.2 的 800 断点保持一致，供各组件共用，
+   避免移动端各页面自行硬编码标题字号/行高/触控尺寸。 */
+@media (max-width: 800px) {
+  :root {
+    --ec-header-height-mobile: 60px;
+    --ec-font-size-mobile-page-title: 22px;
+    --ec-font-size-mobile-header: 17px;
+    --ec-font-size-mobile-list-title: 15px;
+    --ec-font-size-mobile-list-sub: 13px;
+    --ec-row-min-height-mobile: 68px;
+    --ec-touch-target: 44px;
+    --ec-radius-mobile-card: 16px;
+    --ec-radius-mobile-input: 16px;
+    --ec-size-mobile-input-min: 56px;
+    --ec-size-mobile-input-max: 200px;
+    --ec-size-mobile-send: 40px;
+  }
+}

@@ -194,4 +194,26 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
     min-height: 44px;
   }
 }
+
+/* UI-05 移动端：顶栏压到 60px、标题 17px；「搜索/更多」占位入口在窄屏隐藏，
+   保留真实的「群资料」按钮，避免顶栏拥挤。 */
+@media (max-width: 800px) {
+  .ec-chat-header {
+    gap: var(--ec-space-2);
+    height: var(--ec-header-height-mobile);
+    padding: 0 var(--ec-space-2) 0 var(--ec-space-1);
+  }
+
+  .ec-chat-header__title {
+    font-size: var(--ec-font-size-mobile-header);
+  }
+
+  .ec-chat-header__actions > .ec-chat-header__action:not(.ec-chat-header__action--text) {
+    display: none;
+  }
+
+  .ec-chat-header__action--text {
+    height: var(--ec-touch-target);
+  }
+}
 </style>

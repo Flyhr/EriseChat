@@ -61,29 +61,53 @@ const activeKey = computed(() => {
     display: flex;
     flex: none;
     align-items: stretch;
-    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    height: calc(58px + env(safe-area-inset-bottom, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
     border-top: 1px solid var(--ec-border);
     background: var(--ec-surface);
+    box-shadow: 0 -1px 0 var(--ec-border);
   }
 
   .ec-tabbar__item {
+    position: relative;
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     align-items: center;
     justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--ec-touch-target);
+    min-height: var(--ec-touch-target);
     color: var(--ec-text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
   }
 
+  /* 选中项：品牌色 + 顶部 2px 指示条，触屏无需悬停即可辨认当前页。 */
   .ec-tabbar__item--active {
     color: var(--ec-brand-600);
+  }
+
+  .ec-tabbar__item--active::before {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 20px;
+    height: 2px;
+    border-radius: var(--ec-radius-full);
+    background: var(--ec-brand-600);
+    content: '';
+    transform: translateX(-50%);
+  }
+
+  .ec-tabbar__item--active .ec-tabbar__label {
+    font-weight: var(--ec-font-weight-semibold);
+  }
+
+  .ec-tabbar__item :deep(svg) {
+    width: 22px;
+    height: 22px;
   }
 
   .ec-tabbar__item:focus-visible {
@@ -93,7 +117,7 @@ const activeKey = computed(() => {
   }
 
   .ec-tabbar__label {
-    line-height: 16px;
+    line-height: 14px;
   }
 }
 </style>

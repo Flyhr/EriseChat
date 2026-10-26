@@ -185,10 +185,25 @@ function formatTime(timestamp: number): string {
 }
 
 /* ≤800：移动单栏列表行高 44，压缩内边距。 */
+/* UI-05 移动端列表行：按 IM 常见密度放大到 68px 行高，标题/摘要同步放大，
+   行间用 1px 分隔线替代阴影，选中态保持品牌浅蓝。 */
 @media (max-width: 800px) {
   .conversation-item {
-    min-height: 44px;
-    padding: var(--ec-space-1) var(--ec-space-3);
+    min-height: var(--ec-row-min-height-mobile);
+    padding: var(--ec-space-2) var(--ec-space-4);
+    border-bottom: 1px solid var(--ec-border);
+  }
+
+  .conversation-item:last-child {
+    border-bottom: none;
+  }
+
+  .conversation-item__title {
+    font-size: var(--ec-font-size-mobile-list-title);
+  }
+
+  .conversation-item__preview {
+    font-size: var(--ec-font-size-mobile-list-sub);
   }
 }
 </style>

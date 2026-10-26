@@ -237,6 +237,11 @@ function clearServerUrl(): void {
     </section>
 
     <section class="login-panel">
+      <!-- 移动端/窄屏：品牌区放到卡片上方（≥1200 用左侧品牌说明区）。 -->
+      <div class="login-mobile-brand" aria-hidden="true">
+        <span class="login-mobile-brand__logo">E</span>
+        <span class="login-mobile-brand__name">EiseChat</span>
+      </div>
       <div class="login-card">
         <h2 class="login-card__title">{{ mode === 'register' ? '创建账号' : '欢迎回来' }}</h2>
         <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
@@ -436,9 +441,16 @@ function clearServerUrl(): void {
 .login-panel {
   display: flex;
   flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--ec-space-4);
   align-items: center;
   justify-content: center;
   padding: var(--ec-space-6);
+}
+
+/* 移动端/窄屏品牌头（默认隐藏，≤1199 显示在卡片上方）。 */
+.login-mobile-brand {
+  display: none;
 }
 
 .login-card {
@@ -725,6 +737,32 @@ function clearServerUrl(): void {
   .login-panel {
     padding: var(--ec-space-4);
   }
+
+  .login-mobile-brand {
+    display: flex;
+    gap: var(--ec-space-2);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .login-mobile-brand__logo {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: var(--ec-radius-md);
+    background: var(--ec-brand-600);
+    color: var(--ec-text-inverse);
+    font-size: 18px;
+    font-weight: var(--ec-font-weight-semibold);
+  }
+
+  .login-mobile-brand__name {
+    color: var(--ec-text-primary);
+    font-size: 18px;
+    font-weight: var(--ec-font-weight-semibold);
+    letter-spacing: 0.2px;
+  }
 }
 
 @media (min-width: 1200px) {
@@ -744,15 +782,64 @@ function clearServerUrl(): void {
   }
 }
 
-/* UI-04 批次4：触屏按钮触控热区 ≥44px。 */
+/* UI-05 移动端登录页：卡片大圆角 + 16px 外边距、模式切换/输入/发送/登录按钮全部 ≥44px，
+   让登录页在手机上呈现为一张居中的完整表单卡片。 */
 @media (max-width: 800px) {
+  .login-page {
+    padding: var(--ec-space-4);
+  }
+
+  .login-card {
+    width: 100%;
+    padding: var(--ec-space-6) var(--ec-space-4);
+    border-radius: var(--ec-radius-mobile-card);
+    box-shadow: var(--ec-shadow-md);
+  }
+
+  .login-card__title {
+    font-size: var(--ec-font-size-mobile-page-title);
+  }
+
+  .login-modes {
+    gap: 2px;
+  }
+
+  .login-modes__item {
+    min-height: var(--ec-touch-target);
+    font-size: var(--ec-font-size-mobile-list-sub);
+  }
+
+  .login-form__field input {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .login-form__send {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
   .login-form__toggle-password {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: var(--ec-touch-target);
+    min-height: var(--ec-touch-target);
   }
 
   .login-form__submit {
-    min-height: 44px;
+    min-height: 48px;
+    border-radius: var(--ec-radius-mobile-input);
+    font-size: var(--ec-font-size-body);
+  }
+
+  .login-server__panel input {
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .login-server__save,
+  .login-server__reset {
+    min-height: 40px;
+    padding: 0 var(--ec-space-4);
+    border-radius: var(--ec-radius-mobile-input);
   }
 }
 </style>

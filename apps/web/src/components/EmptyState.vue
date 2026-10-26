@@ -70,4 +70,20 @@ defineProps<{
   gap: var(--ec-space-2);
   margin-top: var(--ec-space-2);
 }
+
+/* UI-05 移动端：空态图标更大、留白收紧，避免小屏内容显得零碎。 */
+@media (max-width: 800px) {
+  .empty-state {
+    padding: var(--ec-space-6) var(--ec-space-4);
+  }
+
+  .empty-state__icon {
+    width: 56px;
+    height: 56px;
+  }
+
+  .empty-state__title {
+    font-size: var(--ec-font-size-mobile-header);
+  }
+}
 </style>

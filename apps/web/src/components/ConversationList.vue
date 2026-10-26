@@ -53,9 +53,14 @@ function unreadOf(conversationId: string): number {
   <section class="ec-conversation-list" aria-label="会话列表">
     <header class="ec-conversation-list__header">
       <h2 class="ec-conversation-list__title">消息</h2>
-      <button type="button" class="ec-conversation-list__create" @click="emit('create')">
+      <button
+        type="button"
+        class="ec-conversation-list__create"
+        aria-label="发起聊天"
+        @click="emit('create')"
+      >
         <AppIcon name="plus" :size="16" />
-        发起聊天
+        <span class="ec-conversation-list__create-label">发起聊天</span>
       </button>
     </header>
 
@@ -192,18 +197,64 @@ function unreadOf(conversationId: string): number {
   line-height: var(--ec-line-height-body);
 }
 
+/* UI-05 移动端：页面标题放大到 22px、发起聊天收成 44×44 图标按钮、
+   筛选条吸顶并改为浅灰底胶囊，列表滚动时仍可切换；行间分隔由 ConversationItem 绘制。 */
 @media (max-width: 800px) {
   .ec-conversation-list {
     width: 100%;
     border-right: none;
   }
-}
 
-/* UI-04 批次4：移动端发起聊天/筛选按钮触控热区。 */
-@media (max-width: 800px) {
-  .ec-conversation-list__create,
+  .ec-conversation-list__header {
+    height: var(--ec-header-height-mobile);
+    padding: 0 var(--ec-space-3) 0 var(--ec-space-4);
+  }
+
+  .ec-conversation-list__title {
+    font-size: var(--ec-font-size-mobile-page-title);
+  }
+
+  .ec-conversation-list__create {
+    justify-content: center;
+    min-width: var(--ec-touch-target);
+    min-height: var(--ec-touch-target);
+    padding: 0;
+    border-radius: var(--ec-radius-full);
+  }
+
+  .ec-conversation-list__create-label {
+    display: none;
+  }
+
+  .ec-conversation-list__filters {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    gap: var(--ec-space-2);
+    padding: var(--ec-space-2) var(--ec-space-4) var(--ec-space-3);
+    background: var(--ec-list-bg);
+  }
+
   .ec-conversation-list__chip {
-    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--ec-touch-target);
+    padding: 0 var(--ec-space-4);
+    background: var(--ec-nav-bg);
+    font-size: var(--ec-font-size-mobile-list-sub);
+  }
+
+  /* 触屏设备没有 hover，选中态必须常驻（桌面规则在 hover 媒体查询内）。 */
+  .ec-conversation-list__chip--active {
+    background: var(--ec-brand-050);
+    color: var(--ec-brand-600);
+    font-weight: var(--ec-font-weight-semibold);
+  }
+
+  .ec-conversation-list__hint {
+    margin: var(--ec-space-5) var(--ec-space-4);
+    text-align: center;
   }
 }
 </style>

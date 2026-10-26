@@ -327,22 +327,42 @@ function onEnter(event: KeyboardEvent): void {
   cursor: not-allowed;
 }
 
+/* UI-05 移动端输入条：大圆角输入卡（工具按钮与输入框同卡），发送按钮改为圆角胶囊；
+   底部补 safe-area，避免被系统手势条遮挡。 */
 @media (max-width: 800px) {
   .send-box {
-    gap: 6px;
     padding: var(--ec-space-2) var(--ec-space-3)
       calc(var(--ec-space-2) + env(safe-area-inset-bottom));
   }
 
+  .send-box__field {
+    gap: 2px;
+    padding: var(--ec-space-2) var(--ec-space-3) var(--ec-space-1);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .send-box__input {
+    min-height: var(--ec-size-mobile-input-min);
+    max-height: var(--ec-size-mobile-input-max);
+  }
+
+  .send-box__toolbar {
+    gap: var(--ec-space-1);
+    min-height: var(--ec-touch-target);
+    padding-top: 0;
+  }
+
   /* UI-04 批次4：触屏点按目标 ≥44×44（桌面保持紧凑）。 */
   .send-box__icon {
-    width: 44px;
-    height: 44px;
+    width: var(--ec-touch-target);
+    height: var(--ec-touch-target);
   }
 
   .send-box__send {
-    height: 44px;
-    padding: 0 var(--ec-space-3);
+    height: var(--ec-size-mobile-send);
+    padding: 0 var(--ec-space-4);
+    border-radius: var(--ec-radius-full);
+    font-size: var(--ec-font-size-secondary);
   }
 }
 </style>
