@@ -105,6 +105,11 @@
   --ec-header-height: 64px; /* 顶栏 64~72 */
   --ec-drawer-width: 288px; /* 右侧面板 280~300（≥1440 提到 300） */
 
+  /* Android 15+ 强制 edge-to-edge 后，WebView 会绘制到状态栏下方；
+     用 env() 取系统状态栏高度，App 根节点在 ≤800 时据此留出顶部安全区（UI-05 修复）。 */
+  --ec-safe-top: env(safe-area-inset-top, 0px);
+  --ec-safe-bottom: env(safe-area-inset-bottom, 0px);
+
   /* ==================== 兼容别名（旧组件无需改结构即切换蓝白） ==================== */
   --color-primary: var(--ec-brand-600);
   --color-primary-hover: var(--ec-brand-700);

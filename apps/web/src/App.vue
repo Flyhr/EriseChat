@@ -89,6 +89,12 @@ function reconnect(): void {
 
 /* ≤800（UI-04）：单列外壳 + 底部导航行；主导航 SideNav 由自身媒体查询隐藏。 */
 @media (max-width: 800px) {
+  .ec-app-root {
+    /* UI-05 修复：Android 15+ edge-to-edge 下 WebView 绘制到状态栏区域，
+       为系统状态栏（时间/信号）留出安全区，避免页面标题被遮挡。 */
+    padding-top: var(--ec-safe-top);
+  }
+
   .ec-app-shell {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
