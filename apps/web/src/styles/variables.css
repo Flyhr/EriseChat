@@ -5,48 +5,58 @@
    2) 每个派生值在注释里标明来源（§3.1 定值 / 按 §3.1 同色系推导），避免散落硬编码。
    3) 不捆绑字体文件；图标使用内联 SVG；深色主题只预留结构（计划 D-10），本阶段不实现。 */
 :root {
-  /* ==================== 颜色（§3.1 定值） ==================== */
-  --ec-brand-500: #3d82f6; /* 品牌主色：图标/强调/悬停；不承载白字正文（约 3.7:1） */
-  --ec-brand-600: #1769d2; /* 主按钮/发送气泡/选中文字：白字约 5.3:1，达标 */
-  --ec-brand-050: #e8f2ff; /* 选中会话、菜单项背景 */
-  --ec-nav-bg: #f2f6fc; /* 全局导航底色 */
+  /* ==================== 颜色（聊天主题「澄蓝」，2026-10-26 落地） ==================== */
+  --ec-brand-500: #3b82f6; /* 品牌主色：图标/强调/气泡渐变起点 */
+  --ec-brand-600: #2563eb; /* 主按钮/发送气泡/选中文字：白字约 5.2:1，达标 */
+  --ec-brand-700: #1d4ed8; /* 悬停/按下：白字约 6.3:1 */
+  --ec-brand-100: #dbeafe; /* 浅色描边/选中指示底 */
+  --ec-brand-050: #eff6ff; /* 选中会话、菜单项背景 */
+  --ec-nav-bg: #f1f5fd; /* 全局导航底色 */
   --ec-list-bg: #ffffff; /* 会话列表底色 */
-  --ec-chat-bg-a: #fcfeff; /* 聊天渐变起点 */
-  --ec-chat-bg-b: #edf5ff; /* 聊天渐变中间色 */
-  --ec-chat-bg-c: #f5f9ff; /* 聊天渐变过渡色 */
-  --ec-chat-bg-d: #eaf3ff; /* 聊天渐变终点 */
-  --ec-text-primary: #26364a; /* 主要文字 */
-  --ec-text-secondary: #5f6e80; /* 次要正文（时间/摘要；白底约 4.9:1） */
-  --ec-text-tertiary: #8290a3; /* 仅装饰性标签/禁用文本（白底约 3.3:1，不承载正文） */
-  --ec-border: #e7edf5; /* 分割线与边框 */
-  --ec-success: #34b985; /* 在线/成功状态（圆点等装饰性用法） */
-  --ec-danger: #c44747; /* 发送失败与危险操作文字（白底约 5.4:1） */
-  --ec-focus-ring: #1769d2; /* 键盘焦点环（2px，偏移 2px） */
+  --ec-chat-bg-a: #f8fbff; /* 聊天渐变起点 */
+  --ec-chat-bg-b: #eef5ff; /* 聊天渐变中间色 */
+  --ec-chat-bg-c: #e9f1fe; /* 聊天渐变终点 */
+  --ec-chat-bg-d: #e9f1fe; /* 保留旧 token（仅兼容渐变参考） */
+  --ec-chat-glow-a: rgba(219, 234, 254, 0.75); /* 聊天区左上 brand 光晕 */
+  --ec-chat-glow-b: rgba(224, 231, 255, 0.55); /* 聊天区右下 indigo 光晕 */
+  --ec-text-primary: #0f172a; /* 主要文字（白底约 17:1） */
+  --ec-text-secondary: #5f6d7e; /* 次要正文（时间/摘要；白底约 5.3:1、导航底约 4.8:1） */
+  --ec-text-tertiary: #94a3b8; /* 仅装饰性标签/占位（白底约 2.6:1，不承载正文） */
+  --ec-border: #e2e8f0; /* 分割线与边框 */
+  --ec-border-soft: #eef3fb; /* 列表行分割线/顶栏底边等更弱的边界 */
+  --ec-success: #059669; /* 成功状态 */
+  --ec-online: #059669; /* 在线圆点 */
+  --ec-danger: #dc2626; /* 发送失败与危险操作文字（白底约 4.8:1） */
+  --ec-focus-ring: #2563eb; /* 键盘焦点环（2px，偏移 2px） */
   --ec-disabled: #a8b2bf; /* 禁用文本/图标 */
-  --ec-scrim: rgba(20, 30, 45, 0.42); /* 抽屉/弹窗遮罩 */
+  --ec-scrim: rgba(15, 23, 42, 0.45); /* 抽屉/弹窗遮罩 */
   --ec-overlay: rgba(15, 23, 42, 0.78); /* 图片大图预览遮罩（深色，与旧 rgba 值一致） */
   --ec-overlay-border: rgba(255, 255, 255, 0.4); /* 深色遮罩上的按钮边框（可解释白） */
   --ec-overlay-hover: rgba(255, 255, 255, 0.12); /* 深色遮罩上的按钮悬停（可解释白） */
 
-  /* ============ 颜色（派生；按 §3.1 同色系推导，组件不得再自造色值） ============ */
-  --ec-brand-700: #1357b0; /* brand-600 加深一档：主按钮悬停/按下（白字约 6.6:1） */
-  --ec-bg-canvas: #f7fafe; /* 页面画布：nav-bg 与 list-bg 之间的浅色过渡 */
+  /* ============ 颜色（派生；同色系推导，组件不得再自造色值） ============ */
+  --ec-bg-canvas: #f6f9fe; /* 页面画布 */
   --ec-surface: #ffffff; /* 卡片/输入框/面板表面色（同 list-bg） */
-  --ec-surface-hover: #eff5fe; /* 列表项/按钮悬停浅蓝底（brand-050 与白之间） */
-  --ec-border-strong: #cbd8ea; /* 滚动条滑块/强分割线：border 加深一档 */
-  --ec-bubble-self: #e8f2ff; /* 自己的气泡暂用浅蓝（UI-02 按 D-05 改 brand-600 蓝底白字） */
+  --ec-surface-hover: #f2f7ff; /* 列表项/按钮悬停浅蓝底（brand-050 与白之间） */
+  --ec-border-strong: #cbd5e1; /* 滚动条滑块/强分割线：border 加深一档 */
+  --ec-bubble-self: #2563eb; /* 自己的气泡主体色（渐变由 --ec-bubble-self-bg 提供） */
+  --ec-bubble-self-bg: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); /* 自己气泡渐变 */
+  --ec-bubble-self-border: transparent; /* 渐变气泡不描边 */
   --ec-bubble-other: #ffffff; /* 对方气泡白色（D-05） */
-  --ec-warning: #b45309; /* 警示文字：§3.1 未定义 warning，取可读深橙（白底约 4.8:1） */
+  --ec-bubble-other-border: #e7eef9; /* 对方气泡冷蓝描边 */
+  --ec-warning: #b45309; /* 警示文字：取可读深橙（白底约 4.8:1） */
   --ec-text-inverse: #ffffff; /* 深色底上的文字（白字属可解释例外值） */
   --ec-scrollbar-thumb: var(--ec-border-strong);
   --ec-scrollbar-track: transparent;
-  --ec-chat-gradient: linear-gradient(
-    140deg,
-    var(--ec-chat-bg-a) 0%,
-    var(--ec-chat-bg-b) 47%,
-    var(--ec-chat-bg-c) 78%,
-    var(--ec-chat-bg-d) 100%
-  );
+  --ec-row-active-bg: linear-gradient(90deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.5)); /* 选中会话行 */
+  --ec-header-bg: rgba(255, 255, 255, 0.84); /* 半透明磨砂顶栏 */
+  --ec-header-blur: blur(12px);
+  --ec-chat-gradient: radial-gradient(circle at 16% -6%, var(--ec-chat-glow-a) 0%, transparent 44%),
+    radial-gradient(circle at 88% 108%, var(--ec-chat-glow-b) 0%, transparent 48%),
+    linear-gradient(180deg, var(--ec-chat-bg-a) 0%, var(--ec-chat-bg-b) 56%, var(--ec-chat-bg-c) 100%);
+  --ec-shadow-bubble: 0 2px 8px rgba(15, 23, 42, 0.06); /* 对方气泡 */
+  --ec-shadow-bubble-self: 0 4px 14px rgba(37, 99, 235, 0.22); /* 自己渐变气泡 */
+  --ec-composer-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); /* 输入卡片浮起阴影 */
 
   /* ==================== 字体与排版（§3.2；不捆绑字体文件） ==================== */
   --ec-font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
@@ -72,19 +82,21 @@
   --ec-space-6: 24px;
   --ec-space-8: 32px;
 
-  /* ============ 圆角（§3.2：输入框 12、气泡 14、面板/弹窗 12~16） ============ */
+  /* ============ 圆角（聊天主题：气泡 18 + 单侧 6 尾角、输入卡 20） ============ */
   --ec-radius-sm: 8px;
   --ec-radius-md: 12px;
   --ec-radius-input: 12px;
-  --ec-radius-bubble: 14px;
+  --ec-radius-bubble: 18px;
+  --ec-radius-bubble-tail: 6px;
+  --ec-radius-composer: 20px;
   --ec-radius-panel: 14px;
   --ec-radius-lg: 16px;
   --ec-radius-full: 9999px;
 
   /* ==================== 阴影 / 焦点 / 禁用 / 动效 ==================== */
-  --ec-shadow-sm: 0 1px 2px rgba(20, 30, 45, 0.06);
-  --ec-shadow-md: 0 8px 24px rgba(20, 30, 45, 0.08);
-  --ec-shadow-lg: 0 16px 40px rgba(20, 30, 45, 0.12);
+  --ec-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --ec-shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+  --ec-shadow-lg: 0 16px 40px rgba(15, 23, 42, 0.12);
   --ec-focus-width: 2px;
   --ec-focus-offset: 2px;
   --ec-transition-fast: 120ms;

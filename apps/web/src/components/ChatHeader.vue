@@ -78,9 +78,12 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   align-items: center;
   justify-content: space-between;
   height: var(--ec-header-height);
-  padding: 0 var(--ec-space-4);
-  border-bottom: 1px solid var(--ec-border);
-  background: var(--ec-surface);
+  padding: 0 var(--ec-space-5);
+  border-bottom: 1px solid var(--ec-border-soft);
+  /* 「澄蓝」主题：半透明磨砂顶栏，聊天区光晕透出。 */
+  background: var(--ec-header-bg);
+  -webkit-backdrop-filter: var(--ec-header-blur);
+  backdrop-filter: var(--ec-header-blur);
 }
 
 .ec-chat-header__main {
@@ -98,7 +101,7 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   overflow: hidden;
   margin: 0;
   color: var(--ec-text-primary);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: var(--ec-font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -113,11 +116,12 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
 
 .ec-chat-header__member-count {
   flex: none;
-  padding: 2px var(--ec-space-2);
+  padding: 3px var(--ec-space-2);
+  border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-full);
-  background: var(--ec-surface-hover);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
+  font-size: var(--ec-font-size-small);
   font-weight: var(--ec-font-weight-regular);
 }
 

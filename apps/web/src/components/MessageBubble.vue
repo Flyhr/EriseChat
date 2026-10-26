@@ -174,21 +174,25 @@ const timeText = computed(() =>
   font-size: var(--ec-font-size-small);
 }
 
-/* D-05：自己 brand-600 蓝底白字；对方白底 + 边框；圆角 14px。 */
+/* 「澄蓝」主题：气泡 18px 大圆角 + 单侧 6px 尾角；自己为蓝色渐变白字，对方为白底冷蓝描边。 */
 .message-bubble {
   max-width: 100%;
-  padding: var(--ec-space-2) var(--ec-space-3);
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-bubble);
+  padding: 10px 14px;
+  border: 1px solid var(--ec-bubble-other-border);
+  border-radius: var(--ec-radius-bubble) var(--ec-radius-bubble) var(--ec-radius-bubble)
+    var(--ec-radius-bubble-tail);
   background: var(--ec-bubble-other);
   color: var(--ec-text-primary);
-  box-shadow: var(--ec-shadow-sm);
+  box-shadow: var(--ec-shadow-bubble);
 }
 
 .message-bubble--self {
-  border-color: var(--ec-brand-600);
-  background: var(--ec-brand-600);
+  border-color: var(--ec-bubble-self-border);
+  border-radius: var(--ec-radius-bubble) var(--ec-radius-bubble) var(--ec-radius-bubble-tail)
+    var(--ec-radius-bubble);
+  background: var(--ec-bubble-self-bg);
   color: var(--ec-text-inverse);
+  box-shadow: var(--ec-shadow-bubble-self);
 }
 
 .message-bubble--sending {
@@ -227,10 +231,18 @@ const timeText = computed(() =>
   cursor: pointer;
 }
 
-/* ≤800：气泡最大宽放宽，避免窄屏消息过短。 */
+/* ≤800：窄屏下气泡最大宽放宽，圆角同步收一档。 */
 @media (max-width: 800px) {
   .message-row__body {
     max-width: 84%;
+  }
+
+  .message-bubble {
+    border-radius: 16px 16px 16px 5px;
+  }
+
+  .message-bubble--self {
+    border-radius: 16px 16px 5px 16px;
   }
 }
 </style>

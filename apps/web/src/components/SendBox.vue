@@ -225,15 +225,22 @@ function onEnter(event: KeyboardEvent): void {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  padding: var(--ec-space-2) var(--ec-space-3);
+  /* 「澄蓝」主题：浮起的大圆角输入卡（工具按钮与输入框同卡）。 */
+  padding: 12px 12px 8px 16px;
   border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-input);
+  border-radius: var(--ec-radius-composer);
   background: var(--ec-surface);
-  transition: border-color var(--ec-transition-fast) var(--ec-ease);
+  box-shadow: var(--ec-composer-shadow);
+  transition:
+    border-color var(--ec-transition-fast) var(--ec-ease),
+    box-shadow var(--ec-transition-fast) var(--ec-ease);
 }
 
 .send-box__field:focus-within {
-  border-color: var(--ec-brand-600);
+  border-color: var(--ec-brand-500);
+  box-shadow:
+    var(--ec-composer-shadow),
+    0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .send-box__field--error {
@@ -302,17 +309,19 @@ function onEnter(event: KeyboardEvent): void {
 
 .send-box__send {
   flex: none;
-  height: 32px;
+  height: 34px;
   margin-left: var(--ec-space-1);
-  padding: 0 var(--ec-space-3);
+  padding: 0 var(--ec-space-5);
   border: none;
-  border-radius: var(--ec-radius-sm);
+  border-radius: var(--ec-radius-full);
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
   font-size: var(--ec-font-size-small);
   font-weight: var(--ec-font-weight-semibold);
   cursor: pointer;
-  transition: background var(--ec-transition-fast) var(--ec-ease);
+  transition:
+    background var(--ec-transition-fast) var(--ec-ease),
+    transform var(--ec-transition-fast) var(--ec-ease);
 }
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */

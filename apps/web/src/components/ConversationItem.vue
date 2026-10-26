@@ -121,7 +121,8 @@ function formatTime(timestamp: number): string {
 }
 
 .conversation-item--active {
-  background: var(--ec-brand-050);
+  /* 「澄蓝」主题：选中行用极浅的横向蓝色渐变，比纯色底更轻。 */
+  background: var(--ec-row-active-bg);
 }
 
 /* 选中会话左侧 3px 品牌色指示条（计划 §5.2）。 */
@@ -131,7 +132,7 @@ function formatTime(timestamp: number): string {
   bottom: var(--ec-space-2);
   left: 0;
   width: 3px;
-  border-radius: var(--ec-radius-full);
+  border-radius: 0 var(--ec-radius-full) var(--ec-radius-full) 0;
   background: var(--ec-brand-600);
   content: '';
 }

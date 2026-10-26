@@ -217,13 +217,14 @@ onMounted(() => {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--ec-space-3);
+  gap: var(--ec-space-4);
   min-height: 0;
-  padding: var(--ec-space-4) var(--ec-space-5);
+  padding: 18px var(--ec-space-5) var(--ec-space-3);
   overflow-y: auto;
   /* UI-04 批次3：移动端触摸滚动保持原生惯性，滚动链不传给页面。 */
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* 「澄蓝」主题：左上 brand 光晕 + 右下 indigo 光晕 + 纵向浅蓝渐变。 */
   background: var(--ec-chat-gradient);
 }
 
@@ -235,6 +236,7 @@ onMounted(() => {
   background: var(--ec-surface);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
+  box-shadow: var(--ec-shadow-sm);
   cursor: pointer;
 }
 
@@ -249,36 +251,30 @@ onMounted(() => {
   font-size: var(--ec-font-size-secondary);
 }
 
-/* 日期分隔：居中细字 + 两侧渐隐线（计划 §5.4）。 */
+/* 日期分隔：居中胶囊（替换原先的左右细线，视觉更轻）。 */
 .message-list__date {
-  display: flex;
-  gap: var(--ec-space-3);
-  align-items: center;
+  align-self: center;
   margin: var(--ec-space-1) 0;
+  padding: 3px var(--ec-space-3);
+  border-radius: var(--ec-radius-full);
+  background: rgba(241, 245, 253, 0.92);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
 }
 
-.message-list__date::before,
-.message-list__date::after {
-  flex: 1;
-  height: 1px;
-  background: var(--ec-border);
-  content: '';
-}
-
-/* 「有新消息 ↓」浮标：绝对定位在列表底部（不遮挡输入区）。 */
+/* 「有新消息 ↓」浮标：绝对定位在列表底部（不遮挡输入区），品牌蓝实底。 */
 .message-list__badge {
   position: absolute;
   bottom: var(--ec-space-3);
   left: 50%;
   padding: var(--ec-space-1) var(--ec-space-3);
-  border: 1px solid var(--ec-border);
+  border: none;
   border-radius: var(--ec-radius-full);
-  background: var(--ec-surface);
-  box-shadow: var(--ec-shadow-md);
-  color: var(--ec-brand-600);
+  background: var(--ec-brand-600);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  color: var(--ec-text-inverse);
   font-size: var(--ec-font-size-secondary);
+  font-weight: var(--ec-font-weight-medium);
   white-space: nowrap;
   cursor: pointer;
   transform: translateX(-50%);
@@ -287,7 +283,7 @@ onMounted(() => {
 /* UI-05 移动端：消息区左右留白收紧、行距略增，日期分隔与浮标保持可点。 */
 @media (max-width: 800px) {
   .message-list {
-    gap: var(--ec-space-2);
+    gap: 14px;
     padding: var(--ec-space-3) var(--ec-space-3) var(--ec-space-2);
   }
 

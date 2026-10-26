@@ -19,10 +19,12 @@ const label = computed(() => (props.count && props.count > 99 ? '99+' : String(p
   min-width: 18px;
   padding: 0 5px;
   border-radius: var(--ec-radius-full);
-  background: var(--ec-danger);
+  /* 「澄蓝」主题：未读角标用品牌蓝实底，与列表选中色同一体系。 */
+  background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
   font-size: var(--ec-font-size-small);
   line-height: 18px;
+  font-weight: var(--ec-font-weight-semibold);
   text-align: center;
 }
 </style>

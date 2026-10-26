@@ -114,13 +114,13 @@ function unreadOf(conversationId: string): number {
   justify-content: space-between;
   height: var(--ec-header-height);
   padding: 0 var(--ec-space-4);
-  border-bottom: 1px solid var(--ec-border);
+  border-bottom: 1px solid var(--ec-border-soft);
 }
 
 .ec-conversation-list__title {
   margin: 0;
   color: var(--ec-text-primary);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: var(--ec-font-weight-semibold);
 }
 
@@ -154,10 +154,10 @@ function unreadOf(conversationId: string): number {
 }
 
 .ec-conversation-list__chip {
-  padding: 4px var(--ec-space-3);
+  padding: 5px var(--ec-space-3);
   border: 1px solid transparent;
   border-radius: var(--ec-radius-full);
-  background: transparent;
+  background: var(--ec-nav-bg);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
   cursor: pointer;
@@ -174,14 +174,12 @@ function unreadOf(conversationId: string): number {
 }
 }
 
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
+/* 选中态必须常驻（原先写在 hover 媒体里导致触屏看不到）；卡片/列表筛选共用。 */
 .ec-conversation-list__chip--active,
 .ec-conversation-list__chip--active:hover {
   background: var(--ec-brand-050);
   color: var(--ec-brand-600);
   font-weight: var(--ec-font-weight-semibold);
-}
 }
 
 .ec-conversation-list__items {
