@@ -1,49 +1,171 @@
-// 联系人资料卡（UI-03 批次2，计划 §5.8）：展示选中用户的昵称、在线状态、邮箱与「发送消息」入口。
-// 纯展示组件：不直接调用接口，发起单聊由 Contacts 页处理（沿用原 createDirect 流程）。
+// 联系人资料卡（UI-03 批次2，F-17 批次5）：展示昵称、在线状态、邮箱与操作入口。
+// - 未选人：空态；陌生人：发送消息 / 加为好友；好友：发送消息 + 备注与分组（保存）+ 删除好友。
+// 纯展示组件：不直接调用接口，动作通过 emits 交给 Contacts 页处理。
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { UserProfile } from '../api/users'
+import { computed, ref, watch } from 'vue'
 import Avatar from './Avatar.vue'
 import EmptyState from './EmptyState.vue'
 import PresenceDot from './PresenceDot.vue'
 import { presenceLabelOf, type PresenceState } from '../core/presence'
+import type { Friend } from '../types/frames'
+
+/** 资料区需要的最小用户信息（UserProfile 结构兼容）。 */
+interface ContactUser {
+  userId: string
+  displayName: string
+  email: string
+  avatarFileId?: string | null
+}
 
 const props = defineProps<{
-  user: UserProfile | null
+  user: ContactUser | null
   presence?: PresenceState
   /** 正在创建/打开会话（按钮禁用）。 */
   busy?: boolean
+  /** 已是好友时传入好友关系（备注/分组/删除入口）。 */
+  friend?: Friend | null
+  /** 搜索结果中的关系：friend/outgoing/incoming，未搜索过为 null。 */
+  relation?: 'friend' | 'outgoing' | 'incoming' | null
+  /** 保存备注/分组中。 */
+  saving?: boolean
+  /** 删除好友中。 */
+  removing?: boolean
 }>()
 
-const emit = defineEmits<{ 'start-chat': [user: UserProfile] }>()
+const emit = defineEmits<{
+  'start-chat': [user: ContactUser]
+  'send-request': [user: ContactUser]
+  'update-friend': [payload: { userId: string; remark?: string; groupName?: string }]
+  'remove-friend': [friend: Friend]
+}>()
 
 const presenceText = computed(() => presenceLabelOf(props.presence))
+const displayName = computed(() => props.friend?.remark?.trim() || props.user?.displayName || '')
+
+const remark = ref('')
+const groupName = ref('')
+const formError = ref('')
+
+function syncForm(): void {
+  remark.value = props.friend?.remark ?? ''
+  groupName.value = props.friend?.groupName ?? ''
+  formError.value = ''
+}
+
+watch(() => props.friend, syncForm, { immediate: true })
+watch(() => props.user?.userId, syncForm)
+
+const relationHint = computed(() => {
+  switch (props.relation) {
+    case 'outgoing':
+      return '好友申请已发送，等待对方处理'
+    case 'incoming':
+      return '对方已向你发送好友申请，可在「申请」中处理'
+    case 'friend':
+      return ''
+    default:
+      return ''
+  }
+})
+
+function saveFriend(): void {
+  if (!props.user) return
+  const nextRemark = remark.value.trim()
+  const nextGroupName = groupName.value.trim()
+  if (nextRemark.length > 64) {
+    formError.value = '备注不能超过 64 个字符'
+    return
+  }
+  if (nextGroupName.length > 32) {
+    formError.value = '分组名不能超过 32 个字符'
+    return
+  }
+  formError.value = ''
+  // 空串表示清空备注/分组（服务端归一为 null），因此始终传字符串以便用户能清除旧值。
+  emit('update-friend', {
+    userId: props.user.userId,
+    remark: nextRemark,
+    groupName: nextGroupName,
+  })
+}
 </script>
 
 <template>
   <div class="contact-profile">
     <div v-if="user" class="contact-profile__card">
-      <Avatar :display-name="user.displayName" :size="64" />
-      <h3 class="contact-profile__name">{{ user.displayName }}</h3>
+      <Avatar :display-name="displayName" :size="64" />
+      <h3 class="contact-profile__name">{{ displayName }}</h3>
       <p class="contact-profile__presence">
         <PresenceDot :online="presence" />
         <span>{{ presenceText }}</span>
       </p>
       <p class="contact-profile__email">{{ user.email }}</p>
+
+      <div class="contact-profile__actions">
+        <button
+          type="button"
+          class="contact-profile__action"
+          :disabled="busy"
+          @click="emit('start-chat', user)"
+        >
+          {{ busy ? '正在打开…' : '发送消息' }}
+        </button>
+        <button
+          v-if="!friend"
+          type="button"
+          class="contact-profile__action contact-profile__action--secondary"
+          :disabled="relation === 'outgoing'"
+          @click="emit('send-request', user)"
+        >
+          {{ relation === 'outgoing' ? '已发送申请' : relation === 'incoming' ? '对方已申请' : '加为好友' }}
+        </button>
+      </div>
+
+      <p v-if="relationHint" class="contact-profile__hint">{{ relationHint }}</p>
+
+      <form v-if="friend" class="contact-profile__form" @submit.prevent="saveFriend">
+        <h4 class="contact-profile__form-title">好友备注</h4>
+        <label class="contact-profile__field">
+          <span>备注名</span>
+          <input
+            v-model="remark"
+            type="text"
+            maxlength="64"
+            placeholder="设置后优先显示备注"
+            aria-label="好友备注名"
+          />
+        </label>
+        <label class="contact-profile__field">
+          <span>分组</span>
+          <input
+            v-model="groupName"
+            type="text"
+            maxlength="32"
+            placeholder="例如：同事、项目组"
+            aria-label="好友分组"
+          />
+        </label>
+        <p v-if="formError" class="contact-profile__error" role="alert">{{ formError }}</p>
+        <button type="submit" class="contact-profile__save" :disabled="saving">
+          {{ saving ? '保存中…' : '保存备注' }}
+        </button>
+      </form>
+
       <button
+        v-if="friend"
         type="button"
-        class="contact-profile__action"
-        :disabled="busy"
-        @click="emit('start-chat', user)"
+        class="contact-profile__remove"
+        :disabled="removing"
+        @click="emit('remove-friend', friend)"
       >
-        {{ busy ? '正在打开…' : '发送消息' }}
+        {{ removing ? '正在删除…' : '删除好友' }}
       </button>
     </div>
     <EmptyState
       v-else
       icon="user"
-      title="搜索同事开始聊天"
-      description="输入邮箱或昵称搜索，选中结果可查看资料并发送消息。"
+      title="选择联系人查看资料"
+      description="从好友或搜索结果中选择一位同事，可发送消息、加为好友或维护备注。"
     />
   </div>
 </template>
@@ -58,6 +180,7 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   height: 100%;
   padding: var(--ec-space-6);
   text-align: center;
+  overflow-y: auto;
 }
 
 .contact-profile__card {
@@ -74,6 +197,7 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-page-title);
   font-weight: var(--ec-font-weight-semibold);
+  word-break: break-word;
 }
 
 .contact-profile__presence {
@@ -89,10 +213,18 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   margin: 0;
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-body);
+  word-break: break-all;
+}
+
+.contact-profile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ec-space-2);
+  justify-content: center;
+  margin-top: var(--ec-space-3);
 }
 
 .contact-profile__action {
-  margin-top: var(--ec-space-3);
   padding: 8px var(--ec-space-5);
   border: none;
   border-radius: var(--ec-radius-md);
@@ -102,11 +234,9 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   cursor: pointer;
 }
 
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.contact-profile__action:hover:not(:disabled) {
-  background: var(--ec-brand-700);
-}
+.contact-profile__action--secondary {
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
 }
 
 .contact-profile__action:disabled {
@@ -114,7 +244,110 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
   cursor: not-allowed;
 }
 
-/* UI-05 移动端：资料区改为卡片（白底/圆角/阴影），「发送消息」全宽 44px，触屏更易点。 */
+.contact-profile__hint {
+  margin: 0;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.contact-profile__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  width: 100%;
+  margin-top: var(--ec-space-4);
+  padding-top: var(--ec-space-4);
+  border-top: 1px solid var(--ec-border-soft);
+  text-align: left;
+}
+
+.contact-profile__form-title {
+  margin: 0;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.contact-profile__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.contact-profile__field input {
+  width: 100%;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface);
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+}
+
+.contact-profile__field input:focus-visible {
+  border-color: var(--ec-brand-500);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.contact-profile__error {
+  margin: 0;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
+}
+
+.contact-profile__save {
+  align-self: flex-start;
+  padding: 6px var(--ec-space-4);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-md);
+  background: var(--ec-surface);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
+  font-weight: var(--ec-font-weight-medium);
+  cursor: pointer;
+}
+
+.contact-profile__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.contact-profile__remove {
+  margin-top: var(--ec-space-4);
+  padding: 6px var(--ec-space-4);
+  border: 1px solid var(--ec-danger);
+  border-radius: var(--ec-radius-md);
+  background: transparent;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.contact-profile__remove:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+  .contact-profile__action:hover:not(:disabled) {
+    background: var(--ec-brand-700);
+  }
+
+  .contact-profile__action--secondary:hover:not(:disabled) {
+    background: var(--ec-brand-100);
+  }
+
+  .contact-profile__save:hover:not(:disabled),
+  .contact-profile__remove:hover:not(:disabled) {
+    background: var(--ec-surface-hover);
+  }
+}
+
+/* UI-05 移动端：资料区改为卡片（白底/圆角/阴影），按钮全宽 44px，触屏更易点。 */
 @media (max-width: 800px) {
   .contact-profile {
     justify-content: flex-start;
@@ -143,10 +376,20 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
     word-break: break-all;
   }
 
+  .contact-profile__actions {
+    width: 100%;
+  }
+
   .contact-profile__action {
+    flex: 1;
+    min-height: var(--ec-touch-target);
+    border-radius: var(--ec-radius-mobile-input);
+  }
+
+  .contact-profile__save,
+  .contact-profile__remove {
     align-self: stretch;
     min-height: var(--ec-touch-target);
-    margin-top: var(--ec-space-4);
     border-radius: var(--ec-radius-mobile-input);
   }
 }

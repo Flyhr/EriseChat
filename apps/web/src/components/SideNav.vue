@@ -6,6 +6,7 @@ import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
+import { useFriendsStore } from '../stores/friends'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
@@ -27,10 +28,32 @@ const items: NavItem[] = [
 const route = useRoute()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
+const friends = useFriendsStore()
 
 // F-02：全局未读数（左导航「消息」徽标；桌面壳另由 App.vue 同步到托盘/任务栏）。
 const totalUnread = computed(() => conversations.totalUnread)
 const unreadBadgeText = computed(() => (totalUnread.value > 99 ? '99+' : String(totalUnread.value)))
+
+// F-17：待处理好友申请数（左导航「联系人」徽标）。
+const pendingFriendCount = computed(() => friends.incomingCount)
+
+function badgeTextOf(key: string): string {
+  if (key === 'chat' && totalUnread.value > 0) return unreadBadgeText.value
+  if (key === 'contacts' && pendingFriendCount.value > 0) {
+    return pendingFriendCount.value > 99 ? '99+' : String(pendingFriendCount.value)
+  }
+  return ''
+}
+
+function ariaLabelOf(item: NavItem): string {
+  if (item.key === 'chat' && totalUnread.value > 0) {
+    return `${item.label}（${totalUnread.value} 条未读）`
+  }
+  if (item.key === 'contacts' && pendingFriendCount.value > 0) {
+    return `${item.label}（${pendingFriendCount.value} 条好友申请）`
+  }
+  return item.label
+}
 
 /** 当前一级导航高亮：按路由前缀 + 聊天页群聊筛选（?group=all）判断。 */
 const activeKey = computed(() => {
@@ -60,19 +83,15 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
           :class="{ 'ec-sidenav__item--active': activeKey === item.key }"
           :title="item.label"
           :aria-current="activeKey === item.key ? 'page' : undefined"
-          :aria-label="
-            item.key === 'chat' && totalUnread > 0
-              ? `${item.label}（${totalUnread} 条未读）`
-              : item.label
-          "
+          :aria-label="ariaLabelOf(item)"
         >
           <AppIcon :name="item.icon" />
           <span class="ec-sidenav__label">{{ item.label }}</span>
           <span
-            v-if="item.key === 'chat' && totalUnread > 0"
+            v-if="badgeTextOf(item.key)"
             class="ec-sidenav__badge"
             aria-hidden="true"
-          >{{ unreadBadgeText }}</span>
+          >{{ badgeTextOf(item.key) }}</span>
         </RouterLink>
       </li>
     </ul>
