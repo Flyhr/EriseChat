@@ -12,7 +12,9 @@
 
 <style scoped>
 .simple-page {
+  height: 100%;
   padding: var(--space-6);
+  overflow-y: auto;
 }
 
 .simple-page__title {

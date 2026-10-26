@@ -235,9 +235,11 @@ function toMessage(error: unknown): string {
 
 <style scoped>
 .contacts-page {
+  height: 100%;
   max-width: 640px;
   margin: 0 auto;
   padding: var(--space-5);
+  overflow-y: auto;
 }
 
 .contacts-page__header {

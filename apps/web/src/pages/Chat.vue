@@ -367,7 +367,15 @@ async function handleFileSelected(file: File): Promise<void> {
   display: grid;
   grid-template-columns: 280px 1fr;
   height: 100%;
+  min-height: 0;
   background: var(--color-surface);
+}
+
+/* UI-01：801~1099 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
+@media (max-width: 1099px) {
+  .chat-page {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
 }
 
 .chat-page__sidebar {

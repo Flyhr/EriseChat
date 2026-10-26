@@ -10,7 +10,8 @@ const router = createRouter({
   history: isFileProtocol ? createWebHashHistory() : createWebHistory(),
   routes: [
     { path: '/', redirect: '/chat' },
-    { path: '/login', name: 'login', component: () => import('../pages/Login.vue') },
+    // /login 使用 blank 布局（无左侧导航，登录页视觉不变；UI-01）。
+    { path: '/login', name: 'login', component: () => import('../pages/Login.vue'), meta: { layout: 'blank' } },
     { path: '/chat/:conversationId?', name: 'chat', component: () => import('../pages/Chat.vue') },
     { path: '/contacts', name: 'contacts', component: () => import('../pages/Contacts.vue') },
     { path: '/settings', name: 'settings', component: () => import('../pages/Settings.vue') },
