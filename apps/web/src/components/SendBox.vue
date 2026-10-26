@@ -160,6 +160,7 @@ function onEnter(event: KeyboardEvent): void {
         <span v-else-if="uploadError" class="send-box__status send-box__status--error">
           {{ uploadError }}
         </span>
+        <span class="send-box__spacer" />
         <span
           v-show="length > 0"
           class="send-box__counter"
@@ -167,24 +168,21 @@ function onEnter(event: KeyboardEvent): void {
         >
           {{ length }}/{{ MAX_TEXT_LENGTH }}
         </span>
+        <button class="send-box__send" type="submit" :disabled="uploading || !text.trim()">
+          发送
+        </button>
       </div>
     </div>
-
-    <button class="send-box__send" type="submit" :disabled="uploading || !text.trim()">
-      发送
-    </button>
   </form>
 </template>
 
 <style scoped>
 .send-box {
-  display: flex;
+  display: block;
   flex-shrink: 0;
-  gap: var(--ec-space-2);
-  align-items: flex-end;
-  padding: var(--ec-space-3) var(--ec-space-5) var(--ec-space-4);
-  border-top: 1px solid var(--ec-border);
-  background: var(--ec-surface);
+  /* 去掉输入条外部白底与顶部分割线：聊天区渐变背景直接透出，只保留输入框自身边框。 */
+  padding: var(--ec-space-2) var(--ec-space-5) var(--ec-space-4);
+  background: transparent;
 }
 
 .send-box__icon {
@@ -266,12 +264,15 @@ function onEnter(event: KeyboardEvent): void {
 .send-box__toolbar {
   display: flex;
   gap: 2px;
-  /* 固定占位：没有字数/状态时也保留高度，输入首字不会引起输入框整体高度跳动。 */
+  /* 与正文同处一个输入框、无分隔线；固定最小高度避免首字输入抖动。 */
   min-height: 32px;
   align-items: center;
-  padding-top: 6px;
-  border-top: 1px solid var(--ec-border-subtle);
+  padding-top: 2px;
   line-height: 16px;
+}
+
+.send-box__spacer {
+  flex: 1 1 auto;
 }
 
 .send-box__counter {
@@ -298,13 +299,14 @@ function onEnter(event: KeyboardEvent): void {
 
 .send-box__send {
   flex: none;
-  height: 40px;
-  padding: 0 var(--ec-space-4);
+  height: 32px;
+  margin-left: var(--ec-space-1);
+  padding: 0 var(--ec-space-3);
   border: none;
   border-radius: var(--ec-radius-sm);
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
-  font-size: var(--ec-font-size-nav);
+  font-size: var(--ec-font-size-small);
   font-weight: var(--ec-font-weight-semibold);
   cursor: pointer;
   transition: background var(--ec-transition-fast) var(--ec-ease);
@@ -332,7 +334,7 @@ function onEnter(event: KeyboardEvent): void {
   }
 
   .send-box__send {
-    height: 36px;
+    height: 32px;
     padding: 0 var(--ec-space-3);
   }
 }
