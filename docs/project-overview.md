@@ -18,6 +18,8 @@
 | `protocol/protocol.md` | 帧定义唯一来源（M0 创建，先改文档再改实现） | 改协议、写 WS 代码时 |
 | `protocol/schema.sql` | 表结构唯一来源（M0 创建，与 EF 迁移同步） | 改库表、写迁移时 |
 | `docs/deploy.md` | 云服务器部署、HTTPS、升级、备份恢复（M4 产出） | 部署/排障时 |
+| `docs/web.md` | Web 端（`apps/web`）开发运行、构建、生产部署（dist → wwwroot）、验收与排障 | 运行/构建/部署 Web 时 |
+| `docs/desktop.md` | Windows 桌面端（`apps/desktop`）安装、托盘/通知/设置行为、开发联调、NSIS 打包 | 打包或排查桌面端时 |
 | `docs/usage.md` | 安装与使用说明（M6 交付给最终用户） | 内测发版时 |
 | `docs/ui/` | UI 改造参考图与改造前后基线截图（**本地资产不入库**；仅 `README.md` 入库） | UI 收口后对照参考与展示 |
 
@@ -168,6 +170,8 @@ EriseChat/
 │   ├── project-overview.md                 # ← 本文
 │   ├── internal-plan.md                    # 唯一现行计划（V2.3.5）
 │   ├── deploy.md                           # M4：部署/HTTPS/升级/备份恢复
+│   ├── web.md                              # Web 端运行/构建/部署/验收（说明类，入库）
+│   ├── desktop.md                          # Windows 端安装/打包/联调（说明类，入库）
 │   ├── usage.md                            # M6：安装使用说明（给最终用户）
 │   └── test/                               # 测试与临时脚本（gitignore，不入库；子目录需申请）
 │

@@ -40,6 +40,10 @@
 | **README.md（本文件）** | **项目介绍与入口**：项目是什么/给谁用、技术栈概览、文档索引、里程碑、目标目录、重要边界 |
 | `docs/internal-plan.md`（本地文档，不入库） | **现行主计划（V2.3.5）**：协议设计、数据模型、Windows/Android/服务器方案（iPhone 仅方案）、安装程序、云端部署、6~7 周路线、成本与风险 |
 | [docs/project-overview.md](docs/project-overview.md) | **项目说明与目录架构**：项目定位/范围/技术栈/总体架构 + 文件级目录规划、模块职责、依赖方向；M0 建骨架按此执行 |
+| [docs/deploy.md](docs/deploy.md) | 服务端部署（Ubuntu + Caddy + systemd）、配置项、邮件通道、备份恢复、升级回滚 |
+| [docs/web.md](docs/web.md) | Web 端开发运行、构建、生产部署（dist → wwwroot）、验收清单与排障 |
+| [docs/desktop.md](docs/desktop.md) | Windows 桌面端安装、日常行为（托盘/通知/设置）、开发联调、NSIS 打包与排障 |
+| [docs/mobile.md](docs/mobile.md) | Android 端安装、签名、USB/局域网联机、APK 打包与真机验收 |
 | [AGENTS.md](AGENTS.md) | **项目约束**：技术栈、硬规则（许可/架构/范围）、协议可靠性要求、工作流、测试与提交规范、DoD，AI/开发代理开工前必读 |
 | （历史文档） | 旧计划、可行性分析、research 技术底稿已清理，只保留本计划、项目说明与约束文档 |
 
@@ -80,9 +84,9 @@ curl http://127.0.0.1:8080/api/health    # 健康检查：status / serverTime / 
 # Web 前端（开发期 /api、/ws 代理到 127.0.0.1:8080）
 cd apps/web && npm install
 npm run dev     # http://127.0.0.1:5173
-npm run build   # 产物 apps/web/dist（不入库）
+npm run build   # 产物 apps/web/dist（不入库；生产部署见 docs/web.md）
 
-# Windows 壳（开发态需先启动上面的 Web dev server；安装包 M4 已产出）
+# Windows 壳（开发态需先启动上面的 Web dev server；安装包 M4 已产出，安装/打包见 docs/desktop.md）
 cd apps/desktop && npm install && npm run dev   # Electron 加载 http://127.0.0.1:5173
 npm run dist                                    # NSIS 安装包（apps/desktop/dist/EiseChat-Setup-1.0.0.exe，不入库）
 
