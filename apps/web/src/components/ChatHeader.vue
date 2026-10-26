@@ -128,8 +128,15 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   align-items: center;
 }
 
+/* ComingSoonHint 的 inline 布局默认撑满整行（用于设置页整行占位），
+   在顶栏这里要作为 32px 图标按钮使用，必须收掉 width:100%。 */
+.ec-chat-header__actions :deep(.ec-coming-soon--inline) {
+  width: auto;
+}
+
 .ec-chat-header__action {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   min-width: 32px;
@@ -139,6 +146,7 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   border-radius: var(--ec-radius-sm);
   background: transparent;
   color: var(--ec-text-secondary);
+  white-space: nowrap;
   cursor: not-allowed;
 }
 

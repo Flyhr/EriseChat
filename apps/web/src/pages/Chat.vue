@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AppIcon from '../components/AppIcon.vue'
 import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList from '../components/ConversationList.vue'
-import DrawerShell from '../components/DrawerShell.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
@@ -56,8 +56,15 @@ const activeTitle = computed(() => {
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
-// 右侧抽屉（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，group 由群聊顶栏触发。
+// 右侧面板（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，group 由群聊顶栏触发。
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
+/** 群成员面板改为与聊天窗口同层的右侧栏（内嵌 grid 列，不再用遮罩抽屉覆盖聊天区）。 */
+const membersOpen = computed(
+  () =>
+    Boolean(activeId.value) &&
+    activeConversation.value?.type === 'group' &&
+    activeDrawer.value === 'group',
+)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
 
@@ -307,13 +314,17 @@ function onEmojiEscape(event: KeyboardEvent): void {
 }
 
 watch(activeDrawer, (drawer) => {
+  document.removeEventListener('mousedown', onEmojiOutsidePointer)
+  document.removeEventListener('keydown', onEmojiEscape)
   if (drawer === 'emoji') {
     document.addEventListener('mousedown', onEmojiOutsidePointer)
     document.addEventListener('keydown', onEmojiEscape)
     return
   }
-  document.removeEventListener('mousedown', onEmojiOutsidePointer)
-  document.removeEventListener('keydown', onEmojiEscape)
+  // 群成员是内嵌侧栏，不监听外部点击；保留 Esc 收起与顶栏/关闭按钮切换。
+  if (drawer === 'group') {
+    document.addEventListener('keydown', onEmojiEscape)
+  }
 })
 
 function toggleGroupDrawer(): void {
@@ -384,7 +395,10 @@ async function handleFileSelected(file: File): Promise<void> {
 </script>
 
 <template>
-  <main class="chat-page" :class="{ 'chat-page--conversation': Boolean(activeId) }">
+  <main
+    class="chat-page"
+    :class="{ 'chat-page--conversation': Boolean(activeId), 'chat-page--members': membersOpen }"
+  >
     <ConversationList
       class="chat-page__list"
       :conversations="conversations.sorted"
@@ -450,19 +464,6 @@ async function handleFileSelected(file: File): Promise<void> {
             @pick-emoji="toggleEmojiDrawer"
           />
         </div>
-        <DrawerShell
-          v-if="activeConversation.type === 'group'"
-          :open="activeDrawer === 'group'"
-          title="群成员"
-          @close="activeDrawer = null"
-        >
-          <GroupMembersPanel
-            :conversation="activeConversation"
-            :self-user-id="selfUserId"
-            @updated="onGroupUpdated"
-            @left="onLeftGroup"
-          />
-        </DrawerShell>
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"
@@ -477,6 +478,29 @@ async function handleFileSelected(file: File): Promise<void> {
         description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
       />
     </section>
+
+    <!-- 群成员面板：与聊天窗口同层的右侧栏（内嵌 grid 列，非遮罩抽屉），默认隐藏。 -->
+    <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群成员">
+      <header class="chat-page__members-header">
+        <h2 class="chat-page__members-title">群成员</h2>
+        <button
+          type="button"
+          class="chat-page__members-close"
+          aria-label="关闭群成员面板"
+          @click="activeDrawer = null"
+        >
+          <AppIcon name="close" :size="18" />
+        </button>
+      </header>
+      <div class="chat-page__members-body">
+        <GroupMembersPanel
+          :conversation="activeConversation"
+          :self-user-id="selfUserId"
+          @updated="onGroupUpdated"
+          @left="onLeftGroup"
+        />
+      </div>
+    </aside>
   </main>
 </template>
 
@@ -494,6 +518,10 @@ async function handleFileSelected(file: File): Promise<void> {
   .chat-page {
     grid-template-columns: 260px minmax(0, 1fr);
   }
+
+  .chat-page--members {
+    grid-template-columns: 260px minmax(0, 1fr) 260px;
+  }
 }
 
 .chat-page__main {
@@ -501,6 +529,62 @@ async function handleFileSelected(file: File): Promise<void> {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+/* 群成员面板（UI-03 追加）：与聊天窗口同层的第三列，打开时聊天区收窄而非被遮罩覆盖。 */
+.chat-page--members {
+  grid-template-columns: var(--ec-list-width) minmax(0, 1fr) var(--ec-drawer-width);
+}
+
+.chat-page__members {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--ec-border);
+  background: var(--ec-surface);
+}
+
+.chat-page__members-header {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ec-space-3) var(--ec-space-4);
+  border-bottom: 1px solid var(--ec-border);
+}
+
+.chat-page__members-title {
+  margin: 0;
+  color: var(--ec-text-primary);
+  font-size: 15px;
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.chat-page__members-close {
+  display: grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  cursor: pointer;
+}
+
+.chat-page__members-close:hover {
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-primary);
+}
+
+.chat-page__members-body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--ec-space-4);
+  overflow-y: auto;
 }
 
 /* 底部输入区容器：为悬浮 Emoji 面板提供定位基准（面板绝对定位，不占文档流高度）。 */
@@ -557,6 +641,19 @@ async function handleFileSelected(file: File): Promise<void> {
 
   .chat-page:not(.chat-page--conversation) .chat-page__main {
     display: none;
+  }
+
+  /* 群成员面板在窄屏占满全宽：聊天区让位，关闭后回到聊天；顶部返回按钮仍可回列表。 */
+  .chat-page--members .chat-page__list,
+  .chat-page--members .chat-page__main {
+    display: none;
+  }
+
+  .chat-page__members {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border-left: none;
   }
 
   .chat-page__emoji {
