@@ -15,6 +15,8 @@ const props = withDefaults(
     tone?: 'default' | 'danger'
     /** 业务提交中：禁用两个按钮且不响应 Esc/遮罩关闭。 */
     busy?: boolean
+    /** 宽版（560px），用于表单类内容（如新建群聊）。 */
+    wide?: boolean
   }>(),
   {
     message: '',
@@ -22,6 +24,7 @@ const props = withDefaults(
     cancelText: '取消',
     tone: 'default',
     busy: false,
+    wide: false,
   },
 )
 
@@ -74,6 +77,7 @@ function onConfirm(): void {
       <section
         ref="panel"
         class="ec-dialog__panel"
+        :class="{ 'ec-dialog__panel--wide': wide }"
         role="dialog"
         aria-modal="true"
         :aria-label="title"
@@ -123,6 +127,10 @@ function onConfirm(): void {
   background: var(--ec-surface);
   border-radius: var(--ec-radius-panel);
   box-shadow: var(--ec-shadow-lg);
+}
+
+.ec-dialog__panel--wide {
+  width: min(560px, calc(100vw - var(--ec-space-8)));
 }
 
 .ec-dialog__title {
