@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList, { type ConversationFilter } from '../components/ConversationList.vue'
+import DrawerShell from '../components/DrawerShell.vue'
+import EmojiPanel from '../components/EmojiPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
@@ -52,8 +54,10 @@ const activeTitle = computed(() => {
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
-// 群成员管理面板（仅群聊可用）。
-const showMembersPanel = ref(false)
+// 右侧抽屉（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，group 由群聊顶栏触发。
+const activeDrawer = ref<'emoji' | 'group' | null>(null)
+/** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
+const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
 
 // 会话列表筛选（UI-02）：全部/未读/群聊。群聊由左导航「群聊」(?group=all) 驱动；
 // 未读为本地筛选状态，不写入 URL；切换筛选只改展示，不产生任何请求。
@@ -123,7 +127,7 @@ const typingText = computed(() => {
 watch(
   activeId,
   (conversationId, previousId) => {
-    showMembersPanel.value = false
+    activeDrawer.value = null
     atBottom.value = true
     // 离开会话即清除其「输入中」状态（M3-09，避免残留旧会话提示）。
     if (previousId) typing.clearConversation(previousId)
@@ -171,7 +175,7 @@ watch(
 function handleRemovedNotice(): void {
   const removedId = conversations.lastRemovedConversationId
   if (!removedId) return
-  showMembersPanel.value = false
+  activeDrawer.value = null
   if (activeId.value === removedId) {
     pageNotice.value = '你已被移出群聊或已退出群聊'
     void router.replace({ name: 'chat' })
@@ -230,8 +234,23 @@ function onGroupUpdated(conversation: Conversation): void {
 
 // 主动退出群聊成功：移出列表并清缓存（与 removedConversationIds 推送路径一致），回到空聊天页。
 function onLeftGroup(conversationId: string): void {
-  showMembersPanel.value = false
+  activeDrawer.value = null
   conversations.handleRemovedConversations([conversationId])
+}
+
+// 右侧抽屉互斥切换（UI-02，计划 §5.6）：再点同一按钮收起；emoji 由发送框触发，group 由群聊顶栏触发。
+function toggleEmojiDrawer(): void {
+  activeDrawer.value = activeDrawer.value === 'emoji' ? null : 'emoji'
+}
+
+function toggleGroupDrawer(): void {
+  if (!isGroup.value) return
+  activeDrawer.value = activeDrawer.value === 'group' ? null : 'group'
+}
+
+// Emoji 面板选择：插入到发送框光标处，不发送、不关闭抽屉（可连续选多个）。
+function onEmojiPick(emoji: string): void {
+  sendBoxRef.value?.insertEmoji(emoji)
 }
 
 // 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
@@ -241,7 +260,7 @@ const uploadError = ref<string | null>(null)
 // 退出登录/切换账号：关闭群成员面板并清空页内提示（面板内部状态随 v-if 卸载重置）；
 // 同时清空「输入中」状态与节流记录，避免沿用上一位用户的数据（M3-09）。
 watch(selfUserId, () => {
-  showMembersPanel.value = false
+  activeDrawer.value = null
   pageNotice.value = ''
   uploadError.value = null
   typing.clear()
@@ -316,7 +335,7 @@ async function handleFileSelected(file: File): Promise<void> {
           :is-group="isGroup"
           :member-count="memberCount"
           :peer-presence="peerPresence"
-          @open-group="showMembersPanel = true"
+          @open-group="toggleGroupDrawer"
         />
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
@@ -336,20 +355,31 @@ async function handleFileSelected(file: File): Promise<void> {
           @near-bottom-change="onNearBottomChange"
         />
         <SendBox
+          ref="sendBoxRef"
           :uploading="uploadBusy"
           :upload-error="uploadError"
+          :emoji-open="activeDrawer === 'emoji'"
           @send="sendMessage"
           @file-selected="handleFileSelected"
           @typing="sendTyping"
+          @pick-emoji="toggleEmojiDrawer"
         />
-        <GroupMembersPanel
-          v-if="showMembersPanel && activeConversation.type === 'group'"
-          :conversation="activeConversation"
-          :self-user-id="selfUserId"
-          @close="showMembersPanel = false"
-          @updated="onGroupUpdated"
-          @left="onLeftGroup"
-        />
+        <DrawerShell :open="activeDrawer === 'emoji'" title="表情" @close="activeDrawer = null">
+          <EmojiPanel @pick="onEmojiPick" />
+        </DrawerShell>
+        <DrawerShell
+          v-if="activeConversation.type === 'group'"
+          :open="activeDrawer === 'group'"
+          title="群成员"
+          @close="activeDrawer = null"
+        >
+          <GroupMembersPanel
+            :conversation="activeConversation"
+            :self-user-id="selfUserId"
+            @updated="onGroupUpdated"
+            @left="onLeftGroup"
+          />
+        </DrawerShell>
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"

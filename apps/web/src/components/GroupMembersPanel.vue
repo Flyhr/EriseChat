@@ -13,13 +13,13 @@ import type { Conversation, ConversationMember } from '../types/frames'
 // 所有操作以服务端为准：成功后重新 GET 会话并 emit updated，由 Chat 页写回 store；
 // 被移出/退出由服务端 conv.updated.removedConversationIds 推送（本面板主动退出时也直接 emit left）。
 // M3-09：成员行展示在线状态圆点，头部展示在线人数。
+// UI-02（计划 §5.6 group 抽屉）：本组件改为抽屉内容，遮罩/Esc/焦点返回统一由 DrawerShell 负责。
 const props = defineProps<{
   conversation: Conversation
   selfUserId: string
 }>()
 
 const emit = defineEmits<{
-  close: []
   updated: [conversation: Conversation]
   left: [conversationId: string]
 }>()
@@ -155,163 +155,123 @@ async function leaveGroup(): Promise<void> {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="group-panel__backdrop" @click.self="emit('close')">
-      <aside class="group-panel" role="dialog" aria-label="群成员">
-        <header class="group-panel__header">
-          <div>
-            <h3 class="group-panel__title">{{ conversation.title || '群聊' }}</h3>
-            <p class="group-panel__subtitle">
-              {{ members.length }} 位成员 · 在线 {{ onlineCount }} 人
-            </p>
-          </div>
-          <button type="button" class="group-panel__close" @click="emit('close')">关闭</button>
-        </header>
+  <div class="group-panel">
+    <p class="group-panel__subtitle">{{ members.length }} 位成员 · 在线 {{ onlineCount }} 人</p>
 
-        <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
-        <p v-if="successMessage" class="group-panel__success" role="status">{{ successMessage }}</p>
+    <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
+    <p v-if="successMessage" class="group-panel__success" role="status">{{ successMessage }}</p>
 
-        <ul class="group-panel__members">
-          <li v-for="member in members" :key="member.userId" class="group-panel__member">
-            <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
-            <span class="group-panel__member-info">
-              <span class="group-panel__member-name">
-                <PresenceDot :online="presence.stateOf(member.userId)" />
-                {{ member.displayName }}
-                <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
-              </span>
-              <span class="group-panel__member-email">{{ member.email }}</span>
+    <ul class="group-panel__members">
+      <li v-for="member in members" :key="member.userId" class="group-panel__member">
+        <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
+        <span class="group-panel__member-info">
+          <span class="group-panel__member-name">
+            <PresenceDot :online="presence.stateOf(member.userId)" />
+            {{ member.displayName }}
+            <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
+          </span>
+          <span class="group-panel__member-email">{{ member.email }}</span>
+        </span>
+        <span class="group-panel__role">{{ roleLabel(member) }}</span>
+        <button
+          v-if="isOwner && member.userId !== selfUserId"
+          type="button"
+          class="group-panel__remove"
+          :disabled="busy"
+          @click="removeMember(member)"
+        >
+          移除
+        </button>
+      </li>
+    </ul>
+
+    <section class="group-panel__section">
+      <button v-if="!inviteOpen" type="button" class="group-panel__primary" :disabled="busy" @click="inviteOpen = true">
+        邀请成员
+      </button>
+      <template v-else>
+        <form class="group-panel__search" @submit.prevent="searchUsers">
+          <input
+            v-model="inviteKeyword"
+            type="search"
+            maxlength="64"
+            placeholder="输入邮箱或昵称搜索"
+            aria-label="搜索待邀请用户"
+          />
+          <button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button>
+        </form>
+        <p v-if="selectedInviteIds.length > 0" class="group-panel__selected">
+          已选 {{ selectedInviteIds.length }} 人
+        </p>
+        <ul v-if="inviteResults.length > 0" class="group-panel__candidates">
+          <li v-for="user in inviteResults" :key="user.userId" class="group-panel__candidate">
+            <Avatar :display-name="user.displayName" :avatar-file-id="user.avatarFileId" :size="28" />
+            <span class="group-panel__candidate-info">
+              <span>{{ user.displayName }}</span>
+              <span class="group-panel__member-email">{{ user.email }}</span>
             </span>
-            <span class="group-panel__role">{{ roleLabel(member) }}</span>
-            <button
-              v-if="isOwner && member.userId !== selfUserId"
-              type="button"
-              class="group-panel__remove"
-              :disabled="busy"
-              @click="removeMember(member)"
-            >
-              移除
+            <button type="button" class="group-panel__toggle" @click="toggleInvite(user.userId)">
+              {{ isSelected(user.userId) ? '取消选择' : '选择' }}
             </button>
           </li>
         </ul>
-
-        <section class="group-panel__section">
-          <button v-if="!inviteOpen" type="button" class="group-panel__primary" :disabled="busy" @click="inviteOpen = true">
-            邀请成员
+        <p v-else-if="searching === false && inviteKeyword.trim().length > 0" class="group-panel__hint">
+          没有找到可邀请的用户。
+        </p>
+        <div class="group-panel__actions">
+          <button
+            type="button"
+            class="group-panel__primary"
+            :disabled="busy || selectedInviteIds.length === 0"
+            @click="invite"
+          >
+            确认邀请
           </button>
-          <template v-else>
-            <form class="group-panel__search" @submit.prevent="searchUsers">
-              <input
-                v-model="inviteKeyword"
-                type="search"
-                maxlength="64"
-                placeholder="输入邮箱或昵称搜索"
-                aria-label="搜索待邀请用户"
-              />
-              <button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button>
-            </form>
-            <p v-if="selectedInviteIds.length > 0" class="group-panel__selected">
-              已选 {{ selectedInviteIds.length }} 人
-            </p>
-            <ul v-if="inviteResults.length > 0" class="group-panel__candidates">
-              <li v-for="user in inviteResults" :key="user.userId" class="group-panel__candidate">
-                <Avatar :display-name="user.displayName" :avatar-file-id="user.avatarFileId" :size="28" />
-                <span class="group-panel__candidate-info">
-                  <span>{{ user.displayName }}</span>
-                  <span class="group-panel__member-email">{{ user.email }}</span>
-                </span>
-                <button type="button" class="group-panel__toggle" @click="toggleInvite(user.userId)">
-                  {{ isSelected(user.userId) ? '取消选择' : '选择' }}
-                </button>
-              </li>
-            </ul>
-            <p v-else-if="searching === false && inviteKeyword.trim().length > 0" class="group-panel__hint">
-              没有找到可邀请的用户。
-            </p>
-            <div class="group-panel__actions">
-              <button
-                type="button"
-                class="group-panel__primary"
-                :disabled="busy || selectedInviteIds.length === 0"
-                @click="invite"
-              >
-                确认邀请
-              </button>
-              <button type="button" class="group-panel__secondary" :disabled="busy" @click="resetInvite">取消</button>
-            </div>
-          </template>
-        </section>
+          <button type="button" class="group-panel__secondary" :disabled="busy" @click="resetInvite">取消</button>
+        </div>
+      </template>
+    </section>
 
-        <section class="group-panel__section group-panel__leave">
-          <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="leaveGroup">
-            退出群聊
-          </button>
-          <p v-else class="group-panel__hint">群主不能退出群聊（v1 不支持转让群主或解散群）。</p>
-        </section>
-      </aside>
-    </div>
-  </Teleport>
+    <section class="group-panel__section group-panel__leave">
+      <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="leaveGroup">
+        退出群聊
+      </button>
+      <p v-else class="group-panel__hint">群主不能退出群聊（v1 不支持转让群主或解散群）。</p>
+    </section>
+  </div>
 </template>
 
 <style scoped>
-.group-panel__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  justify-content: flex-end;
-  background: rgb(0 0 0 / 32%);
-}
-
 .group-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  width: min(380px, 100%);
-  height: 100%;
-  padding: var(--space-4);
-  overflow-y: auto;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-md);
-}
-
-.group-panel__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.group-panel__title {
-  margin: 0;
-  font-size: 18px;
+  gap: var(--ec-space-3);
 }
 
 .group-panel__subtitle {
-  margin: 4px 0 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
 }
 
-.group-panel__close,
 .group-panel__toggle,
 .group-panel__remove,
 .group-panel__secondary {
   padding: 4px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
   background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
   cursor: pointer;
 }
 
 .group-panel__primary {
   padding: 6px 12px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
   font-size: 13px;
   cursor: pointer;
 }
@@ -324,10 +284,10 @@ async function leaveGroup(): Promise<void> {
 
 .group-panel__danger {
   padding: 6px 12px;
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--ec-danger);
+  border-radius: var(--ec-radius-sm);
   background: transparent;
-  color: var(--color-danger);
+  color: var(--ec-danger);
   font-size: 13px;
   cursor: pointer;
 }
@@ -335,19 +295,19 @@ async function leaveGroup(): Promise<void> {
 .group-panel__error,
 .group-panel__success {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  font-size: 12px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border-radius: var(--ec-radius-sm);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .group-panel__error {
-  background: var(--color-danger);
-  color: var(--color-text-inverse);
+  background: var(--ec-danger);
+  color: var(--ec-text-inverse);
 }
 
 .group-panel__success {
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
 }
 
 .group-panel__members,
@@ -360,10 +320,10 @@ async function leaveGroup(): Promise<void> {
 .group-panel__member,
 .group-panel__candidate {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
   align-items: center;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--ec-space-2) 0;
+  border-bottom: 1px solid var(--ec-border);
 }
 
 .group-panel__member-info,
@@ -376,19 +336,19 @@ async function leaveGroup(): Promise<void> {
 }
 
 .group-panel__member-name {
-  font-weight: 600;
+  font-weight: var(--ec-font-weight-semibold);
 }
 
 .group-panel__me {
-  color: var(--color-text-secondary);
-  font-size: 11px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
   font-style: normal;
 }
 
 .group-panel__member-email {
   overflow: hidden;
-  color: var(--color-text-secondary);
-  font-size: 11px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -396,65 +356,65 @@ async function leaveGroup(): Promise<void> {
 .group-panel__role {
   flex: none;
   padding: 2px 8px;
-  border-radius: var(--radius-full);
-  background: var(--color-surface-hover);
-  color: var(--color-text-secondary);
-  font-size: 11px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
 }
 
 .group-panel__section {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-3);
-  border-top: 1px solid var(--color-border);
+  gap: var(--ec-space-2);
+  padding-top: var(--ec-space-3);
+  border-top: 1px solid var(--ec-border);
 }
 
 .group-panel__search {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
 }
 
 .group-panel__search input {
   flex: 1;
   min-width: 0;
-  padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
   outline: none;
 }
 
 .group-panel__search input:focus {
-  border-color: var(--color-primary);
+  border-color: var(--ec-brand-600);
 }
 
 .group-panel__search button {
-  padding: 0 var(--space-3);
+  padding: 0 var(--ec-space-3);
   border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-primary);
-  color: var(--color-text-inverse);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
   cursor: pointer;
 }
 
 .group-panel__selected {
   margin: 0;
-  color: var(--color-primary);
-  font-size: 12px;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .group-panel__actions {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
 }
 
 .group-panel__hint {
   margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .group-panel__leave {
-  margin-top: auto;
+  margin-top: var(--ec-space-2);
 }
 </style>
