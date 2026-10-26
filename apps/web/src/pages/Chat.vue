@@ -429,40 +429,66 @@ async function handleFileSelected(file: File): Promise<void> {
           @open-group="toggleGroupDrawer"
           @back="backToList"
         />
-        <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
-        <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
-        <MessageList
-          :messages="activeMessages"
-          :pending="activePending"
-          :self-user-id="selfUserId"
-          :conversation-id="activeId"
-          :members="activeConversation.members"
-          :is-group="isGroup"
-          :peer-read-seq="peerReadSeqForDisplay"
-          :show-read-receipt="!isGroup"
-          :has-more="activeHasMore"
-          :loading="activeLoadingHistory"
-          @load-more="loadMoreMessages"
-          @retry="retryMessage"
-          @near-bottom-change="onNearBottomChange"
-        />
-        <div class="chat-page__composer">
-          <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
-          <EmojiPanel
-            v-if="activeDrawer === 'emoji'"
-            class="chat-page__emoji"
-            @pick="onEmojiPick"
-          />
-          <SendBox
-            ref="sendBoxRef"
-            :uploading="uploadBusy"
-            :upload-error="uploadError"
-            :emoji-open="activeDrawer === 'emoji'"
-            @send="sendMessage"
-            @file-selected="handleFileSelected"
-            @typing="sendTyping"
-            @pick-emoji="toggleEmojiDrawer"
-          />
+        <div class="chat-page__content" :class="{ 'chat-page__content--members': membersOpen }">
+          <div class="chat-page__chat">
+            <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
+            <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
+            <MessageList
+              :messages="activeMessages"
+              :pending="activePending"
+              :self-user-id="selfUserId"
+              :conversation-id="activeId"
+              :members="activeConversation.members"
+              :is-group="isGroup"
+              :peer-read-seq="peerReadSeqForDisplay"
+              :show-read-receipt="!isGroup"
+              :has-more="activeHasMore"
+              :loading="activeLoadingHistory"
+              @load-more="loadMoreMessages"
+              @retry="retryMessage"
+              @near-bottom-change="onNearBottomChange"
+            />
+            <div class="chat-page__composer">
+              <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
+              <EmojiPanel
+                v-if="activeDrawer === 'emoji'"
+                class="chat-page__emoji"
+                @pick="onEmojiPick"
+              />
+              <SendBox
+                ref="sendBoxRef"
+                :uploading="uploadBusy"
+                :upload-error="uploadError"
+                :emoji-open="activeDrawer === 'emoji'"
+                @send="sendMessage"
+                @file-selected="handleFileSelected"
+                @typing="sendTyping"
+                @pick-emoji="toggleEmojiDrawer"
+              />
+            </div>
+          </div>
+          <!-- 群成员面板：位于聊天顶栏下方的同层右侧栏（不遮罩、不盖住「群资料」），默认隐藏。 -->
+          <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群成员">
+            <header class="chat-page__members-header">
+              <h2 class="chat-page__members-title">群成员</h2>
+              <button
+                type="button"
+                class="chat-page__members-close"
+                aria-label="关闭群成员面板"
+                @click="activeDrawer = null"
+              >
+                <AppIcon name="close" :size="18" />
+              </button>
+            </header>
+            <div class="chat-page__members-body">
+              <GroupMembersPanel
+                :conversation="activeConversation"
+                :self-user-id="selfUserId"
+                @updated="onGroupUpdated"
+                @left="onLeftGroup"
+              />
+            </div>
+          </aside>
         </div>
       </template>
       <EmptyState
@@ -478,29 +504,6 @@ async function handleFileSelected(file: File): Promise<void> {
         description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
       />
     </section>
-
-    <!-- 群成员面板：与聊天窗口同层的右侧栏（内嵌 grid 列，非遮罩抽屉），默认隐藏。 -->
-    <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群成员">
-      <header class="chat-page__members-header">
-        <h2 class="chat-page__members-title">群成员</h2>
-        <button
-          type="button"
-          class="chat-page__members-close"
-          aria-label="关闭群成员面板"
-          @click="activeDrawer = null"
-        >
-          <AppIcon name="close" :size="18" />
-        </button>
-      </header>
-      <div class="chat-page__members-body">
-        <GroupMembersPanel
-          :conversation="activeConversation"
-          :self-user-id="selfUserId"
-          @updated="onGroupUpdated"
-          @left="onLeftGroup"
-        />
-      </div>
-    </aside>
   </main>
 </template>
 
@@ -519,8 +522,8 @@ async function handleFileSelected(file: File): Promise<void> {
     grid-template-columns: 260px minmax(0, 1fr);
   }
 
-  .chat-page--members {
-    grid-template-columns: 260px minmax(0, 1fr) 260px;
+  .chat-page__members {
+    width: 260px;
   }
 }
 
@@ -531,14 +534,29 @@ async function handleFileSelected(file: File): Promise<void> {
   min-height: 0;
 }
 
-/* 群成员面板（UI-03 追加）：与聊天窗口同层的第三列，打开时聊天区收窄而非被遮罩覆盖。 */
-.chat-page--members {
-  grid-template-columns: var(--ec-list-width) minmax(0, 1fr) var(--ec-drawer-width);
+/* 聊天主区内容行：消息/输入区占剩余宽度，群成员面板固定宽度并列在右侧。 */
+.chat-page__content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
+.chat-page__chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 群成员面板（UI-03 追加）：与聊天窗口同层，位于聊天顶栏下方紧邻右侧，
+   打开时聊天区收窄而非被遮罩覆盖；高度与内容行一致，不盖住顶栏「群资料」。 */
 .chat-page__members {
   display: flex;
+  flex: none;
   flex-direction: column;
+  width: var(--ec-drawer-width);
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--ec-border);
@@ -643,16 +661,18 @@ async function handleFileSelected(file: File): Promise<void> {
     display: none;
   }
 
-  /* 群成员面板在窄屏占满全宽：聊天区让位，关闭后回到聊天；顶部返回按钮仍可回列表。 */
-  .chat-page--members .chat-page__list,
-  .chat-page--members .chat-page__main {
+  /* 群成员面板在窄屏占满全宽：顶栏保留（可关闭面板/返回），聊天列让位。 */
+  .chat-page--members .chat-page__list {
     display: none;
   }
 
-  .chat-page__members {
+  .chat-page__content--members .chat-page__chat {
+    display: none;
+  }
+
+  .chat-page__content--members .chat-page__members {
     flex: 1;
     width: 100%;
-    min-height: 0;
     border-left: none;
   }
 
