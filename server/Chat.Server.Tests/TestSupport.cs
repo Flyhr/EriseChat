@@ -6,7 +6,9 @@ using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
+using Chat.Server.Modules.Friends;
 using Chat.Server.Modules.Messages;
+using Chat.Server.Realtime;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -130,6 +132,14 @@ public static class TestSupport
 
     public static MessageService CreateMessageService(ChatDbContext db) =>
         new(db, Options.Create(CreateAppOptions()));
+
+    /// <summary>F-17：好友业务（真实 FriendService，不接实时推送）。</summary>
+    public static FriendService CreateFriendService(ChatDbContext db) =>
+        new(db, NullLogger<FriendService>.Instance);
+
+    /// <summary>F-17：好友变更推送器（不建立真实 WebSocket 连接，推送空跑）。</summary>
+    public static FriendRealtimeNotifier CreateFriendRequestNotifier() =>
+        new(new ConnectionManager(), NullLogger<FriendRealtimeNotifier>.Instance);
 
     /// <summary>M3-06：系统消息写入器（群成员变更系统消息）。</summary>
     public static SystemMessageWriter CreateSystemMessageWriter(ChatDbContext db) => new(db);

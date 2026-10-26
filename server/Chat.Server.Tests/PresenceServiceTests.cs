@@ -73,6 +73,38 @@ public sealed class PresenceServiceTests
         }
     }
 
+    [Fact]
+    public async Task FindPeerUserIds_IncludesFriendWithoutSharedConversation()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.CreateContext();
+        var userA = await TestSupport.SeedUserAsync(db, "presence-friend-a@example.com");
+        var userB = await TestSupport.SeedUserAsync(db, "presence-friend-b@example.com");
+        // F-17：好友关系（无共同会话）也应互相收到在线状态。
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        db.Friends.Add(new Chat.Server.Data.Entities.Friend
+        {
+            OwnerUserId = userA.Id,
+            FriendUserId = userB.Id,
+            CreatedAt = now,
+        });
+        db.Friends.Add(new Chat.Server.Data.Entities.Friend
+        {
+            OwnerUserId = userB.Id,
+            FriendUserId = userA.Id,
+            CreatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
+        var (presence, provider) = CreatePresenceService(database);
+        await using (provider)
+        {
+            var peers = await presence.FindPeerUserIdsAsync(userA.Id, CancellationToken.None);
+
+            Assert.Equal(new[] { userB.Id }, peers);
+        }
+    }
+
     private static (PresenceService Presence, ServiceProvider Provider) CreatePresenceService(TestDatabase database)
     {
         var services = new ServiceCollection();
