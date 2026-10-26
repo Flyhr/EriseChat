@@ -32,18 +32,18 @@ const defaultTitle = computed(() =>
   flex: none;
   width: 8px;
   height: 8px;
-  border-radius: var(--radius-full);
+  border-radius: var(--ec-radius-full);
 }
 
 .presence-dot--online {
-  background: var(--color-success);
+  background: var(--ec-success);
 }
 
 .presence-dot--offline {
-  background: var(--color-text-secondary);
+  background: var(--ec-text-secondary);
 }
 
 .presence-dot--unknown {
-  background: var(--color-border);
+  background: var(--ec-border);
 }
 </style>

@@ -98,6 +98,7 @@ async function download(): Promise<void> {
         class="message-attachment__thumb"
         type="button"
         :title="`查看大图：${content.name}`"
+        :aria-label="`查看大图：${content.name}`"
         @click="openPreview"
       >
         <img
@@ -113,7 +114,7 @@ async function download(): Promise<void> {
         <span>图片不可用</span>
         <button type="button" class="message-attachment__retry" @click="loadImage">重试</button>
       </div>
-      <div v-else class="message-attachment__skeleton" aria-label="图片加载中" />
+      <div v-else class="message-attachment__skeleton" role="img" aria-label="图片正在加载" />
       <p class="message-attachment__name">{{ content.name }}</p>
     </template>
 
@@ -141,7 +142,7 @@ async function download(): Promise<void> {
 <style scoped>
 .message-attachment {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--ec-space-1);
   min-width: 0;
 }
 
@@ -156,33 +157,33 @@ async function download(): Promise<void> {
 .message-attachment__image {
   max-width: 240px;
   max-height: 240px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ec-radius-sm);
   object-fit: cover;
 }
 
 .message-attachment__skeleton {
   width: 160px;
   height: 120px;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-bg-canvas);
 }
 
 .message-attachment__fallback {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  gap: var(--ec-space-2);
+  padding: var(--ec-space-3);
+  border: 1px dashed var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .message-attachment__retry {
   padding: 0;
   border: none;
   background: none;
-  color: var(--color-primary);
+  color: var(--ec-brand-600);
   cursor: pointer;
 }
 
@@ -192,18 +193,18 @@ async function download(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--ec-font-size-secondary);
 }
 
 .message-attachment__file {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--ec-space-2);
   min-width: 200px;
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
+  padding: var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-surface);
 }
 
 .message-attachment__icon {
@@ -217,21 +218,21 @@ async function download(): Promise<void> {
 }
 
 .message-attachment__size {
-  color: var(--color-text-secondary);
-  font-size: 11px;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
 }
 
 .message-attachment__error {
-  color: var(--color-danger);
-  font-size: 11px;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
 }
 
 .message-attachment__download {
-  padding: var(--space-1) var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-primary);
+  padding: var(--ec-space-1) var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-surface);
+  color: var(--ec-brand-600);
   cursor: pointer;
 }
 
