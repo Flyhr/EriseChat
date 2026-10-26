@@ -145,4 +145,12 @@ onBeforeUnmount(() => {
     animation: none;
   }
 }
+
+/* ≤800：窄屏抽屉覆盖全宽（计划 §5.6：抽屉不应覆盖发送按钮或使输入不可用）。 */
+@media (max-width: 800px) {
+  .ec-drawer {
+    width: 100%;
+    max-width: none;
+  }
+}
 </style>

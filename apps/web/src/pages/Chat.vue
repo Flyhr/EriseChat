@@ -8,6 +8,7 @@ import EmojiPanel from '../components/EmojiPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import MessageList from '../components/MessageList.vue'
+import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
@@ -15,7 +16,7 @@ import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
-import { chatWs } from '../core/ws'
+import { chatWs, type WsState } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -58,6 +59,39 @@ const pageNotice = ref('')
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
+
+// 连接状态页内提示（UI-02 批次4）：断线/重连就地提示，恢复后短暂显示 3 秒；
+// 只读取 core/ws.ts 的真实状态，不替代全局 ConnectionBanner，也不伪造连接状态。
+const wsState = ref<WsState>(chatWs.state)
+const recovered = ref(false)
+let recoveredTimer: ReturnType<typeof setTimeout> | null = null
+let offWsState: (() => void) | null = null
+
+const connectionNotice = computed<{ text: string; tone: 'warning' | 'success' } | null>(() => {
+  if (wsState.value === 'closed') return { text: '网络已断开，消息可能延迟', tone: 'warning' }
+  if (wsState.value === 'reconnecting') return { text: '正在重新连接…', tone: 'warning' }
+  if (recovered.value) return { text: '已恢复连接', tone: 'success' }
+  return null
+})
+
+function onWsStateChange(next: WsState): void {
+  const previous = wsState.value
+  wsState.value = next
+  if (recoveredTimer) {
+    clearTimeout(recoveredTimer)
+    recoveredTimer = null
+  }
+  // 仅「断线/重连 → 已认证」才算恢复；首次登录 connecting→authed 不提示。
+  if (next === 'authed' && (previous === 'reconnecting' || previous === 'closed')) {
+    recovered.value = true
+    recoveredTimer = setTimeout(() => {
+      recovered.value = false
+      recoveredTimer = null
+    }, 3000)
+    return
+  }
+  if (next !== 'authed') recovered.value = false
+}
 
 // 会话列表筛选（UI-02）：全部/未读/群聊。群聊由左导航「群聊」(?group=all) 驱动；
 // 未读为本地筛选状态，不写入 URL；切换筛选只改展示，不产生任何请求。
@@ -191,17 +225,29 @@ onMounted(async () => {
   conversations.subscribeRealtime()
   messages.subscribeRealtime()
   typing.subscribeRealtime()
+  offWsState = chatWs.on('statechange', onWsStateChange)
   document.addEventListener('visibilitychange', markActiveConversationRead)
   await conversations.restoreFromCache()
   await messages.restoreFromCache()
 })
 
 onBeforeUnmount(() => {
+  offWsState?.()
+  offWsState = null
+  if (recoveredTimer) {
+    clearTimeout(recoveredTimer)
+    recoveredTimer = null
+  }
   document.removeEventListener('visibilitychange', markActiveConversationRead)
 })
 
 function selectConversation(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
+}
+
+/** ≤800 移动布局：从聊天详情返回会话列表（不改变桌面端两栏行为）。 */
+function backToList(): void {
+  void router.push({ name: 'chat' })
 }
 
 function sendMessage(text: string): void {
@@ -311,8 +357,9 @@ async function handleFileSelected(file: File): Promise<void> {
 </script>
 
 <template>
-  <main class="chat-page">
+  <main class="chat-page" :class="{ 'chat-page--conversation': Boolean(activeId) }">
     <ConversationList
+      class="chat-page__list"
       :conversations="conversations.sorted"
       :self-user-id="selfUserId"
       :active-id="activeId"
@@ -324,10 +371,12 @@ async function handleFileSelected(file: File): Promise<void> {
     />
 
     <section class="chat-page__main">
-      <p v-if="pageNotice" class="chat-page__notice" role="status">
-        <span>{{ pageNotice }}</span>
-        <button type="button" class="chat-page__notice-close" @click="pageNotice = ''">知道了</button>
-      </p>
+      <NoticeBar v-if="pageNotice" :text="pageNotice" action-label="知道了" @action="pageNotice = ''" />
+      <NoticeBar
+        v-if="connectionNotice"
+        :text="connectionNotice.text"
+        :tone="connectionNotice.tone"
+      />
 
       <template v-if="activeConversation">
         <ChatHeader
@@ -335,7 +384,9 @@ async function handleFileSelected(file: File): Promise<void> {
           :is-group="isGroup"
           :member-count="memberCount"
           :peer-presence="peerPresence"
+          :show-back="true"
           @open-group="toggleGroupDrawer"
+          @back="backToList"
         />
         <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
         <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
@@ -418,30 +469,10 @@ async function handleFileSelected(file: File): Promise<void> {
   min-height: 0;
 }
 
-.chat-page__notice {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  justify-content: space-between;
-  margin: 0;
-  padding: var(--space-2) var(--space-4);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: 13px;
-}
-
-.chat-page__notice-close {
-  border: none;
-  background: transparent;
-  color: var(--color-primary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
 .chat-page__main-hint {
-  margin: var(--space-4);
-  color: var(--color-text-secondary);
-  font-size: 13px;
+  margin: var(--ec-space-4);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
   text-align: center;
 }
 
@@ -449,9 +480,35 @@ async function handleFileSelected(file: File): Promise<void> {
 .chat-page__typing {
   margin: 0;
   min-height: 18px;
-  padding: 0 var(--space-4);
-  color: var(--color-text-secondary);
-  font-size: 12px;
+  padding: 0 var(--ec-space-4);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
   line-height: 18px;
+}
+
+/* ≤800：移动单栏布局——无会话显示列表，有会话显示聊天详情（返回按钮回到列表）。 */
+@media (max-width: 800px) {
+  .chat-page {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-page__list {
+    width: 100%;
+    border-right: none;
+  }
+
+  .chat-page--conversation .chat-page__list {
+    display: none;
+  }
+
+  .chat-page__main {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-page:not(.chat-page--conversation) .chat-page__main {
+    display: none;
+  }
 }
 </style>
