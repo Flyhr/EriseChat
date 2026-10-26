@@ -3,9 +3,11 @@ import { computed, ref } from 'vue'
 import { conversationsApi } from '../api/conversations'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from './Avatar.vue'
+import AppDialog from './AppDialog.vue'
 import PresenceDot from './PresenceDot.vue'
-import { ApiError } from '../core/http'
+import { friendlyError } from '../core/errorMessages'
 import { sortMembers } from '../core/groupChat'
+import { showToast } from '../core/toast'
 import { usePresenceStore } from '../stores/presence'
 import type { Conversation, ConversationMember } from '../types/frames'
 
@@ -28,7 +30,8 @@ const presence = usePresenceStore()
 
 const busy = ref(false)
 const errorMessage = ref('')
-const successMessage = ref('')
+/** 待确认的危险操作（移除成员 / 退出群聊），由自绘 AppDialog 二次确认。 */
+const confirmState = ref<{ kind: 'remove'; member: ConversationMember } | { kind: 'leave' } | null>(null)
 const inviteOpen = ref(false)
 const inviteKeyword = ref('')
 const inviteResults = ref<UserProfile[]>([])
@@ -51,14 +54,19 @@ function roleLabel(member: ConversationMember): string {
   return member.role === 'owner' ? '群主' : '成员'
 }
 
-function toMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.code === 'UNAUTHORIZED') return '登录状态已失效，请重新登录'
-    return error.message
+const dialogTitle = computed(() =>
+  confirmState.value?.kind === 'remove' ? '移除群成员' : '退出群聊',
+)
+const dialogMessage = computed(() => {
+  const state = confirmState.value
+  if (!state) return ''
+  if (state.kind === 'remove') {
+    return `确定将「${state.member.displayName}」移出群聊吗？移除后对方将无法继续接收群消息。`
   }
-  if (error instanceof Error && error.message) return error.message
-  return '网络异常，请稍后重试'
-}
+  return '确定退出该群聊吗？退出后将不再接收群消息。'
+})
+const dialogConfirmText = computed(() => (confirmState.value?.kind === 'remove' ? '移除' : '退出'))
+
 
 async function refreshConversation(): Promise<void> {
   const latest = await conversationsApi.get(props.conversation.conversationId)
@@ -77,7 +85,7 @@ async function searchUsers(): Promise<void> {
     const response = await usersApi.search(keyword)
     inviteResults.value = response.users.filter((user) => !memberIds.value.has(user.userId))
   } catch (error) {
-    errorMessage.value = toMessage(error)
+    errorMessage.value = friendlyError(error)
   } finally {
     searching.value = false
   }
@@ -105,49 +113,51 @@ async function invite(): Promise<void> {
   if (busy.value || selectedInviteIds.value.length === 0) return
   busy.value = true
   errorMessage.value = ''
-  successMessage.value = ''
   try {
     const updated = await conversationsApi.addMembers(
       props.conversation.conversationId,
       selectedInviteIds.value,
     )
     emit('updated', updated)
-    successMessage.value = '已邀请成员加入群聊'
+    showToast(`已邀请 ${selectedInviteIds.value.length} 位成员加入群聊`, 'success')
     resetInvite()
   } catch (error) {
-    errorMessage.value = toMessage(error)
+    errorMessage.value = friendlyError(error)
   } finally {
     busy.value = false
   }
 }
 
-async function removeMember(member: ConversationMember): Promise<void> {
+/** 移除成员：打开自绘确认弹窗，真正执行在 confirmDialog()。 */
+function askRemoveMember(member: ConversationMember): void {
   if (busy.value || !isOwner.value) return
-  if (!window.confirm(`确定将「${member.displayName}」移出群聊吗？`)) return
-  busy.value = true
-  errorMessage.value = ''
-  successMessage.value = ''
-  try {
-    await conversationsApi.removeMember(props.conversation.conversationId, member.userId)
-    await refreshConversation()
-    successMessage.value = '已移出成员'
-  } catch (error) {
-    errorMessage.value = toMessage(error)
-  } finally {
-    busy.value = false
-  }
+  confirmState.value = { kind: 'remove', member }
 }
 
-async function leaveGroup(): Promise<void> {
+/** 退出群聊：打开自绘确认弹窗，真正执行在 confirmDialog()。 */
+function askLeaveGroup(): void {
   if (busy.value || isOwner.value) return
-  if (!window.confirm('确定退出该群聊吗？退出后将不再接收群消息。')) return
+  confirmState.value = { kind: 'leave' }
+}
+
+async function confirmDialog(): Promise<void> {
+  const state = confirmState.value
+  if (!state || busy.value) return
   busy.value = true
   errorMessage.value = ''
   try {
-    await conversationsApi.removeMember(props.conversation.conversationId, props.selfUserId)
-    emit('left', props.conversation.conversationId)
+    if (state.kind === 'remove') {
+      await conversationsApi.removeMember(props.conversation.conversationId, state.member.userId)
+      await refreshConversation()
+      showToast('已移出成员', 'success')
+    } else {
+      await conversationsApi.removeMember(props.conversation.conversationId, props.selfUserId)
+      emit('left', props.conversation.conversationId)
+    }
+    confirmState.value = null
   } catch (error) {
-    errorMessage.value = toMessage(error)
+    errorMessage.value = friendlyError(error)
+    confirmState.value = null
   } finally {
     busy.value = false
   }
@@ -159,7 +169,6 @@ async function leaveGroup(): Promise<void> {
     <p class="group-panel__subtitle">{{ members.length }} 位成员 · 在线 {{ onlineCount }} 人</p>
 
     <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="group-panel__success" role="status">{{ successMessage }}</p>
 
     <ul class="group-panel__members">
       <li v-for="member in members" :key="member.userId" class="group-panel__member">
@@ -178,7 +187,7 @@ async function leaveGroup(): Promise<void> {
           type="button"
           class="group-panel__remove"
           :disabled="busy"
-          @click="removeMember(member)"
+          @click="askRemoveMember(member)"
         >
           移除
         </button>
@@ -233,11 +242,22 @@ async function leaveGroup(): Promise<void> {
     </section>
 
     <section class="group-panel__section group-panel__leave">
-      <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="leaveGroup">
+      <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="askLeaveGroup">
         退出群聊
       </button>
       <p v-else class="group-panel__hint">群主不能退出群聊（v1 不支持转让群主或解散群）。</p>
     </section>
+
+    <AppDialog
+      :open="confirmState !== null"
+      :title="dialogTitle"
+      :message="dialogMessage"
+      :confirm-text="dialogConfirmText"
+      tone="danger"
+      :busy="busy"
+      @confirm="confirmDialog"
+      @cancel="confirmState = null"
+    />
   </div>
 </template>
 
@@ -292,22 +312,13 @@ async function leaveGroup(): Promise<void> {
   cursor: pointer;
 }
 
-.group-panel__error,
-.group-panel__success {
+.group-panel__error {
   margin: 0;
   padding: var(--ec-space-2) var(--ec-space-3);
   border-radius: var(--ec-radius-sm);
-  font-size: var(--ec-font-size-secondary);
-}
-
-.group-panel__error {
   background: var(--ec-danger);
   color: var(--ec-text-inverse);
-}
-
-.group-panel__success {
-  background: var(--ec-brand-050);
-  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
 }
 
 .group-panel__members,

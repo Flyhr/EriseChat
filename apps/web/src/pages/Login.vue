@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
-import { ApiError } from '../core/http'
 import { chatWs } from '../core/ws'
 import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
+import { friendlyError } from '../core/errorMessages'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -20,17 +20,7 @@ const MODE_LABELS: Record<Mode, string> = {
 }
 const modes = Object.keys(MODE_LABELS) as Mode[]
 
-/** 服务端错误码 → 中文文案（protocol.md §5；未列出的错误码用服务端 message 兜底）。 */
-const ERROR_MESSAGES: Record<string, string> = {
-  CODE_INVALID: '验证码错误，请检查后重试',
-  CODE_EXPIRED: '验证码已过期，请重新获取',
-  CODE_ATTEMPTS_EXCEEDED: '验证码错误次数过多，请重新获取',
-  EMAIL_ALREADY_REGISTERED: '该邮箱已注册，请直接登录',
-  EMAIL_RATE_LIMITED: '发送过于频繁，请稍后再试',
-  PASSWORD_INVALID: '邮箱或密码错误',
-  ACCOUNT_LOCKED: '登录失败次数过多，账号已临时锁定，请稍后再试',
-  UNAUTHORIZED: '登录状态已失效，请重新登录',
-}
+/** 服务端错误码 → 中文文案统一由 core/errorMessages 维护（UI-03 批次1）。 */
 
 const router = useRouter()
 const route = useRoute()
@@ -73,15 +63,11 @@ const sendButtonLabel = computed(() => {
 })
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) return ERROR_MESSAGES[error.code] ?? error.message
-  // 浏览器对网络/CORS 失败只抛 TypeError: Failed to fetch，需给出可操作的指引。
-  if (error instanceof TypeError) {
-    return isFileShell
-      ? '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:8080）后重试'
-      : '无法连接服务器，请检查网络或服务器地址'
+  // 桌面/APK 以 file:// 加载时，网络失败需额外提示先配置服务器地址（其余错误统一走 friendlyError）。
+  if (isFileShell && error instanceof TypeError) {
+    return '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:8080）后重试'
   }
-  if (error instanceof Error && error.message) return error.message
-  return '网络异常，请稍后重试'
+  return friendlyError(error)
 }
 
 /** 展开服务器地址编辑区：桌面端未配置时预填本机默认地址，点「保存」即可生效。 */

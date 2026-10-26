@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { usersApi, type UserProfile } from '../api/users'
 import Avatar from '../components/Avatar.vue'
 import PresenceDot from '../components/PresenceDot.vue'
-import { ApiError } from '../core/http'
+import { friendlyError } from '../core/errorMessages'
 import { useConversationsStore } from '../stores/conversations'
 import { usePresenceStore } from '../stores/presence'
 
@@ -117,12 +117,7 @@ async function createGroup(): Promise<void> {
 }
 
 function toMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.code === 'UNAUTHORIZED') return '登录状态已失效，请重新登录'
-    return error.message
-  }
-  if (error instanceof Error && error.message) return error.message
-  return '网络异常，请稍后重试'
+  return friendlyError(error)
 }
 </script>
 

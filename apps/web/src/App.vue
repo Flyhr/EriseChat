@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import ConnectionBanner from './components/ConnectionBanner.vue'
+import AppToast from './components/AppToast.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import { useAuthStore } from './stores/auth'
@@ -44,6 +45,8 @@ function reconnect(): void {
         <RouterView />
       </main>
     </div>
+    <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
+    <AppToast />
   </div>
 </template>
 
