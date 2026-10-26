@@ -9,6 +9,7 @@ import { chatWs, type WsState } from './core/ws'
 import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
 import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
+import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useVisualViewport } from './core/useVisualViewport'
 
@@ -20,6 +21,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
+const friends = useFriendsStore()
 const presence = usePresenceStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
 const { keyboardOpen } = useVisualViewport()
@@ -46,8 +48,16 @@ function openConversationFromNotification(conversationId: string): void {
 
 onMounted(() => {
   presence.subscribeRealtime()
+  // F-17：好友的 REST 全量拉取 + friend.changed 增量推送（登录后/重连 authed 时拉取）。
+  friends.subscribeRealtime()
+  if (chatWs.state === 'authed') {
+    void friends.loadAll().catch(() => undefined)
+  }
   unsubscribe = chatWs.on('statechange', (state) => {
     wsState.value = state
+    if (state === 'authed') {
+      void friends.loadAll().catch(() => undefined)
+    }
   })
   // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
   unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)

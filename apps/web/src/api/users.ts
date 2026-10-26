@@ -5,6 +5,8 @@ import type { AuthUser } from './auth'
 export interface UserProfile extends AuthUser {
   status: 'active' | 'disabled'
   createdAt: number
+  /** F-17：与当前用户的关系（仅搜索结果返回；/api/me 不返回） */
+  relation?: 'friend' | 'outgoing' | 'incoming'
 }
 
 export interface SearchUsersResponse {

@@ -6,7 +6,7 @@
 // 本文件只是类型镜像，不做运行时校验；帧解析/序列化在 core/ws.ts。
 // 协议版本运行时值见 core/config.ts（默认 1，可由 VITE_PROTOCOL_VERSION 覆盖）。
 
-/** 17 个帧 type（protocol.md §3） */
+/** 18 个帧 type（protocol.md §3） */
 export type FrameType =
   | 'auth'
   | 'hello'
@@ -23,6 +23,7 @@ export type FrameType =
   | 'read.updated'
   | 'typing'
   | 'presence'
+  | 'friend.changed'
   | 'kicked'
   | 'error'
 
@@ -258,6 +259,54 @@ export interface KickedFrame extends FrameBase {
   reason: string
 }
 
+/** 好友申请状态（protocol.md §4.9） */
+export type FriendRequestStatus = 'pending' | 'accepted' | 'rejected' | 'cancelled'
+
+/** 好友对象（protocol.md §4.9，服务端 Friend DTO） */
+export interface Friend {
+  userId: string
+  displayName: string
+  email: string
+  createdAt: number
+  /** 我对该好友的备注（可选；未设置为空） */
+  remark?: string
+  /** 我设置的分组名（可选；未设置为空） */
+  groupName?: string
+  /** 头像文件 ID（可选） */
+  avatarFileId?: string
+}
+
+/** 好友申请对象（protocol.md §4.9，服务端 FriendRequest DTO） */
+export interface FriendRequest {
+  requestId: string
+  fromUserId: string
+  fromDisplayName: string
+  toUserId: string
+  toDisplayName: string
+  message?: string
+  status: FriendRequestStatus
+  createdAt: number
+  handledAt?: number
+}
+
+/** friend.changed 的 kind（protocol.md §4.9；未知取值必须忽略） */
+export type FriendChangedKind =
+  | 'request.received'
+  | 'request.accepted'
+  | 'request.rejected'
+  | 'request.cancelled'
+  | 'friend.added'
+  | 'friend.removed'
+  | 'friend.updated'
+
+/** 好友/申请变更推送（F-17，protocol.md §4.9） */
+export interface FriendChangedFrame extends FrameBase {
+  type: 'friend.changed'
+  kind: FriendChangedKind
+  friend?: Friend
+  request?: FriendRequest
+}
+
 export interface ErrorFrame extends FrameBase {
   type: 'error'
   code: ErrorCode
@@ -288,5 +337,6 @@ export type ServerFrame =
   | ReadUpdatedFrame
   | TypingServerFrame
   | PresenceFrame
+  | FriendChangedFrame
   | KickedFrame
   | ErrorFrame

@@ -7,6 +7,7 @@ import { chatWs } from './core/ws'
 import { clearAllData } from './core/db'
 import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
+import { useFriendsStore } from './stores/friends'
 import { useMessagesStore } from './stores/messages'
 import './styles/variables.css'
 import './styles/global.css'
@@ -19,6 +20,7 @@ app.use(router)
 
 const auth = useAuthStore()
 const conversations = useConversationsStore()
+const friends = useFriendsStore()
 const messages = useMessagesStore()
 
 /**
@@ -29,6 +31,7 @@ function cleanupSession(): void {
   chatWs.disconnect(1000, 'session cleanup')
   auth.clearSession()
   conversations.clear()
+  friends.clear()
   messages.clear()
   void clearAllData()
 }
