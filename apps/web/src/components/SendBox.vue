@@ -32,8 +32,8 @@ const props = withDefaults(
   { uploading: false, uploadError: null, emojiOpen: false },
 )
 
-/** 输入框最大高度（计划 §5.5：自动增长至约 180px，超出后内部滚动）。 */
-const MAX_TEXTAREA_HEIGHT = 180
+/** 输入框最大高度（计划 §5.5：自动增长至约 360px，超出后内部滚动）。 */
+const MAX_TEXTAREA_HEIGHT = 360
 
 const text = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -42,9 +42,8 @@ const length = computed(() => text.value.length)
 const atLimit = computed(() => length.value >= MAX_TEXT_LENGTH)
 /** 与服务端白名单一致的 accept（仅影响选择框过滤，真正校验在 attachments.ts）。 */
 const accept = ALLOWED_EXTENSIONS.join(',')
-const showFooter = computed(() => length.value > 0 || props.uploading || Boolean(props.uploadError))
 
-/** 依据内容调整 textarea 高度：1 行起，超过约 180px 改为内部滚动。 */
+/** 依据内容调整 textarea 高度：3 行起，超过约 360px 改为内部滚动。 */
 function resizeInput(): void {
   const el = input.value
   if (!el) return
@@ -148,7 +147,7 @@ function onEnter(event: KeyboardEvent): void {
         ref="input"
         v-model="text"
         class="send-box__input"
-        rows="1"
+        rows="3"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息，Enter 发送，Shift+Enter 换行"
@@ -156,12 +155,17 @@ function onEnter(event: KeyboardEvent): void {
         @input="onInput"
         @keydown.enter.exact="onEnter"
       />
-      <div v-if="showFooter" class="send-box__footer">
+      <!-- 字数/状态行始终占位：避免输入第一个字符时出现该行导致输入框高度跳动。 -->
+      <div class="send-box__footer">
         <span v-if="uploading" class="send-box__status">上传中…</span>
         <span v-else-if="uploadError" class="send-box__status send-box__status--error">
           {{ uploadError }}
         </span>
-        <span class="send-box__counter" :class="{ 'send-box__counter--limit': atLimit }">
+        <span
+          v-show="length > 0"
+          class="send-box__counter"
+          :class="{ 'send-box__counter--limit': atLimit }"
+        >
           {{ length }}/{{ MAX_TEXT_LENGTH }}
         </span>
       </div>
@@ -238,8 +242,9 @@ function onEnter(event: KeyboardEvent): void {
 
 .send-box__input {
   width: 100%;
-  min-height: 24px;
-  max-height: 180px;
+  /* 输入区高度为原先约 2 倍（3 行起），最大约 360px 后内部滚动。 */
+  min-height: 64px;
+  max-height: 360px;
   padding: 0;
   border: none;
   outline: none;
@@ -262,8 +267,11 @@ function onEnter(event: KeyboardEvent): void {
 .send-box__footer {
   display: flex;
   gap: var(--ec-space-2);
+  /* 固定占位：没有字数/状态时也保留高度，输入首字不会引起输入框整体高度跳动。 */
+  min-height: 16px;
   align-items: center;
   justify-content: space-between;
+  line-height: 16px;
 }
 
 .send-box__counter {
