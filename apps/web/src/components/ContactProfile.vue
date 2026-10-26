@@ -41,6 +41,7 @@ const presenceText = computed(() => presenceLabelOf(props.presence))
     </template>
     <EmptyState
       v-else
+      icon="user"
       title="搜索同事开始聊天"
       description="输入邮箱或昵称搜索，选中结果可查看资料并发送消息。"
     />

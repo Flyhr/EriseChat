@@ -155,6 +155,7 @@ function onGroupCreated(conversation: Conversation): void {
       </ul>
       <EmptyState
         v-else-if="searched"
+        icon="search"
         title="未找到匹配用户"
         description="换一个邮箱或昵称再试试。"
       />

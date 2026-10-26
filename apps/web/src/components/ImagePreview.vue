@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, watch } from 'vue'
 
-// 图片大图预览（M3-07）：全屏遮罩，点击空白/Esc 关闭；下载复用已鉴权加载的 blob URL（<a download>）。
+// 图片大图预览（M3-07；UI-03 批次4 token 化）：全屏遮罩，点击空白/Esc 关闭；
+// 下载复用已鉴权加载的 blob URL（<a download>），行为与旧版一致。
 const props = defineProps<{
   open: boolean
   /** 已鉴权下载得到的 blob URL（由 MessageAttachment 打开时传入）。 */
@@ -57,13 +58,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
-  background: rgba(15, 23, 42, 0.78);
+  padding: var(--ec-space-4);
+  background: var(--ec-overlay);
 }
 
 .image-preview__panel {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--ec-space-3);
   max-width: 92vw;
   max-height: 92vh;
 }
@@ -71,25 +72,36 @@ onBeforeUnmount(() => {
 .image-preview__image {
   max-width: 92vw;
   max-height: 82vh;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ec-radius-md);
   object-fit: contain;
 }
 
 .image-preview__actions {
   display: flex;
   justify-content: center;
-  gap: var(--space-3);
+  gap: var(--ec-space-3);
 }
 
 .image-preview__download,
 .image-preview__close {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: var(--radius-full);
+  padding: var(--ec-space-2) var(--ec-space-4);
+  border: 1px solid var(--ec-overlay-border);
+  border-radius: var(--ec-radius-full);
   background: transparent;
-  color: #fff;
+  color: var(--ec-text-inverse);
   text-decoration: none;
-  font-size: 13px;
+  font-size: var(--ec-font-size-secondary);
   cursor: pointer;
+}
+
+.image-preview__download:hover,
+.image-preview__close:hover {
+  background: var(--ec-overlay-hover);
+}
+
+.image-preview__download:focus-visible,
+.image-preview__close:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 </style>

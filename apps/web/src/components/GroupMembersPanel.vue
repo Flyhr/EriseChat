@@ -277,7 +277,7 @@ async function confirmDialog(): Promise<void> {
 .group-panel__toggle,
 .group-panel__remove,
 .group-panel__secondary {
-  padding: 4px 10px;
+  padding: var(--ec-space-1) var(--ec-space-2);
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-sm);
   background: transparent;
@@ -287,12 +287,12 @@ async function confirmDialog(): Promise<void> {
 }
 
 .group-panel__primary {
-  padding: 6px 12px;
+  padding: var(--ec-space-1) var(--ec-space-2);
   border: none;
   border-radius: var(--ec-radius-sm);
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
-  font-size: 13px;
+  font-size: var(--ec-font-size-secondary);
   cursor: pointer;
 }
 
@@ -303,12 +303,12 @@ async function confirmDialog(): Promise<void> {
 }
 
 .group-panel__danger {
-  padding: 6px 12px;
+  padding: var(--ec-space-1) var(--ec-space-2);
   border: 1px solid var(--ec-danger);
   border-radius: var(--ec-radius-sm);
   background: transparent;
   color: var(--ec-danger);
-  font-size: 13px;
+  font-size: var(--ec-font-size-secondary);
   cursor: pointer;
 }
 
@@ -366,7 +366,7 @@ async function confirmDialog(): Promise<void> {
 
 .group-panel__role {
   flex: none;
-  padding: 2px 8px;
+  padding: 2px var(--ec-space-2);
   border-radius: var(--ec-radius-full);
   background: var(--ec-surface-hover);
   color: var(--ec-text-secondary);

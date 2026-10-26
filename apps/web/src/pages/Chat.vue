@@ -466,11 +466,13 @@ async function handleFileSelected(file: File): Promise<void> {
       </template>
       <EmptyState
         v-else-if="activeId && conversations.loaded"
+        icon="chat"
         title="会话不存在或无权访问"
         description="请从左侧选择已有会话，或到「通讯录」重新发起聊天。"
       />
       <EmptyState
         v-else
+        icon="chat"
         title="选择会话开始聊天"
         description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
       />
