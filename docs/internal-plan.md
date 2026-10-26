@@ -592,6 +592,7 @@ chat-platform/                      # 当前仓库根 D:\Code\EiseChat
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
+| —（UI-00 审查完成） | 2026-10-26 | UI-00 只读工程审查完成：新增 `docs/ui/ui-00-review.md`（文件/页面/链路清点、五类映射、范围三档、风险 H-01~H-16、交互验收包差距表）与 `docs/ui/screens-before/` 基线截图 8 张；同步 README 文档表、`docs/project-overview.md` §1、`docs/ui/README.md`；未改需求、范围、协议与计划版本（V2.3.5）。 |
 | —（UI 专项计划入库） | 2026-10-26 | 新增 `docs/ui-upgrade-plan.md`（V1.1，待批准）并按实际状态修订（M1～M5 已完成、M6 前置暂缓、UI 排在 M5 后内测前）；同步 README 文档索引与 `docs/project-overview.md` §1 文档表；不改需求、范围、协议与计划版本（V2.3.5） |
 | —（UI 专项计划 V1.2） | 2026-10-26 | `docs/ui-upgrade-plan.md` 升 V1.2：新增 §16「参考资产与实现规格」，明确客户验收包只作参考、不复制组件位置/尺寸/内容，给出参考场景→页面/组件/数据映射、实现约定、尺寸区间与验收口径；同步 README 与 `docs/project-overview.md` 文档表、`docs/ui/README.md`；不改计划版本（V2.3.5）。 |
 | —（M5 收尾状态同步） | 2026-10-26 | §13「当前仓库状态」更新为 M5 已完成：Android APK 1.0.0 产出（`com.eisechat.mobile`、`versionCode=10000`、minSdk 26 / targetSdk 36、v2 自签名、3,276,544 B、SHA256 `dee0898…984d14`）、图标/启动页、release 签名与 `infra/build-apk.sh`、`GET /download` 下载页可下载、`docs/mobile.md` 安装联调说明；M6（稳定性/备份恢复演练）未开始；需求、范围、部署参数与计划版本（V2.3.5）未变 |
