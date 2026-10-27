@@ -15,6 +15,12 @@ export interface AddConversationMembersRequest {
   userIds: string[]
 }
 
+/** 成员设置请求（F-10）：至少提供 pinned/muted 之一，服务端校验。 */
+export interface MemberSettingsRequest {
+  pinned?: boolean
+  muted?: boolean
+}
+
 export const conversationsApi = {
   list: () => http.get<Conversation[]>('/conversations'),
 
@@ -42,4 +48,14 @@ export const conversationsApi = {
   /** 移除成员 / 退出群聊（M3-08）：userId 传自己即退出；成功返回 204（http 层映射为 undefined）。 */
   removeMember: (conversationId: string, userId: string) =>
     http.delete<void>(`/conversations/${conversationId}/members/${encodeURIComponent(userId)}`),
+
+  /**
+   * 更新当前用户在该会话的置顶/免打扰（F-10）：只改本人成员行，返回更新后的 Conversation。
+   * 私密性：服务端不广播，客户端以本响应更新 store。
+   */
+  updateMemberSettings: (conversationId: string, settings: MemberSettingsRequest) =>
+    http.patch<Conversation>(
+      `/conversations/${conversationId}/member-settings`,
+      settings satisfies MemberSettingsRequest,
+    ),
 }

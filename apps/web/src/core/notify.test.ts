@@ -13,6 +13,7 @@ function makeState(overrides: Partial<IncomingNotifyState> = {}): IncomingNotify
     documentVisible: true,
     activeConversationId: 'conv-1',
     conversationId: 'conv-1',
+    muted: false,
     soundEnabled: true,
     desktopNotificationsEnabled: false,
     ...overrides,
@@ -43,6 +44,14 @@ describe('shouldPlayIncomingSound', () => {
   it('用户关闭提示音后不播放', () => {
     expect(shouldPlayIncomingSound(makeState({ soundEnabled: false }))).toBe(false)
   })
+
+  it('免打扰会话不播放（即使窗口不可见且不在该会话）', () => {
+    expect(
+      shouldPlayIncomingSound(
+        makeState({ muted: true, documentVisible: false, activeConversationId: null }),
+      ),
+    ).toBe(false)
+  })
 })
 
 describe('shouldShowDesktopNotification', () => {
@@ -68,6 +77,14 @@ describe('shouldShowDesktopNotification', () => {
     expect(
       shouldShowDesktopNotification(
         makeState({ desktopNotificationsEnabled: true, documentVisible: false, isSelf: true }),
+      ),
+    ).toBe(false)
+  })
+
+  it('免打扰会话不弹桌面通知', () => {
+    expect(
+      shouldShowDesktopNotification(
+        makeState({ desktopNotificationsEnabled: true, documentVisible: false, muted: true }),
       ),
     ).toBe(false)
   })

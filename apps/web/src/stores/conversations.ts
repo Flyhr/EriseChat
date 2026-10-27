@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { Conversation, Message } from '../types/frames'
 import { conversationsApi } from '../api/conversations'
+import { sortConversations } from '../core/conversationSort'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
@@ -71,14 +72,8 @@ export const useConversationsStore = defineStore('conversations', () => {
   let unsubscribeState: (() => void) | null = null
   let cacheRestored = false
 
-  /** 按最新消息时间倒序展示（未读数由 sync.ts 统一计算）。 */
-  const sorted = computed(() =>
-    [...items.value].sort((a, b) => {
-      const aTime = a.lastMessage?.createdAt ?? a.createdAt
-      const bTime = b.lastMessage?.createdAt ?? b.createdAt
-      return bTime - aTime
-    }),
-  )
+  /** 展示顺序（F-10）：置顶优先，组内按最近消息时间倒序（core/conversationSort 纯函数）。 */
+  const sorted = computed(() => sortConversations(items.value))
 
   function upsert(conversations: readonly Conversation[]): void {
     if (conversations.length === 0) return
@@ -352,6 +347,24 @@ export const useConversationsStore = defineStore('conversations', () => {
     }
   }
 
+  /** 当前用户是否对该会话免打扰（F-10）；未加载/未设置时为 false。 */
+  function isMuted(conversationId: string): boolean {
+    return getById(conversationId)?.muted === true
+  }
+
+  /**
+   * 更新当前用户的会话成员设置（F-10）：PATCH 服务端后以响应更新 store。
+   * 服务端不广播该设置；失败时抛出 ApiError 由调用方提示。
+   */
+  async function setMemberSettings(
+    conversationId: string,
+    settings: { pinned?: boolean; muted?: boolean },
+  ): Promise<Conversation> {
+    const updated = await conversationsApi.updateMemberSettings(conversationId, settings)
+    upsert([updated])
+    return updated
+  }
+
   /** Chat 页监听路由变化时写入，供 messages store 判断提示音/通知是否需要提醒。 */
   function setActiveConversation(conversationId: string | null): void {
     activeConversationId.value = conversationId
@@ -369,6 +382,8 @@ export const useConversationsStore = defineStore('conversations', () => {
     applyMessage,
     getById,
     unreadOf,
+    isMuted,
+    setMemberSettings,
     totalUnread,
     markRead,
     readSeqOf,

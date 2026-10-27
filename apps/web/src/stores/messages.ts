@@ -678,6 +678,8 @@ export const useMessagesStore = defineStore('messages', () => {
       documentVisible: document.visibilityState === 'visible',
       activeConversationId: conversationStore.activeConversationId,
       conversationId: message.conversationId,
+      // F-10：免打扰会话不提示音、不弹系统通知（未读数不受影响）。
+      muted: conversationStore.isMuted(message.conversationId),
       soundEnabled: settings.soundEnabled,
       desktopNotificationsEnabled: settings.desktopNotificationsEnabled,
     } as const

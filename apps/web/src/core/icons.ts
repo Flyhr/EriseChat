@@ -21,6 +21,8 @@ export type AppIconName =
   | 'logout'
   | 'check'
   | 'back'
+  | 'mute'
+  | 'pin'
 
 export interface AppIconShape {
   paths?: string[]
@@ -74,4 +76,9 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
   logout: { paths: ['M15 4h4v16h-4', 'M4 12h11', 'M11.5 8.5L15 12l-3.5 3.5'] },
   check: { paths: ['M5 12.5l4.5 4.5L19 6.5'] },
   back: { paths: ['M15 5l-7 7 7 7'] },
+  // F-10：免打扰（斜线喇叭）与置顶（图钉）。
+  mute: {
+    paths: ['M4 9.5h4l5-4v13l-5-4H4v-5Z', 'M16.5 9.5l5 5', 'M21.5 9.5l-5 5'],
+  },
+  pin: { paths: ['M9 4h6l-1 6 3.5 3.5H6.5L10 10 9 4Z', 'M12 13.5V20'] },
 }

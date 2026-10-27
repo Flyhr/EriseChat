@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import type { Conversation } from '../types/frames'
 import { filterConversations, type ConversationFilter } from '../core/chatLayout'
+import { friendlyError } from '../core/errorMessages'
+import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
@@ -9,6 +11,7 @@ import ConversationItem from './ConversationItem.vue'
 // 会话列表（UI-02 批次1，计划 §5.2）：头部标题 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
 // 只消费现有 store 数据（不新增请求）；未读数以 unreadOf 为唯一口径（当前打开的会话传 0）。
 // 筛选规则在 core/chatLayout.ts 的 filterConversations（纯函数，单测覆盖）。
+// F-10：子组件「⋯」菜单发出 update-settings，这里统一调 store 更新并给轻提示。
 
 const props = defineProps<{
   conversations: readonly Conversation[]
@@ -46,6 +49,32 @@ const emptyText = computed(() => {
 function unreadOf(conversationId: string): number {
   if (conversationId === props.activeId) return 0
   return conversationsStore.unreadOf(conversationId)
+}
+
+/** F-10：置顶/免打扰成功后的轻提示文案，按本次改动的字段决定。 */
+function settingsToastText(
+  settings: { pinned?: boolean; muted?: boolean },
+  updated: Conversation,
+): string {
+  if (settings.pinned !== undefined) return updated.pinned ? '会话已置顶' : '已取消置顶'
+  if (settings.muted !== undefined) return updated.muted ? '已开启消息免打扰' : '已关闭消息免打扰'
+  return '设置已更新'
+}
+
+async function onUpdateSettings(payload: {
+  conversationId: string
+  settings: { pinned?: boolean; muted?: boolean }
+}): Promise<void> {
+  try {
+    const updated = await conversationsStore.setMemberSettings(
+      payload.conversationId,
+      payload.settings,
+    )
+    showToast(settingsToastText(payload.settings, updated), 'success')
+  } catch (error) {
+    // 失败时 store 未写入，保持原状并给出可读原因（协议错误码已由 friendlyError 映射）。
+    showToast(friendlyError(error), 'error')
+  }
 }
 </script>
 
@@ -90,6 +119,7 @@ function unreadOf(conversationId: string): number {
         :active="conversation.conversationId === activeId"
         :unread="unreadOf(conversation.conversationId)"
         @select="emit('select', $event)"
+        @update-settings="onUpdateSettings"
       />
     </nav>
   </section>

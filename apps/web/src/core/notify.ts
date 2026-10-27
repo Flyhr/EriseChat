@@ -12,20 +12,22 @@ export interface IncomingNotifyState {
   activeConversationId: string | null
   /** 新消息所在会话。 */
   conversationId: string
+  /** 该会话是否免打扰（F-10）：免打扰时不提示音、不弹桌面通知（未读仍照常累计）。 */
+  muted: boolean
   soundEnabled: boolean
   desktopNotificationsEnabled: boolean
 }
 
-/** 提示音：非本人消息，且（窗口不可见 或 当前不在该会话）时播放。 */
+/** 提示音：非本人消息、非免打扰，且（窗口不可见 或 当前不在该会话）时播放。 */
 export function shouldPlayIncomingSound(state: IncomingNotifyState): boolean {
-  if (!state.soundEnabled || state.isSelf) return false
+  if (!state.soundEnabled || state.isSelf || state.muted) return false
   if (state.documentVisible && state.activeConversationId === state.conversationId) return false
   return true
 }
 
-/** 系统通知：非本人消息，且窗口不可见时弹出（后台/最小化场景）。 */
+/** 系统通知：非本人消息、非免打扰，且窗口不可见时弹出（后台/最小化场景）。 */
 export function shouldShowDesktopNotification(state: IncomingNotifyState): boolean {
-  if (!state.desktopNotificationsEnabled || state.isSelf) return false
+  if (!state.desktopNotificationsEnabled || state.isSelf || state.muted) return false
   return !state.documentVisible
 }
 

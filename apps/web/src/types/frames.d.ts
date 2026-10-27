@@ -137,6 +137,10 @@ export interface Conversation {
   createdAt: number
   lastSeq: number
   lastReadSeq: number
+  /** 当前用户是否置顶（F-10：成员级设置，按收件人填充，不广播） */
+  pinned?: boolean
+  /** 当前用户是否免打扰（F-10：成员级设置，按收件人填充，不广播） */
+  muted?: boolean
   lastMessage?: Message | null
   members: ConversationMember[]
 }
