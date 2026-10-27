@@ -74,6 +74,10 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<string>("Announcement")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("announcement");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER")
                         .HasColumnName("created_at");

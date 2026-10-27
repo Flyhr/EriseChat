@@ -17,6 +17,9 @@ public sealed class Conversation
     /// <summary>群标题；单聊为空（客户端用对方昵称展示）。</summary>
     public string? Title { get; set; }
 
+    /// <summary>群公告（≤500 字符，可换行）；NULL = 无公告；单聊恒为 NULL（F-14）。</summary>
+    public string? Announcement { get; set; }
+
     /// <summary>单聊唯一键（两个用户 ID 排序后拼接，如 "u1:u2"）；群聊为空。</summary>
     public string? DirectKey { get; set; }
 

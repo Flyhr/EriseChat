@@ -29,6 +29,7 @@ public sealed record ConversationMember(
 /// <param name="LastMessage">最新消息快照，可为 null。</param>
 /// <param name="Pinned">当前用户是否置顶该会话（F-10，成员级设置，默认 false；按收件人填充，不广播）。</param>
 /// <param name="Muted">当前用户是否对该会话免打扰（F-10，成员级设置，默认 false；按收件人填充，不广播）。</param>
+/// <param name="Announcement">群公告（F-14，≤500 字符，支持换行）；null 表示无公告；单聊恒为 null。</param>
 public sealed record Conversation(
     string ConversationId,
     ConversationType Type,
@@ -39,4 +40,5 @@ public sealed record Conversation(
     IReadOnlyList<ConversationMember> Members,
     Message? LastMessage = null,
     bool Pinned = false,
-    bool Muted = false);
+    bool Muted = false,
+    string? Announcement = null);

@@ -51,6 +51,34 @@ public sealed class ConversationRealtimeNotifier
     }
 
     /// <summary>
+    /// 按收件人视角推送 conv.updated（F-14 群资料变更）：每个成员收到的 Conversation 只反映自己的
+    /// pinned / muted / lastReadSeq，禁止把同一份会话广播给所有成员。不阻塞调用方。
+    /// </summary>
+    public void PushUpdatedPerRecipient(IReadOnlyDictionary<string, Conversation> conversationsByUserId)
+    {
+        if (conversationsByUserId.Count == 0)
+        {
+            return;
+        }
+
+        var pushed = 0;
+        foreach (var (userId, conversation) in conversationsByUserId)
+        {
+            var frame = new ConvUpdatedFrame(new[] { conversation });
+            foreach (var connection in _connections.GetConnections(userId))
+            {
+                pushed++;
+                _ = SendSafeAsync(connection, frame);
+            }
+        }
+
+        _logger.LogInformation(
+            "conv.updated(按收件人) 推送：{RecipientCount} 个收件人 → {ConnectionCount} 条在线连接",
+            conversationsByUserId.Count,
+            pushed);
+    }
+
+    /// <summary>
     /// 向指定成员的在线连接广播 message.new（REST 场景含发送者本人；广播不带 clientMsgId，
     /// 客户端按 messageId 去重）。不阻塞调用方。
     /// </summary>

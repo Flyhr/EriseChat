@@ -22,6 +22,11 @@ public sealed record GroupMutationResult(
     Message? SystemMessage,
     string? RemovedUserId);
 
+/// <summary>群资料更新结果：最新会话实体、需按收件人视角推送的成员用户 ID（F-14）。</summary>
+public sealed record GroupProfileUpdateResult(
+    ConversationEntity Conversation,
+    IReadOnlyList<string> MemberUserIds);
+
 /// <summary>
 /// 会话业务（M1-07 单聊最小集 + M3-04 群聊成员管理）：创建单聊（direct_key 去重）/群聊、
 /// 当前用户会话列表、单会话读取（成员校验）、群成员邀请/退出/移除。
@@ -30,6 +35,9 @@ public sealed record GroupMutationResult(
 public sealed class ConversationService
 {
     private const int TitleMaxLength = 100;
+
+    /// <summary>群公告最大长度（F-14，接口层校验；库表列为 TEXT）。</summary>
+    private const int AnnouncementMaxLength = 500;
 
     private readonly ChatDbContext _db;
     private readonly SystemMessageWriter _systemMessages;
@@ -563,6 +571,132 @@ public sealed class ConversationService
         return (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
     }
 
+    /// <summary>
+    /// 更新群资料（F-14）：仅群聊群主可改标题与公告；title/announcement 为 null 表示不修改，
+    /// announcement 传空串表示清空（落库 NULL）。返回最新会话实体与成员列表，供端点按收件人视角推送。
+    /// </summary>
+    public async Task<GroupProfileUpdateResult> UpdateGroupProfileAsync(
+        string currentUserId,
+        string conversationId,
+        string? title,
+        string? announcement,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            throw ApiException.ValidationFailed("conversationId 不能为空");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        var member = await _db.ConversationMembers.FirstOrDefaultAsync(
+            item => item.ConversationId == conversationId && item.UserId == currentUserId,
+            cancellationToken);
+        if (member is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不在此会话中", StatusCodes.Status403Forbidden);
+        }
+
+        if (conversation.Type != ConversationType.Group)
+        {
+            throw ApiException.ValidationFailed("仅群聊支持修改群资料");
+        }
+
+        if (member.Role != MemberRole.Owner)
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "仅群主可修改群资料", StatusCodes.Status403Forbidden);
+        }
+
+        if (title is null && announcement is null)
+        {
+            throw ApiException.ValidationFailed("至少需要修改一个字段");
+        }
+
+        var normalizedTitle = title is null ? null : NormalizeGroupTitle(title);
+        var normalizedAnnouncement = announcement is null ? null : NormalizeAnnouncement(announcement);
+
+        if (title is not null)
+        {
+            conversation.Title = normalizedTitle;
+        }
+
+        if (announcement is not null)
+        {
+            conversation.Announcement = normalizedAnnouncement;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var memberUserIds = await _db.ConversationMembers.AsNoTracking()
+            .Where(item => item.ConversationId == conversationId)
+            .Select(item => item.UserId)
+            .ToListAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "群资料更新：会话 {ConversationId}，操作者 {UserId}，标题变更 {TitleChanged}，公告变更 {AnnouncementChanged}",
+            conversationId,
+            currentUserId,
+            title is not null,
+            announcement is not null);
+
+        return new GroupProfileUpdateResult(conversation, memberUserIds);
+    }
+
+    /// <summary>
+    /// 按收件人视角逐成员构建会话 DTO（F-14）：conv.updated 需要每个成员只看到自己的
+    /// pinned / muted / lastReadSeq，因此不广播同一份 Conversation。
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, Conversation>> BuildPerRecipientAsync(
+        ConversationEntity conversation,
+        IReadOnlyList<string> memberUserIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, Conversation>(StringComparer.Ordinal);
+        foreach (var memberUserId in memberUserIds)
+        {
+            var built = await BuildAsync(new[] { conversation }, memberUserId, cancellationToken);
+            result[memberUserId] = built[0];
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// 群公告（F-14）：CRLF/CR 统一为 \n、去首尾空白；空串=清空（返回 null）；≤500 字符；
+    /// 除换行外的控制字符一律拒绝。
+    /// </summary>
+    private static string? NormalizeAnnouncement(string? announcement)
+    {
+        var normalized = (announcement ?? string.Empty)
+            .Replace("\r\n", "\n")
+            .Replace('\r', '\n')
+            .Trim();
+        if (normalized.Length == 0)
+        {
+            return null;
+        }
+
+        if (normalized.Length > AnnouncementMaxLength)
+        {
+            throw ApiException.ValidationFailed($"群公告最多 {AnnouncementMaxLength} 个字符");
+        }
+
+        foreach (var ch in normalized)
+        {
+            if (ch != '\n' && char.IsControl(ch))
+            {
+                throw ApiException.ValidationFailed("群公告不能包含控制字符");
+            }
+        }
+
+        return normalized;
+    }
+
     /// <summary>把实体会话组装成协议 DTO（成员、我的 lastReadSeq、最新消息快照）。</summary>
     private async Task<IReadOnlyList<Conversation>> BuildAsync(
         IReadOnlyList<ConversationEntity> conversations,
@@ -653,7 +787,8 @@ public sealed class ConversationService
                 members,
                 lastMessage,
                 myPinned,
-                myMuted));
+                myMuted,
+                conversation.Announcement));
         }
 
         return result

@@ -154,6 +154,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .HasColumnName("type")
                 .HasConversion(LowercaseEnum<ConversationType>());
             entity.Property(conversation => conversation.Title).HasColumnName("title");
+            entity.Property(conversation => conversation.Announcement).HasColumnName("announcement");
             entity.Property(conversation => conversation.DirectKey).HasColumnName("direct_key");
             entity.HasIndex(conversation => conversation.DirectKey).IsUnique();
             entity.Property(conversation => conversation.CreatedBy).HasColumnName("created_by").IsRequired();
