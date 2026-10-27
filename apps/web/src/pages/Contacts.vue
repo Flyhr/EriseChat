@@ -10,6 +10,7 @@ import { usersApi, type UserProfile } from '../api/users'
 import type { Conversation } from '../types/frames'
 import type { Friend, FriendRequest } from '../types/frames'
 import AppDialog from '../components/AppDialog.vue'
+import SearchInput from '../components/SearchInput.vue'
 import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
 import ContactProfile from '../components/ContactProfile.vue'
@@ -331,19 +332,15 @@ onBeforeUnmount(() => {
   <main class="contacts-page" :class="{ 'contacts-page--profile': selectedUser }">
     <aside class="contacts-page__list">
       <header class="contacts-page__header">
-        <div class="contacts-page__searchbox">
-          <AppIcon name="search" :size="16" class="contacts-page__searchbox-icon" />
-          <input
-            v-model="keyword"
-            type="search"
-            maxlength="64"
-            class="contacts-page__searchbox-input"
-            placeholder="搜索联系人"
-            aria-label="搜索联系人"
-            @focus="onHeaderSearchFocus"
-            @keydown.esc="clearKeyword"
-          />
-        </div>
+        <SearchInput
+          v-model="keyword"
+          class="contacts-page__searchbox"
+          placeholder="搜索联系人"
+          aria-label="搜索联系人"
+          :maxlength="64"
+          @focus="onHeaderSearchFocus"
+          @escape="clearKeyword"
+        />
         <button
           type="button"
           class="contacts-page__new-group"
@@ -640,63 +637,10 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-/* F-11 体验调整：页头用搜索框替代标题，点击打开全局搜索。 */
+/* 搜索框组件（SearchInput）统一外观，这里只限制头部占用宽度。 */
 .contacts-page__searchbox {
-  display: inline-flex;
   flex: 1;
-  gap: var(--ec-space-2);
-  align-items: center;
-  min-width: 0;
   max-width: 280px;
-  height: 32px;
-  padding: 0 var(--ec-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-nav-bg);
-  color: var(--ec-text-secondary);
-  transition:
-    background var(--ec-transition-fast) var(--ec-ease),
-    border-color var(--ec-transition-fast) var(--ec-ease);
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.contacts-page__searchbox:hover {
-  border-color: var(--ec-border);
-  background: var(--ec-surface-hover);
-}
-}
-
-.contacts-page__searchbox:focus-within {
-  border-color: var(--ec-border);
-  background: var(--ec-surface);
-}
-
-.contacts-page__searchbox-icon {
-  flex: none;
-  color: var(--ec-text-tertiary);
-}
-
-.contacts-page__searchbox-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--ec-text-primary);
-  font-family: inherit;
-  font-size: var(--ec-font-size-secondary);
-}
-
-.contacts-page__searchbox-input::placeholder {
-  color: var(--ec-text-tertiary);
-}
-
-.contacts-page__searchbox-input:focus-visible {
-  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-  outline-offset: var(--ec-focus-offset);
-  border-radius: var(--ec-radius-sm);
 }
 
 .contacts-page__new-group {
@@ -1032,7 +976,6 @@ onBeforeUnmount(() => {
 
   .contacts-page__searchbox {
     max-width: none;
-    height: 36px;
   }
 
   .contacts-page__new-group {

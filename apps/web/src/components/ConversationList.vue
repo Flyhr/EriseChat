@@ -10,6 +10,7 @@ import { useConversationsStore } from '../stores/conversations'
 import { SEARCH_DEBOUNCE_MS, SEARCH_PAGE_SIZE } from '../stores/search'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
+import SearchInput from './SearchInput.vue'
 import SearchResultItem from './SearchResultItem.vue'
 
 // 会话列表（UI-02 批次1，计划 §5.2）：头部搜索框 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
@@ -216,17 +217,13 @@ async function onUpdateSettings(payload: {
 <template>
   <section class="ec-conversation-list" aria-label="会话列表">
     <header class="ec-conversation-list__header">
-      <div class="ec-conversation-list__searchbox">
-        <AppIcon name="search" :size="16" class="ec-conversation-list__searchbox-icon" />
-        <input
-          v-model="searchKeyword"
-          type="search"
-          class="ec-conversation-list__searchbox-input"
-          :placeholder="searchPlaceholder"
-          :aria-label="searchPlaceholder"
-          @keydown.esc="clearSearch"
-        />
-      </div>
+      <SearchInput
+        v-model="searchKeyword"
+        class="ec-conversation-list__searchbox"
+        :placeholder="searchPlaceholder"
+        :aria-label="searchPlaceholder"
+        @escape="clearSearch"
+      />
       <button
         type="button"
         class="ec-conversation-list__create"
@@ -314,63 +311,10 @@ async function onUpdateSettings(payload: {
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
+/* 搜索框组件（SearchInput）只负责外观，这里限制它在头部占用的宽度。 */
 .ec-conversation-list__searchbox {
-  display: inline-flex;
   flex: 1;
-  gap: var(--ec-space-2);
-  align-items: center;
-  min-width: 0;
   max-width: 280px;
-  height: 32px;
-  padding: 0 var(--ec-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-nav-bg);
-  color: var(--ec-text-secondary);
-  transition:
-    background var(--ec-transition-fast) var(--ec-ease),
-    border-color var(--ec-transition-fast) var(--ec-ease);
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.ec-conversation-list__searchbox:hover {
-  border-color: var(--ec-border);
-  background: var(--ec-surface-hover);
-}
-}
-
-/* 聚焦时整体给出输入态（输入框本身不画边框）。 */
-.ec-conversation-list__searchbox:focus-within {
-  border-color: var(--ec-border);
-  background: var(--ec-surface);
-}
-
-.ec-conversation-list__searchbox-icon {
-  flex: none;
-  color: var(--ec-text-tertiary);
-}
-
-.ec-conversation-list__searchbox-input {
-  flex: 1;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--ec-text-primary);
-  font-family: inherit;
-  font-size: var(--ec-font-size-secondary);
-}
-
-.ec-conversation-list__searchbox-input::placeholder {
-  color: var(--ec-text-tertiary);
-}
-
-.ec-conversation-list__searchbox-input:focus-visible {
-  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-  outline-offset: var(--ec-focus-offset);
-  border-radius: var(--ec-radius-sm);
 }
 
 .ec-conversation-list__more {
@@ -494,7 +438,6 @@ async function onUpdateSettings(payload: {
 
   .ec-conversation-list__searchbox {
     max-width: none;
-    height: 36px;
   }
 
   .ec-conversation-list__filters {
