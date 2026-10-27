@@ -84,7 +84,7 @@ public sealed class WebSocketConnectionHandler
             var userId = authResult.UserId!;
             // 记录注册前的在线状态，用于判定 presence 是否 0→1（单活动连接踢旧时不算重新上线）。
             var hadOnlineConnections = _connections.GetConnections(userId).Count > 0;
-            connection.MarkAuthenticated(userId, auth.DeviceId!.Trim());
+            connection.MarkAuthenticated(userId, auth.DeviceId!.Trim(), authResult.SessionId);
             _connections.Register(connection);
 
             // 单活动连接：把该账号已有连接先踢下线（先 kicked 再 close 4001）。

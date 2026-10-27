@@ -11,11 +11,11 @@ using Microsoft.IdentityModel.Tokens;
 namespace Chat.Server.Realtime;
 
 /// <summary>WS auth 帧校验结果（失败时 ErrorCode 为 protocol/protocol.md §5.1 的错误码）。</summary>
-public sealed record WsAuthResult(bool Succeeded, string? UserId, string? ErrorCode, string? ErrorMessage)
+public sealed record WsAuthResult(bool Succeeded, string? UserId, string? SessionId, string? ErrorCode, string? ErrorMessage)
 {
-    public static WsAuthResult Success(string userId) => new(true, userId, null, null);
+    public static WsAuthResult Success(string userId, string sessionId) => new(true, userId, sessionId, null, null);
 
-    public static WsAuthResult Fail(string errorCode, string errorMessage) => new(false, null, errorCode, errorMessage);
+    public static WsAuthResult Fail(string errorCode, string errorMessage) => new(false, null, null, errorCode, errorMessage);
 }
 
 /// <summary>
@@ -127,6 +127,6 @@ public sealed class WsAuthenticator
             .Where(item => item.Id == session.Id)
             .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.LastSeenAt, now), cancellationToken);
 
-        return WsAuthResult.Success(userId);
+        return WsAuthResult.Success(userId, session.Id);
     }
 }

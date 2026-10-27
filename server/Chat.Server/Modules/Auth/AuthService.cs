@@ -20,6 +20,9 @@ public sealed record AuthSessionResult(string AccessToken, long ExpiresAt, AuthU
 /// <summary>当前用户资料（与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
 public sealed record UserProfileDto(string UserId, string Email, string DisplayName, string? AvatarFileId, string Role, string Status, long CreatedAt, bool HasPassword);
 
+/// <summary>F-13：登录设备列表项（Current 表示发起请求所用的 JWT 会话）。</summary>
+public sealed record SessionInfoDto(string SessionId, string DeviceId, long CreatedAt, long LastSeenAt, bool Current);
+
 /// <summary>
 /// 账号认证业务（计划 §4.1 / §7）：邮箱验证码注册、验证码登录、密码登录、注销、当前用户资料。
 /// 验证码校验/消费、JWT 签发与会话（sessions）落库都在本层；REST 端点只做参数绑定与响应映射。
@@ -243,6 +246,56 @@ public sealed class AuthService
         {
             throw ApiException.Unauthorized("会话不存在或已失效");
         }
+    }
+
+    /// <summary>
+    /// F-13：当前用户未撤销的登录会话（按 lastSeenAt 降序；Current 标识发起请求的 JWT 会话）。
+    /// </summary>
+    public async Task<IReadOnlyList<SessionInfoDto>> ListSessionsAsync(
+        string userId,
+        string? currentJwtId,
+        CancellationToken cancellationToken)
+    {
+        var sessions = await _db.Sessions.AsNoTracking()
+            .Where(session => session.UserId == userId && session.RevokedAt == null)
+            .OrderByDescending(session => session.LastSeenAt)
+            .ThenByDescending(session => session.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return sessions
+            .Select(session => new SessionInfoDto(
+                session.Id,
+                session.DeviceId,
+                session.CreatedAt,
+                session.LastSeenAt,
+                !string.IsNullOrEmpty(currentJwtId)
+                    && string.Equals(session.JwtId, currentJwtId, StringComparison.Ordinal)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// F-13：按会话 ID 远程下号（软撤销）。会话不存在或不属于当前用户 → NOT_FOUND（不泄漏存在性）；
+    /// 已撤销 → 幂等成功。撤销后由调用方踢掉该会话的 WS 连接。
+    /// </summary>
+    public async Task RevokeSessionAsync(string userId, string sessionId, CancellationToken cancellationToken)
+    {
+        var session = await _db.Sessions.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == sessionId && item.UserId == userId, cancellationToken);
+        if (session is null)
+        {
+            throw ApiException.NotFound("会话不存在");
+        }
+
+        if (session.RevokedAt is not null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await _db.Sessions
+            .Where(item => item.Id == sessionId && item.UserId == userId && item.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.RevokedAt, now), cancellationToken);
+        _logger.LogInformation("远程下号：用户 {UserId} 退出会话 {SessionId}", userId, sessionId);
     }
 
     /// <summary>当前登录用户资料（禁用/不存在视为未登录）。</summary>

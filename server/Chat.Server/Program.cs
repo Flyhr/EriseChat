@@ -245,6 +245,8 @@ app.UseStaticFiles();
 // 认证/用户 REST：M1-04 发码、M1-05 注册/登录/注销与当前用户资料。
 app.MapAuthEndpoints();
 app.MapUserEndpoints();
+// 登录会话（F-13）：GET /api/sessions 与 DELETE /api/sessions/{sessionId}（软撤销 + WS 踢下线）。
+app.MapSessionEndpoints();
 app.MapFriendEndpoints();
 
 // 会话 REST（M1-07）：创建单聊、会话列表、单会话读取。

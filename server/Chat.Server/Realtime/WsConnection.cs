@@ -37,17 +37,21 @@ public sealed class WsConnection
     /// <summary>认证时上报的设备标识。</summary>
     public string? DeviceId { get; private set; }
 
+    /// <summary>F-13：认证时对应的登录会话 ID（用于按会话远程下号）。</summary>
+    public string? SessionId { get; private set; }
+
     /// <summary>建连时间（UTC 毫秒）。</summary>
     public long ConnectedAt { get; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
     /// <summary>是否已通过 auth 认证。</summary>
     public bool IsAuthenticated => UserId is not null;
 
-    /// <summary>认证成功：记录用户与设备。</summary>
-    public void MarkAuthenticated(string userId, string deviceId)
+    /// <summary>认证成功：记录用户、设备与登录会话。</summary>
+    public void MarkAuthenticated(string userId, string deviceId, string? sessionId = null)
     {
         UserId = userId;
         DeviceId = deviceId;
+        SessionId = sessionId;
     }
 
     /// <summary>发送一帧（JSON + 换行，串行化；已关闭/发送失败时静默返回）。</summary>
