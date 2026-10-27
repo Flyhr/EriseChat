@@ -98,6 +98,7 @@ CREATE INDEX idx_files_owner_id ON files (owner_id);
 -- conversations：会话（单聊 / 群聊）
 -- type         : direct / group
 -- title        : 群标题；单聊为空（客户端用对方昵称展示）
+-- announcement : 群公告（≤500 字符，接口层校验；NULL = 无公告；单聊恒为 NULL；F-14）
 -- direct_key   : 单聊唯一键（两个用户 ID 排序后拼接，如 "u1:u2"）；群聊为 NULL
 -- last_seq     : 会话最新消息序号，只增不减（未读与补拉基数）
 -- last_message_id 为便利引用（指向 messages.id），不加外键以避免 conversations ↔ messages 循环依赖
@@ -106,6 +107,7 @@ CREATE TABLE conversations (
     id              TEXT PRIMARY KEY NOT NULL,
     type            TEXT NOT NULL CHECK (type IN ('direct', 'group')),
     title           TEXT,
+    announcement    TEXT,
     direct_key      TEXT UNIQUE,
     created_by      TEXT NOT NULL,
     created_at      INTEGER NOT NULL,

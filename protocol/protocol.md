@@ -61,7 +61,7 @@
 | `sync.request` | C→S | 补拉请求 | 每会话携带 `lastSeq` |
 | `sync.response` | S→C | 补拉响应 | 每会话每批 ≤200 条 |
 | `conv.list` | 双向 | 会话列表 | C→S 请求 / S→C 返回全量 |
-| `conv.updated` | S→C | 会话变更推送 | 新建、标题、成员、最新消息变化 |
+| `conv.updated` | S→C | 会话变更推送 | 新建、标题/公告变更、成员、最新消息变化 |
 | `read.update` | C→S | 上报已读游标 | 打开会话滚到底部时上报 |
 | `read.updated` | S→C | 已读广播 | 仅单聊推送给对方 |
 | `typing` | 双向 | 正在输入 | 3 秒节流，不落库 |
@@ -270,7 +270,7 @@ batch 对象：
 | `conversations` | array | 是 | 发生变化的 Conversation 数组；被移出/主动退出场景可为空数组 |
 | `removedConversationIds` | string[] | 否 | 当前连接用户被移出/主动退出群聊时，服务端推送该帧，`conversations` 可为空数组，`removedConversationIds` 列出被移除的会话；客户端收到后移除对应会话的本地状态（列表项、消息缓存、游标） |
 
-规则：触发场景为「新建会话、标题变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。被移出/主动退出场景下，该用户只收到 `removedConversationIds` 帧，不再收到该会话的 `conv.updated`。
+规则：触发场景为「新建会话、标题变更、公告变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。被移出/主动退出场景下，该用户只收到 `removedConversationIds` 帧，不再收到该会话的 `conv.updated`。群资料（标题/公告）变更时服务端按**收件人视角**逐连接下发 `conv.updated`（每个成员的 `pinned` / `muted` / `lastReadSeq` 只反映自己），不会互相覆盖。
 
 群聊创建与成员管理走 REST（见计划 §7）；成功后服务端在同一事务内写一条 `msgType=system` 消息（`seq` 严格 +1），并推送 `message.new`（在线成员）与 `conv.updated`（含全体成员的最新 Conversation）；客户端对 `message.new` 按 `messageId` 去重。
 
@@ -286,6 +286,7 @@ batch 对象：
 | `lastReadSeq` | integer | 是 | 当前用户在该会话的已读游标 |
 | `pinned` | bool | 否 | 当前用户是否置顶该会话（成员级设置，默认 `false`；旧客户端忽略） |
 | `muted` | bool | 否 | 当前用户是否对该会话免打扰（成员级设置，默认 `false`；旧客户端忽略） |
+| `announcement` | string / null | 否 | 群公告（≤500 字符，支持换行）；`null` / 缺省表示无公告；单聊恒为 `null`；旧客户端忽略 |
 | `lastMessage` | object / null | 否 | 最新消息快照（Message，可为 `null`） |
 | `members` | array | 是 | 成员数组，见下表 |
 
@@ -303,6 +304,8 @@ batch 对象：
 > 未读数由客户端按 `未读 = lastSeq − lastReadSeq` 计算，协议不单独下发 `unread`（`AGENTS.md` §5.6）。
 
 > `pinned` / `muted` 是**当前登录用户自己的成员级设置**（`conversation_members` 行上的列）：服务端在 `conv.list`、`conv.updated`、`GET /api/conversations` 中按各自收件人填充，不广播给其他成员；改动入口为 `PATCH /api/conversations/{conversationId}/member-settings`。会话排序规则属客户端展示层：`conv.list` 仍按最近消息时间倒序，客户端可将置顶会话排在前面（置顶组内保持时间倒序）。
+>
+> `announcement` 为群公告，只有 `group` 会话可能有值；修改入口为 `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?}`，仅群主可用，空串表示清空（落库 `null`））。
 
 ### 4.6 `read.update` / `read.updated`（已读）
 
@@ -605,3 +608,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-17 好友关系） | 2026-10-27 | 新增 `friend.changed` 推送帧（共 18 个 type，§4.9）及 Friend/FriendRequest 对象、7 种 `kind`；presence 推送范围扩展为「有共同会话或好友关系」；新增好友/申请相关 REST（计划 §7）；`protocolVersion` 仍为 1 |
 | v1（F-09 回复引用） | 2026-10-27 | 新增可选 Reply 引用摘要（`Message.reply` 与 `message.ack.reply`）：不落库、按需组装，文本摘要 120 字符截断、image/file 带 fileId+name、被引用消息缺失时不返回；明确 `message.send.replyTo` 必须为同会话已存在 messageId，否则 `VALIDATION_FAILED`；帧 type 与 `protocolVersion` 仍为 1 |
 | v1（F-10 置顶与免打扰） | 2026-10-27 | Conversation 新增可选字段 `pinned` / `muted`（当前用户成员级设置，默认 false，按收件人填充、不广播）；新增 REST `PATCH /api/conversations/{conversationId}/member-settings`（body `{pinned?, muted?}`，至少一项）；`conversation_members` 新增 `pinned` / `muted` 两列（`protocol/schema.sql` 同步）；置顶排序属客户端展示层，`conv.list` 顺序不变；帧 type 与 `protocolVersion` 仍为 1 |
+| v1（F-14 群资料） | 2026-10-28 | Conversation 新增可选字段 `announcement`（群公告，≤500 字符、支持换行，`null` = 无公告，单聊恒为 null）；`conv.updated` 触发场景补充「标题/公告变更」并明确按收件人视角逐连接下发；`conversations` 新增 `announcement TEXT` 列（`protocol/schema.sql` 同步）；新增 REST `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?}`，仅群主）；无新帧、`protocolVersion` 仍为 1 |
