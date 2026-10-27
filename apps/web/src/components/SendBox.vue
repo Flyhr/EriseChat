@@ -4,17 +4,19 @@ import AppIcon from './AppIcon.vue'
 import { MAX_TEXT_LENGTH } from '../core/config'
 import { ALLOWED_EXTENSIONS } from '../core/attachments'
 import { insertAtCursor } from '../core/emoji'
+import { filesOfClipboard, normalizeDroppedFile } from '../core/fileDrop'
 
 // 发送框（纯展示 + 本地输入）：文本只 emit send，附件只 emit file-selected；
 // 上传、压缩、发送状态机由 pages/Chat.vue 与 stores/messages.ts 负责。
 // Enter 发送、Shift+Enter 换行；服务端文本上限 4096 字符，输入框与发送入口双重拦截（M3-00 N10）。
-// M3-07：附件按钮 → 选择文件 → emit file-selected；上传中禁用发送与再次选择。
+// M3-07：附件按钮 → 选择文件（支持多选数组）→ emit file-selected；上传中禁用发送与再次选择。
+// F-06：textarea 粘贴剪贴板文件（截图/复制的文件）时拦截默认文本粘贴，走同一上传链路。
 // M3-09：输入非空时 emit typing（由父组件按会话做 3 秒节流后发 typing 帧）。
 // UI-02（计划 §5.5）：附件/表情图标化（AppIcon 内联 SVG）、自动增高到约 180px 后内部滚动、
 // 中文输入法组合期间 Enter 不误发、emoji 由父组件抽屉选择后调用 insertEmoji 插入光标处。
 const emit = defineEmits<{
   send: [text: string]
-  'file-selected': [file: File]
+  'file-selected': [files: File[]]
   typing: []
   /** 点击「表情」按钮：由 Chat 页切换 Emoji 抽屉（互斥逻辑在页面层）。 */
   'pick-emoji': []
@@ -111,9 +113,20 @@ function pickFile(): void {
 
 function onFileChange(event: Event): void {
   const inputEl = event.target as HTMLInputElement
-  const file = inputEl.files?.[0]
+  const files = Array.from(inputEl.files ?? [])
   inputEl.value = ''
-  if (file) emit('file-selected', file)
+  if (files.length > 0) emit('file-selected', files)
+}
+
+/**
+ * 粘贴上传（F-06）：剪贴板含文件（如 Win+Shift+S 截图）时拦截文件名的默认文本粘贴，
+ * 走与附件按钮相同的上传链路；纯文本粘贴保持默认行为。
+ */
+function onPaste(event: ClipboardEvent): void {
+  const files = filesOfClipboard(event.clipboardData)
+  if (files.length === 0) return
+  event.preventDefault()
+  emit('file-selected', files.map((file) => normalizeDroppedFile(file)))
 }
 
 /** 输入变化（M3-09）：非空且未超上限时通知父组件发送 typing（父组件负责 3 秒节流）。 */
@@ -147,6 +160,7 @@ function onEnter(event: KeyboardEvent): void {
         aria-label="消息输入框"
         @input="onInput"
         @keydown.enter.exact="onEnter"
+        @paste="onPaste"
       />
       <!-- 工具栏与正文同处一个输入框：图标放在输入框下侧，分隔线用浅色避免抢视觉。 -->
       <div class="send-box__toolbar">

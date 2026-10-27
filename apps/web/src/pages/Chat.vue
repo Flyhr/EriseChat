@@ -13,6 +13,7 @@ import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import type { ConversationFilter } from '../core/chatLayout'
+import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { createPanelHistoryGuard } from '../core/historyGuard'
@@ -252,6 +253,8 @@ onMounted(async () => {
   typing.subscribeRealtime()
   offWsState = chatWs.on('statechange', onWsStateChange)
   document.addEventListener('visibilitychange', markActiveConversationRead)
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('drop', onWindowDrop)
   await conversations.restoreFromCache()
   await messages.restoreFromCache()
 })
@@ -265,6 +268,8 @@ onBeforeUnmount(() => {
     recoveredTimer = null
   }
   document.removeEventListener('visibilitychange', markActiveConversationRead)
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('drop', onWindowDrop)
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
   document.removeEventListener('keydown', onEmojiEscape)
   panelGuard.dispose()
@@ -387,25 +392,53 @@ watch(selfUserId, () => {
   typingThrottle.reset()
 })
 
-async function handleFileSelected(file: File): Promise<void> {
-  const conversationId = activeId.value
-  const senderId = selfUserId.value
-  if (!conversationId || !senderId || uploadBusy.value) return
-
-  const validation = validateAttachment(file)
-  if (!validation.ok) {
-    uploadError.value = validation.reason
+async function handleFileSelected(files: File[]): Promise<void> {
+  if (files.length === 0) return
+  if (!activeId.value || !selfUserId.value) {
+    uploadError.value = '请先选择会话'
+    return
+  }
+  if (uploadBusy.value) {
+    uploadError.value = '上传中，请稍候'
     return
   }
 
+  const { files: accepted, rejectedCount } = truncateFiles(files)
+  if (accepted.length === 0) return
+
   uploadBusy.value = true
   uploadError.value = null
+  if (rejectedCount > 0) {
+    uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 个文件，已忽略多余的 ${rejectedCount} 个`
+  }
+  try {
+    // 顺序上传，避免多张图片同时压缩/上传造成内存峰值；单个失败不阻断后续文件。
+    for (const file of accepted) {
+      await uploadAndSendFile(normalizeDroppedFile(file, Date.now()))
+    }
+  } finally {
+    uploadBusy.value = false
+  }
+}
+
+/** 单文件链路（F-06 从原 handleFileSelected 抽出）：校验 → 图片压缩 → 上传 → 发消息。 */
+async function uploadAndSendFile(file: File): Promise<void> {
+  const conversationId = activeId.value
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId) return
+
+  const validation = validateAttachment(file)
+  if (!validation.ok) {
+    if (!uploadError.value) uploadError.value = validation.reason
+    return
+  }
+
   try {
     // 图片发送前压缩（最长边 1280、约 ≤300KB）；gif 由 compressImageFile 原样返回。
     const payload = isImageFile(file) ? await compressImageFile(file) : file
     const recheck = validateAttachment(payload)
     if (!recheck.ok) {
-      uploadError.value = recheck.reason
+      if (!uploadError.value) uploadError.value = recheck.reason
       return
     }
 
@@ -421,12 +454,66 @@ async function handleFileSelected(file: File): Promise<void> {
       },
       senderId,
     )
-    if (!sent) uploadError.value = '消息发送失败，请重试'
+    if (!sent && !uploadError.value) uploadError.value = '消息发送失败，请重试'
   } catch (error) {
-    uploadError.value = error instanceof ApiError ? error.message : '文件上传失败，请重试'
-  } finally {
-    uploadBusy.value = false
+    if (!uploadError.value) {
+      uploadError.value = error instanceof ApiError ? error.message : '文件上传失败，请重试'
+    }
   }
+}
+
+// 拖拽上传（F-06）：根容器显示投放提示；window 兜底阻止浏览器/Electron 直接打开文件。
+const dragActive = ref(false)
+/** 进入/离开计数，避免在子元素间移动时覆盖层闪烁。 */
+let dragDepth = 0
+
+function onDragEnter(event: DragEvent): void {
+  if (!hasFiles(event.dataTransfer) || !activeId.value) return
+  event.preventDefault()
+  dragDepth += 1
+  dragActive.value = true
+}
+
+function onDragOver(event: DragEvent): void {
+  if (!hasFiles(event.dataTransfer)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = uploadBusy.value ? 'none' : 'copy'
+}
+
+function onDragLeave(event: DragEvent): void {
+  if (!hasFiles(event.dataTransfer)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragActive.value = false
+}
+
+function onDrop(event: DragEvent): void {
+  if (!hasFiles(event.dataTransfer)) return
+  event.preventDefault()
+  dragDepth = 0
+  dragActive.value = false
+  if (uploadBusy.value) {
+    uploadError.value = '上传中，请稍候'
+    return
+  }
+  if (!activeId.value) {
+    uploadError.value = '请先选择会话'
+    return
+  }
+  const files = filesOf(event.dataTransfer)
+  if (files.length === 0) return
+  void handleFileSelected(files)
+}
+
+/** window 兜底：拖拽含文件时一律 preventDefault（即使落在侧栏/页面空白处也不打开文件）。 */
+function onWindowDragOver(event: DragEvent): void {
+  if (hasFiles(event.dataTransfer)) event.preventDefault()
+}
+
+function onWindowDrop(event: DragEvent): void {
+  if (!hasFiles(event.dataTransfer)) return
+  event.preventDefault()
+  dragDepth = 0
+  dragActive.value = false
 }
 </script>
 
@@ -447,7 +534,13 @@ async function handleFileSelected(file: File): Promise<void> {
       @create="openContacts"
     />
 
-    <section class="chat-page__main">
+    <section
+      class="chat-page__main"
+      @dragenter="onDragEnter"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
       <NoticeBar v-if="pageNotice" :text="pageNotice" action-label="知道了" @action="pageNotice = ''" />
       <NoticeBar
         v-if="connectionNotice"
@@ -549,6 +642,14 @@ async function handleFileSelected(file: File): Promise<void> {
         title="选择会话开始聊天"
         description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
       />
+      <!-- 拖拽投放提示（F-06）：仅拖拽含文件且已选择会话时出现在聊天主区；移动端由 CSS 隐藏。 -->
+      <div v-if="dragActive" class="chat-page__drop" aria-hidden="true">
+        <div class="chat-page__drop-card">
+          <AppIcon name="paperclip" :size="28" />
+          <p class="chat-page__drop-text">松开以发送到当前会话</p>
+          <p class="chat-page__drop-hint">支持图片、PDF、TXT、Office 文档、ZIP（单次最多 10 个）</p>
+        </div>
+      </div>
     </section>
   </main>
 </template>
@@ -560,6 +661,54 @@ async function handleFileSelected(file: File): Promise<void> {
   height: 100%;
   min-height: 0;
   background: var(--ec-bg-canvas);
+}
+
+/* 拖拽投放覆盖层（F-06）：绝对定位覆盖整个聊天页，pointer-events:none 让事件继续落到根容器。 */
+.chat-page__drop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ec-space-6);
+  background: rgba(37, 99, 235, 0.12);
+  border: 2px dashed var(--ec-brand-500);
+  border-radius: var(--ec-radius-panel);
+  pointer-events: none;
+}
+
+.chat-page__drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ec-space-2);
+  max-width: 360px;
+  padding: var(--ec-space-5) var(--ec-space-6);
+  text-align: center;
+  color: var(--ec-brand-600);
+  background: var(--ec-surface);
+  border-radius: var(--ec-radius-panel);
+  box-shadow: var(--ec-shadow-lg);
+}
+
+.chat-page__drop-text {
+  margin: 0;
+  font-size: var(--ec-font-size-page-title);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.chat-page__drop-hint {
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+/* 移动端没有拖拽操作，不做投放提示。 */
+@media (max-width: 800px) {
+  .chat-page__drop {
+    display: none;
+  }
 }
 
 /* UI-01/UI-02/UI-04：801~1199 窗口（含 Electron 最小 960×640）会话列表收窄，避免挤压主区域。 */
@@ -574,6 +723,7 @@ async function handleFileSelected(file: File): Promise<void> {
 }
 
 .chat-page__main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
