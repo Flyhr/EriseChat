@@ -21,6 +21,7 @@ import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
 import { usePresenceStore } from '../stores/presence'
+import { useSearchStore } from '../stores/search'
 
 type ContactsTab = 'friends' | 'requests' | 'search'
 
@@ -39,6 +40,7 @@ const router = useRouter()
 const conversations = useConversationsStore()
 const presence = usePresenceStore()
 const friends = useFriendsStore()
+const globalSearch = useSearchStore()
 
 const tab = ref<ContactsTab>('friends')
 
@@ -320,7 +322,16 @@ onBeforeUnmount(() => {
   <main class="contacts-page" :class="{ 'contacts-page--profile': selectedUser }">
     <aside class="contacts-page__list">
       <header class="contacts-page__header">
-        <h2 class="contacts-page__title">联系人</h2>
+        <button
+          type="button"
+          class="contacts-page__searchbox"
+          title="搜索消息"
+          aria-label="搜索消息"
+          @click="globalSearch.openGlobal()"
+        >
+          <AppIcon name="search" :size="16" />
+          <span class="contacts-page__searchbox-label">搜索消息</span>
+        </button>
         <button
           type="button"
           class="contacts-page__new-group"
@@ -626,11 +637,47 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-.contacts-page__title {
-  margin: 0;
+/* F-11 体验调整：页头用搜索框替代标题，点击打开全局搜索。 */
+.contacts-page__searchbox {
+  display: inline-flex;
+  flex: 1;
+  gap: var(--ec-space-2);
+  align-items: center;
+  min-width: 0;
+  max-width: 280px;
+  height: 32px;
+  padding: 0 var(--ec-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-nav-bg);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--ec-transition-fast) var(--ec-ease),
+    border-color var(--ec-transition-fast) var(--ec-ease),
+    color var(--ec-transition-fast) var(--ec-ease);
+}
+
+.contacts-page__searchbox-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+.contacts-page__searchbox:hover {
+  border-color: var(--ec-border);
+  background: var(--ec-surface-hover);
   color: var(--ec-text-primary);
-  font-size: var(--ec-font-size-nav);
-  font-weight: var(--ec-font-weight-semibold);
+}
+}
+
+.contacts-page__searchbox:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .contacts-page__new-group {
@@ -1004,8 +1051,9 @@ onBeforeUnmount(() => {
     padding: 0 var(--ec-space-3) 0 var(--ec-space-4);
   }
 
-  .contacts-page__title {
-    font-size: var(--ec-font-size-mobile-page-title);
+  .contacts-page__searchbox {
+    max-width: none;
+    height: 36px;
   }
 
   .contacts-page__new-group {

@@ -8,7 +8,8 @@ import { useConversationsStore } from '../stores/conversations'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
 
-// 会话列表（UI-02 批次1，计划 §5.2）：头部标题 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
+// 会话列表（UI-02 批次1，计划 §5.2）：头部搜索框 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
+// F-11 体验调整：搜索以输入框形式放在「发起聊天」左侧（点击打开全局搜索面板），不再显示列表标题。
 // 只消费现有 store 数据（不新增请求）；未读数以 unreadOf 为唯一口径（当前打开的会话传 0）。
 // 筛选规则在 core/chatLayout.ts 的 filterConversations（纯函数，单测覆盖）。
 // F-10：子组件「⋯」菜单发出 update-settings，这里统一调 store 更新并给轻提示。
@@ -25,7 +26,7 @@ const emit = defineEmits<{
   select: [conversationId: string]
   'update:filter': [filter: ConversationFilter]
   create: []
-  /** F-11：移动端头部搜索入口（全局搜索由 Chat 页打开面板）。 */
+  /** F-11：头部搜索框（点击打开全局搜索面板）。 */
   search: []
 }>()
 
@@ -39,6 +40,10 @@ const filters: { key: ConversationFilter; label: string }[] = [
 
 const visible = computed(() =>
   filterConversations(props.conversations, props.filter, conversationsStore.unreadOf),
+)
+
+const searchPlaceholder = computed(() =>
+  props.filter === 'group' ? '搜索群聊消息' : '搜索消息',
 )
 
 const emptyText = computed(() => {
@@ -83,27 +88,25 @@ async function onUpdateSettings(payload: {
 <template>
   <section class="ec-conversation-list" aria-label="会话列表">
     <header class="ec-conversation-list__header">
-      <h2 class="ec-conversation-list__title">消息</h2>
-      <div class="ec-conversation-list__header-actions">
-        <button
-          type="button"
-          class="ec-conversation-list__search"
-          aria-label="搜索消息"
-          title="搜索消息"
-          @click="emit('search')"
-        >
-          <AppIcon name="search" :size="18" />
-        </button>
-        <button
-          type="button"
-          class="ec-conversation-list__create"
-          aria-label="发起聊天"
-          @click="emit('create')"
-        >
-          <AppIcon name="plus" :size="16" />
-          <span class="ec-conversation-list__create-label">发起聊天</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        class="ec-conversation-list__searchbox"
+        :aria-label="searchPlaceholder"
+        :title="searchPlaceholder"
+        @click="emit('search')"
+      >
+        <AppIcon name="search" :size="16" />
+        <span class="ec-conversation-list__searchbox-label">{{ searchPlaceholder }}</span>
+      </button>
+      <button
+        type="button"
+        class="ec-conversation-list__create"
+        aria-label="发起聊天"
+        @click="emit('create')"
+      >
+        <AppIcon name="plus" :size="16" />
+        <span class="ec-conversation-list__create-label">发起聊天</span>
+      </button>
     </header>
 
     <div class="ec-conversation-list__filters" role="tablist" aria-label="会话筛选">
@@ -154,23 +157,59 @@ async function onUpdateSettings(payload: {
   flex: none;
   gap: var(--ec-space-2);
   align-items: center;
-  justify-content: space-between;
   height: var(--ec-header-height);
   padding: 0 var(--ec-space-4);
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-.ec-conversation-list__title {
-  margin: 0;
+/* F-11 体验调整：搜索以输入框形式放在「发起聊天」左侧，点击打开全局搜索面板。 */
+.ec-conversation-list__searchbox {
+  display: inline-flex;
+  flex: 1;
+  gap: var(--ec-space-2);
+  align-items: center;
+  min-width: 0;
+  max-width: 280px;
+  height: 32px;
+  padding: 0 var(--ec-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-nav-bg);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--ec-transition-fast) var(--ec-ease),
+    border-color var(--ec-transition-fast) var(--ec-ease),
+    color var(--ec-transition-fast) var(--ec-ease);
+}
+
+.ec-conversation-list__searchbox-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+.ec-conversation-list__searchbox:hover {
+  border-color: var(--ec-border);
+  background: var(--ec-surface-hover);
   color: var(--ec-text-primary);
-  font-size: 17px;
-  font-weight: var(--ec-font-weight-semibold);
+}
+}
+
+.ec-conversation-list__searchbox:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .ec-conversation-list__create {
   display: inline-flex;
   gap: var(--ec-space-1);
   align-items: center;
+  flex: none;
   padding: 4px var(--ec-space-2);
   border: none;
   border-radius: var(--ec-radius-sm);
@@ -187,27 +226,6 @@ async function onUpdateSettings(payload: {
 .ec-conversation-list__create:hover {
   background: var(--ec-brand-050);
 }
-}
-
-.ec-conversation-list__header-actions {
-  display: flex;
-  flex: none;
-  gap: var(--ec-space-1);
-  align-items: center;
-}
-
-/* F-11：搜索入口只在移动端出现（桌面端左导航与聊天顶栏已有入口）。 */
-.ec-conversation-list__search {
-  display: none;
-  place-items: center;
-  min-width: var(--ec-touch-target);
-  min-height: var(--ec-touch-target);
-  padding: 0;
-  border: none;
-  border-radius: var(--ec-radius-full);
-  background: transparent;
-  color: var(--ec-text-secondary);
-  cursor: pointer;
 }
 
 .ec-conversation-list__filters {
@@ -272,10 +290,6 @@ async function onUpdateSettings(payload: {
     padding: 0 var(--ec-space-3) 0 var(--ec-space-4);
   }
 
-  .ec-conversation-list__title {
-    font-size: var(--ec-font-size-mobile-page-title);
-  }
-
   .ec-conversation-list__create {
     justify-content: center;
     min-width: var(--ec-touch-target);
@@ -288,13 +302,9 @@ async function onUpdateSettings(payload: {
     display: none;
   }
 
-  .ec-conversation-list__search {
-    display: grid;
-  }
-
-  .ec-conversation-list__search:focus-visible {
-    outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-    outline-offset: var(--ec-focus-offset);
+  .ec-conversation-list__searchbox {
+    max-width: none;
+    height: 36px;
   }
 
   .ec-conversation-list__filters {

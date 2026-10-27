@@ -7,7 +7,6 @@ import Avatar from './Avatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
-import { useSearchStore } from '../stores/search'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
@@ -30,13 +29,6 @@ const route = useRoute()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
 const friends = useFriendsStore()
-const search = useSearchStore()
-
-/** F-11：左导航搜索入口打开全局搜索（跨当前用户全部会话）。 */
-function openGlobalSearch(): void {
-  search.openGlobal()
-}
-
 // F-02：全局未读数（左导航「消息」徽标；桌面壳另由 App.vue 同步到托盘/任务栏）。
 const totalUnread = computed(() => conversations.totalUnread)
 const unreadBadgeText = computed(() => (totalUnread.value > 99 ? '99+' : String(totalUnread.value)))
@@ -81,17 +73,6 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
       <span class="ec-sidenav__logo" aria-hidden="true">E</span>
       <span class="ec-sidenav__brand-text">EiseChat</span>
     </RouterLink>
-
-    <button
-      type="button"
-      class="ec-sidenav__search"
-      title="搜索消息"
-      aria-label="搜索消息"
-      @click="openGlobalSearch"
-    >
-      <AppIcon name="search" />
-      <span class="ec-sidenav__label">搜索</span>
-    </button>
 
     <ul class="ec-sidenav__items">
       <li v-for="item in items" :key="item.key">
@@ -165,39 +146,6 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
   font-size: 15px;
   font-weight: 700;
   line-height: 1;
-}
-
-/* F-11：搜索入口（外观与一级导航项一致，但它是打开面板而非路由跳转）。 */
-.ec-sidenav__search {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  height: 40px;
-  padding: 0 10px;
-  border: none;
-  border-radius: var(--ec-radius-sm);
-  background: transparent;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-nav);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background var(--ec-transition-fast) var(--ec-ease),
-    color var(--ec-transition-fast) var(--ec-ease);
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.ec-sidenav__search:hover {
-  background: var(--ec-surface-hover);
-  color: var(--ec-text-primary);
-}
-}
-
-.ec-sidenav__search:focus-visible {
-  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-  outline-offset: var(--ec-focus-offset);
 }
 
 .ec-sidenav__items {
@@ -322,7 +270,6 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
   }
 
   .ec-sidenav__item,
-  .ec-sidenav__search,
   .ec-sidenav__account {
     justify-content: center;
   }
