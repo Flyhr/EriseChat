@@ -59,6 +59,18 @@ const previewOpen = ref(false)
 const previewUrl = ref('')
 const previewName = ref('')
 
+/** pending 消息没有 messageId，用 clientMsgId 兜底，作为预览条目的稳定键。 */
+function messageKeyOf(message: Message | PendingMessage): string {
+  return 'messageId' in message ? message.messageId : message.clientMsgId
+}
+
+/** F-08 批次2 过渡：先以单图列表适配新的多图预览 API，批次3 再把预览状态提升到会话页。 */
+const previewItems = computed(() =>
+  previewUrl.value
+    ? [{ messageId: messageKeyOf(props.message), name: previewName.value, url: previewUrl.value }]
+    : [],
+)
+
 function onPreview(payload: { url: string; name: string }): void {
   previewUrl.value = payload.url
   previewName.value = payload.name
@@ -142,8 +154,8 @@ const timeText = computed(() =>
     </div>
     <ImagePreview
       :open="previewOpen"
-      :url="previewUrl"
-      :name="previewName"
+      :items="previewItems"
+      :index="0"
       @close="closePreview"
     />
   </div>
