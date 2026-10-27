@@ -517,6 +517,52 @@ public sealed class ConversationService
         return (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
     }
 
+    /// <summary>
+    /// 更新当前用户在该会话的置顶/免打扰（F-10）：只改自己的成员行、不广播；
+    /// pinned/muted 至少提供一个；会话不存在 NOT_FOUND、非成员 NOT_MEMBER。
+    /// </summary>
+    public async Task<Conversation> UpdateMemberSettingsAsync(
+        string currentUserId,
+        string conversationId,
+        bool? pinned,
+        bool? muted,
+        CancellationToken cancellationToken)
+    {
+        if (pinned is null && muted is null)
+        {
+            throw ApiException.ValidationFailed("pinned 与 muted 至少提供一个");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        var member = await _db.ConversationMembers.FirstOrDefaultAsync(
+            item => item.ConversationId == conversationId && item.UserId == currentUserId,
+            cancellationToken);
+        if (member is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        if (pinned is not null)
+        {
+            member.Pinned = pinned.Value;
+        }
+
+        if (muted is not null)
+        {
+            member.Muted = muted.Value;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
+    }
+
     /// <summary>把实体会话组装成协议 DTO（成员、我的 lastReadSeq、最新消息快照）。</summary>
     private async Task<IReadOnlyList<Conversation>> BuildAsync(
         IReadOnlyList<ConversationEntity> conversations,
@@ -545,6 +591,8 @@ public sealed class ConversationService
                     member.JoinedAt,
                     user.AvatarFileId,
                     member.LastReadSeq,
+                    member.Pinned,
+                    member.Muted,
                 })
             .ToListAsync(cancellationToken);
 
@@ -580,10 +628,13 @@ public sealed class ConversationService
                     row.AvatarFileId))
                 .ToList();
 
-            var myLastReadSeq = memberRows
+            var membership = memberRows
                 .FirstOrDefault(row => string.Equals(row.ConversationId, conversation.Id, StringComparison.Ordinal) &&
-                                       string.Equals(row.UserId, currentUserId, StringComparison.Ordinal))
-                ?.LastReadSeq ?? 0L;
+                                       string.Equals(row.UserId, currentUserId, StringComparison.Ordinal));
+            var myLastReadSeq = membership?.LastReadSeq ?? 0L;
+            // F-10：置顶/免打扰是当前用户自己的成员级设置，按收件人填充、不广播。
+            var myPinned = membership?.Pinned ?? false;
+            var myMuted = membership?.Muted ?? false;
 
             Message? lastMessage = null;
             if (conversation.LastMessageId is not null &&
@@ -600,7 +651,9 @@ public sealed class ConversationService
                 conversation.LastSeq,
                 myLastReadSeq,
                 members,
-                lastMessage));
+                lastMessage,
+                myPinned,
+                myMuted));
         }
 
         return result

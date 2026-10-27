@@ -39,6 +39,12 @@ public static class ConversationsEndpoints
             .WithName("RemoveConversationMember")
             .RequireAuthorization();
 
+        // F-10：当前用户自己的置顶/免打扰设置（成员级、不广播，只返回更新后的 Conversation）。
+        app.MapPatch("/api/conversations/{conversationId}/member-settings", UpdateMemberSettingsAsync)
+            .WithName("UpdateConversationMemberSettings")
+            .RequireAuthorization()
+            .Produces<Conversation>();
+
         return app;
     }
 
@@ -146,6 +152,27 @@ public static class ConversationsEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>
+    /// 更新当前用户的会话成员设置（F-10）：body 至少包含 pinned/muted 之一；只改本人成员行并返回最新 Conversation。
+    /// 私密性要求：不广播 conv.updated（其他成员不应看到我的置顶/免打扰状态）。
+    /// </summary>
+    private static async Task<IResult> UpdateMemberSettingsAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        MemberSettingsRequest request,
+        ConversationService conversations,
+        CancellationToken cancellationToken)
+    {
+        var currentUserId = GetUserId(principal);
+        var conversation = await conversations.UpdateMemberSettingsAsync(
+            currentUserId,
+            conversationId,
+            request.Pinned,
+            request.Muted,
+            cancellationToken);
+        return Results.Json(conversation);
+    }
+
     private static async Task<IResult> GetAsync(
         ClaimsPrincipal principal,
         string conversationId,
@@ -168,4 +195,7 @@ public static class ConversationsEndpoints
 
     /// <summary>群成员变更请求（M3-04）：批量邀请的成员用户 ID 列表。</summary>
     public sealed record MemberChangeRequest(IReadOnlyList<string>? UserIds);
+
+    /// <summary>成员设置请求（F-10）：pinned/muted 至少提供一个由 Service 校验。</summary>
+    public sealed record MemberSettingsRequest(bool? Pinned = null, bool? Muted = null);
 }
