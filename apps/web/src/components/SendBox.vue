@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { MAX_TEXT_LENGTH } from '../stores/messages'
+import { MAX_TEXT_LENGTH } from '../core/config'
 import { ALLOWED_EXTENSIONS } from '../core/attachments'
 import { insertAtCursor } from '../core/emoji'
 
@@ -18,6 +18,8 @@ const emit = defineEmits<{
   typing: []
   /** 点击「表情」按钮：由 Chat 页切换 Emoji 抽屉（互斥逻辑在页面层）。 */
   'pick-emoji': []
+  /** 输入文本变化（含清空）：由 Chat 页写入草稿存储（F-04）。 */
+  'draft-change': [text: string]
 }>()
 
 const props = withDefaults(
@@ -28,14 +30,19 @@ const props = withDefaults(
     uploadError?: string | null
     /** Emoji 抽屉是否已打开（仅用于按钮 aria-expanded）。 */
     emojiOpen?: boolean
+    /** 当前会话 id（F-04）：变化时用 initialDraft 重置输入框内容。 */
+    conversationId?: string
+    /** 当前会话的初始草稿（F-04）：仅作为切换会话时的恢复值，输入后由 draft-change 回传。 */
+    initialDraft?: string
   }>(),
-  { uploading: false, uploadError: null, emojiOpen: false },
+  { uploading: false, uploadError: null, emojiOpen: false, conversationId: '', initialDraft: '' },
 )
 
 /** 输入框最大高度（计划 §5.5：自动增长至约 360px，超出后内部滚动）。 */
 const MAX_TEXTAREA_HEIGHT = 360
 
-const text = ref('')
+/** 输入文本（F-04）：挂载时按所在会话的草稿初始化，切换会话时由 watch(conversationId) 重置。 */
+const text = ref(props.initialDraft ?? '')
 const fileInput = ref<HTMLInputElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
 const length = computed(() => text.value.length)
@@ -72,10 +79,28 @@ function focusInput(): void {
 
 defineExpose({ insertEmoji, focusInput })
 
+// 草稿（F-04）：切换会话时用父组件传入的 initialDraft 重置输入框；输入变化统一回传父组件持久化。
+watch(
+  () => props.conversationId,
+  () => {
+    text.value = props.initialDraft ?? ''
+    void nextTick(resizeInput)
+  },
+)
+
+watch(text, (value) => {
+  emit('draft-change', value)
+})
+
+onMounted(() => {
+  if (text.value) void nextTick(resizeInput)
+})
+
 function submit(): void {
   const value = text.value.trim()
   if (!value || value.length > MAX_TEXT_LENGTH) return
   emit('send', value)
+  // 清空后由 watch(text) 回传空串，父组件据此删除草稿（发送成功即清）。
   text.value = ''
   void nextTick(resizeInput)
 }

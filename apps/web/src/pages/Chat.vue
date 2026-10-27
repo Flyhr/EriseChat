@@ -24,6 +24,7 @@ import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
 import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
+import { useDraftsStore } from '../stores/drafts'
 import type { Conversation } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
@@ -35,6 +36,7 @@ const conversations = useConversationsStore()
 const messages = useMessagesStore()
 const typing = useTypingStore()
 const presence = usePresenceStore()
+const drafts = useDraftsStore()
 /** typing 帧的客户端节流（同一会话 3 秒最多一次，protocol.md §4.7）。 */
 const typingThrottle = new TypingThrottle()
 
@@ -43,9 +45,15 @@ const activeId = computed(() =>
   typeof route.params.conversationId === 'string' ? route.params.conversationId : null,
 )
 // 告知 conversations store 当前打开的会话：messages store 的提示音/系统通知据此判断是否正在查看。
-watch(activeId, (conversationId) => conversations.setActiveConversation(conversationId), {
-  immediate: true,
-})
+// 切换会话前先 flush 上一个会话的草稿，避免 300ms 防抖窗口内的内容丢失（F-04）。
+watch(
+  activeId,
+  (conversationId, previousId) => {
+    if (previousId && previousId !== conversationId) drafts.flush(previousId)
+    conversations.setActiveConversation(conversationId)
+  },
+  { immediate: true },
+)
 const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
 )
@@ -277,8 +285,18 @@ function backToList(): void {
 }
 
 function sendMessage(text: string): void {
-  if (!activeId.value || !selfUserId.value) return
-  messages.sendText(activeId.value, text, selfUserId.value)
+  const conversationId = activeId.value
+  if (!conversationId || !selfUserId.value) return
+  messages.sendText(conversationId, text, selfUserId.value)
+  // 发送成功即清空该会话草稿：发送框随后会把空串回传，这里先按语义删除并立即写盘（F-04）。
+  drafts.removeDraft(conversationId)
+}
+
+/** 输入框内容变化 → 写入草稿（F-04）；空串表示已清空，由 store 删除对应条目。 */
+function onDraftChange(text: string): void {
+  const conversationId = activeId.value
+  if (!conversationId) return
+  drafts.setDraft(conversationId, text)
 }
 
 /** 输入中上报（M3-09）：客户端 3 秒节流 + 连接已认证才发送；服务端对「连接×会话」另有 1 秒静默节流。 */
@@ -475,10 +493,13 @@ async function handleFileSelected(file: File): Promise<void> {
               />
               <SendBox
                 ref="sendBoxRef"
+                :conversation-id="activeId ?? ''"
+                :initial-draft="activeId ? drafts.draftOf(activeId) : ''"
                 :uploading="uploadBusy"
                 :upload-error="uploadError"
                 :emoji-open="activeDrawer === 'emoji'"
                 @send="sendMessage"
+                @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"
                 @typing="sendTyping"
                 @pick-emoji="toggleEmojiDrawer"

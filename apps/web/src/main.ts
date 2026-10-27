@@ -9,6 +9,7 @@ import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
 import { useFriendsStore } from './stores/friends'
 import { useMessagesStore } from './stores/messages'
+import { useDraftsStore } from './stores/drafts'
 import './styles/variables.css'
 import './styles/global.css'
 
@@ -22,6 +23,7 @@ const auth = useAuthStore()
 const conversations = useConversationsStore()
 const friends = useFriendsStore()
 const messages = useMessagesStore()
+const drafts = useDraftsStore()
 
 /**
  * 清理登录相关状态（M3-00）：断连 + 清登录态 + 清会话/消息内存状态 + 清 IndexedDB 缓存，
@@ -33,6 +35,7 @@ function cleanupSession(): void {
   conversations.clear()
   friends.clear()
   messages.clear()
+  drafts.clear()
   void clearAllData()
 }
 
