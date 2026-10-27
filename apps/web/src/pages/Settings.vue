@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { filesApi } from '../api/files'
+import { sessionsApi, type SessionInfo } from '../api/sessions'
+import { usersApi } from '../api/users'
 import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
@@ -16,6 +18,8 @@ import { clearAllData } from '../core/db'
 import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { compressImageFile } from '../core/imageCompress'
+import { changePasswordFormError } from '../core/passwordRules'
+import { formatLastSeen, formatSessionTime, shortDeviceLabel } from '../core/sessionFormat'
 import { showToast } from '../core/toast'
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
@@ -193,6 +197,121 @@ async function confirmLogout(): Promise<void> {
     loggingOut.value = false
   }
 }
+
+// ==================== F-13：账号密码与登录设备 ====================
+
+/** 是否已设置密码（null=加载中/未知；来自 GET /api/me 的 hasPassword）。 */
+const hasPassword = ref<boolean | null>(null)
+const passwordDialogOpen = ref(false)
+const passwordSaving = ref(false)
+const passwordError = ref('')
+const oldPassword = ref('')
+const newPasswordInput = ref('')
+const confirmPassword = ref('')
+const passwordVisible = ref(false)
+
+async function loadPasswordState(): Promise<void> {
+  try {
+    const profile = await usersApi.me()
+    hasPassword.value = profile.hasPassword ?? false
+  } catch {
+    // 失败时保持未知：不阻塞其它设置项，改密入口仍可点（服务端会再校验）。
+    hasPassword.value = null
+  }
+}
+
+function openPasswordDialog(): void {
+  passwordDialogOpen.value = true
+  passwordError.value = ''
+  oldPassword.value = ''
+  newPasswordInput.value = ''
+  confirmPassword.value = ''
+  passwordVisible.value = false
+}
+
+function closePasswordDialog(): void {
+  if (passwordSaving.value) return
+  passwordDialogOpen.value = false
+}
+
+async function submitPasswordChange(): Promise<void> {
+  if (passwordSaving.value) return
+  const currentHasPassword = hasPassword.value === true
+  const formError = changePasswordFormError({
+    hasPassword: currentHasPassword,
+    oldPassword: oldPassword.value,
+    newPassword: newPasswordInput.value,
+    confirmPassword: confirmPassword.value,
+  })
+  if (formError) {
+    passwordError.value = formError
+    return
+  }
+
+  passwordSaving.value = true
+  passwordError.value = ''
+  try {
+    await authApi.changePassword({
+      oldPassword: currentHasPassword ? oldPassword.value : undefined,
+      newPassword: newPasswordInput.value,
+    })
+    hasPassword.value = true
+    passwordDialogOpen.value = false
+    showToast(currentHasPassword ? '密码已修改' : '密码已设置', 'success')
+  } catch (error) {
+    passwordError.value = friendlyError(error)
+  } finally {
+    passwordSaving.value = false
+  }
+}
+
+const sessions = ref<SessionInfo[]>([])
+const sessionsLoading = ref(false)
+const sessionsError = ref('')
+const sessionsLoaded = ref(false)
+const kickingSessionId = ref<string | null>(null)
+const kickTarget = ref<SessionInfo | null>(null)
+
+async function loadSessions(force = false): Promise<void> {
+  if (sessionsLoading.value || (sessionsLoaded.value && !force)) return
+  sessionsLoading.value = true
+  sessionsError.value = ''
+  try {
+    sessions.value = await sessionsApi.list()
+    sessionsLoaded.value = true
+  } catch (error) {
+    sessionsError.value = friendlyError(error)
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+
+function askKickSession(session: SessionInfo): void {
+  kickTarget.value = session
+}
+
+async function confirmKickSession(): Promise<void> {
+  const target = kickTarget.value
+  if (!target || kickingSessionId.value) return
+  kickingSessionId.value = target.sessionId
+  try {
+    await sessionsApi.kick(target.sessionId)
+    kickTarget.value = null
+    showToast('已退出该设备', 'success')
+    await loadSessions(true)
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    kickingSessionId.value = null
+  }
+}
+
+// 进入「账号与安全」时懒加载密码状态与登录设备（只请求一次，手动操作后局部刷新）。
+watch(activeSectionId, (next) => {
+  if (next !== 'account') return
+  void loadPasswordState()
+  void loadSessions()
+})
 
 /** 是否运行在桌面壳：Electron preload 提供原生通知，不依赖浏览器通知授权。 */
 function isDesktopShell(): boolean {
@@ -529,6 +648,73 @@ async function saveProfile(): Promise<void> {
             </SettingsRow>
           </SettingsGroup>
 
+          <SettingsGroup title="密码">
+            <SettingsRow
+              label="登录密码"
+              :hint="
+                hasPassword === null
+                  ? '正在读取密码状态…'
+                  : hasPassword
+                    ? '已设置密码，可使用密码登录'
+                    : '未设置密码，当前只能通过验证码登录'
+              "
+            >
+              <button
+                type="button"
+                class="settings-btn settings-btn--secondary"
+                @click="openPasswordDialog"
+              >
+                {{ hasPassword ? '修改密码' : '设置密码' }}
+              </button>
+            </SettingsRow>
+          </SettingsGroup>
+
+          <SettingsGroup
+            title="登录设备"
+            description="退出某台设备会立即断开该设备的连接；当前设备请使用「退出登录」。"
+          >
+            <SettingsRow v-if="sessionsLoading" label="正在加载登录设备…">
+              <span class="settings-value">请稍候</span>
+            </SettingsRow>
+            <SettingsRow v-else-if="sessionsError" label="登录设备加载失败" :hint="sessionsError">
+              <button
+                type="button"
+                class="settings-btn settings-btn--secondary"
+                @click="loadSessions(true)"
+              >
+                重试
+              </button>
+            </SettingsRow>
+            <SettingsRow
+              v-else-if="sessions.length === 0"
+              label="暂无登录设备"
+              hint="当前账号没有其他有效会话"
+            >
+              <span class="settings-value">—</span>
+            </SettingsRow>
+            <template v-else>
+              <SettingsRow
+                v-for="session in sessions"
+                :key="session.sessionId"
+                :label="shortDeviceLabel(session.deviceId)"
+                :hint="`登录：${formatSessionTime(session.createdAt)} · 最近活跃：${formatLastSeen(session.lastSeenAt)}`"
+              >
+                <span v-if="session.current" class="settings-value settings-value--badge">
+                  当前设备
+                </span>
+                <button
+                  v-else
+                  type="button"
+                  class="settings-btn settings-btn--danger"
+                  :disabled="kickingSessionId === session.sessionId"
+                  @click="askKickSession(session)"
+                >
+                  {{ kickingSessionId === session.sessionId ? '退出中…' : '退出该设备' }}
+                </button>
+              </SettingsRow>
+            </template>
+          </SettingsGroup>
+
           <SettingsGroup title="登录" description="同一账号同一时间只保留一个活动连接；在新设备登录会替代旧连接。">
             <SettingsRow label="退出登录" hint="退出后本机将清除登录态与本地缓存" tone="danger">
               <button
@@ -656,6 +842,78 @@ async function saveProfile(): Promise<void> {
         </div>
       </section>
     </div>
+
+    <AppDialog
+      :open="passwordDialogOpen"
+      :title="hasPassword ? '修改密码' : '设置密码'"
+      confirm-text="保存"
+      :busy="passwordSaving"
+      @confirm="submitPasswordChange"
+      @cancel="closePasswordDialog"
+    >
+      <div class="settings-password-form">
+        <label v-if="hasPassword" class="settings-password-form__field">
+          <span class="settings-password-form__label">当前密码</span>
+          <input
+            v-model="oldPassword"
+            class="settings-input"
+            type="password"
+            autocomplete="current-password"
+            aria-label="当前密码"
+          />
+        </label>
+        <label class="settings-password-form__field">
+          <span class="settings-password-form__label">新密码（8~128 个字符）</span>
+          <div class="settings-password-form__row">
+            <input
+              v-model="newPasswordInput"
+              class="settings-input"
+              :type="passwordVisible ? 'text' : 'password'"
+              autocomplete="new-password"
+              minlength="8"
+              maxlength="128"
+              aria-label="新密码"
+            />
+            <button
+              type="button"
+              class="settings-password-form__toggle"
+              :aria-label="passwordVisible ? '隐藏密码' : '显示密码'"
+              :aria-pressed="passwordVisible"
+              @click="passwordVisible = !passwordVisible"
+            >
+              {{ passwordVisible ? '隐藏' : '显示' }}
+            </button>
+          </div>
+        </label>
+        <label class="settings-password-form__field">
+          <span class="settings-password-form__label">确认新密码</span>
+          <input
+            v-model="confirmPassword"
+            class="settings-input"
+            :type="passwordVisible ? 'text' : 'password'"
+            autocomplete="new-password"
+            maxlength="128"
+            aria-label="确认新密码"
+          />
+        </label>
+        <p v-if="passwordError" class="settings-field__error" role="alert">{{ passwordError }}</p>
+      </div>
+    </AppDialog>
+
+    <AppDialog
+      :open="Boolean(kickTarget)"
+      title="退出该设备"
+      :message="
+        kickTarget
+          ? `将退出 ${shortDeviceLabel(kickTarget.deviceId)} 的登录，该设备会被立即断开。`
+          : ''
+      "
+      confirm-text="退出该设备"
+      tone="danger"
+      :busy="Boolean(kickingSessionId)"
+      @confirm="confirmKickSession"
+      @cancel="kickTarget = null"
+    />
 
     <AppDialog
       :open="logoutConfirmOpen"
@@ -984,6 +1242,59 @@ async function saveProfile(): Promise<void> {
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* F-13：登录设备「当前设备」徽标 */
+.settings-value--badge {
+  padding: 2px var(--ec-space-2);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  font-weight: var(--ec-font-weight-medium);
+  white-space: nowrap;
+}
+
+/* F-13：修改密码/设置密码弹窗表单 */
+.settings-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-3);
+}
+
+.settings-password-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+}
+
+.settings-password-form__label {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.settings-password-form__row {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+}
+
+.settings-password-form__row .settings-input {
+  flex: 1;
+}
+
+.settings-password-form__toggle {
+  flex: none;
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0 var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  font: inherit;
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
 }
 
 .settings-link {

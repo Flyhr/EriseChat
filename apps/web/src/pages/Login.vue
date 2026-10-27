@@ -5,20 +5,24 @@ import { authApi, type LoginResponse } from '../api/auth'
 import { chatWs } from '../core/ws'
 import { getServerUrl, normalizeServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
+import { validateNewPassword } from '../core/passwordRules'
+import { showToast } from '../core/toast'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
 
 // 登录/注册页（M2-03）：验证码注册 / 验证码登录 / 密码登录三种模式。
+// F-13：新增「找回密码」reset 模式（不进顶部三页签，从密码登录页进入）。
 // 成功后统一走 applySession：写登录态 → 注入 WS 认证 → 建连 → 进聊天页（protocol.md §4.1）。
-type Mode = 'register' | 'code' | 'password'
+type Mode = 'register' | 'code' | 'password' | 'reset'
+type TabMode = 'register' | 'code' | 'password'
 
-const MODE_LABELS: Record<Mode, string> = {
+const MODE_LABELS: Record<TabMode, string> = {
   code: '验证码登录',
   register: '注册',
   password: '密码登录',
 }
-const modes = Object.keys(MODE_LABELS) as Mode[]
+const modes = Object.keys(MODE_LABELS) as TabMode[]
 
 /** 服务端错误码 → 中文文案统一由 core/errorMessages 维护（UI-03 批次1）。 */
 
@@ -50,12 +54,17 @@ const injectedServerUrl = normalizeServerUrl(
 
 /** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
 const passwordVisible = ref(false)
+/** F-13：找回密码的新密码显示/隐藏。 */
+const resetPasswordVisible = ref(false)
 
 const mode = ref<Mode>('code')
 const email = ref('')
 const code = ref('')
 const displayName = ref('')
 const password = ref('')
+/** F-13：找回密码（reset 模式）的新密码与确认。 */
+const newPassword = ref('')
+const confirmPassword = ref('')
 const submitting = ref(false)
 const sending = ref(false)
 const errorMessage = ref('')
@@ -63,8 +72,12 @@ const devCodeHint = ref('')
 const cooldown = ref(0)
 let cooldownTimer: ReturnType<typeof setInterval> | null = null
 
-const purpose = computed<'register' | 'login'>(() => (mode.value === 'register' ? 'register' : 'login'))
-const submitLabel = computed(() => (mode.value === 'register' ? '注册并登录' : '登录'))
+const purpose = computed<'register' | 'login' | 'reset'>(() =>
+  mode.value === 'register' ? 'register' : mode.value === 'reset' ? 'reset' : 'login',
+)
+const submitLabel = computed(() =>
+  mode.value === 'register' ? '注册并登录' : mode.value === 'reset' ? '重置密码' : '登录',
+)
 const canSubmit = computed(() => !submitting.value && email.value.trim().length > 0)
 const sendButtonLabel = computed(() => {
   if (sending.value) return '发送中…'
@@ -110,6 +123,10 @@ function switchMode(next: Mode): void {
   mode.value = next
   errorMessage.value = ''
   devCodeHint.value = ''
+  if (next !== 'reset') {
+    newPassword.value = ''
+    confirmPassword.value = ''
+  }
 }
 
 async function sendCode(): Promise<void> {
@@ -133,8 +150,55 @@ async function sendCode(): Promise<void> {
   }
 }
 
+/** F-13：找回密码——邮箱 + 验证码 + 新密码，成功切回验证码登录。 */
+async function submitReset(): Promise<void> {
+  const target = email.value.trim()
+  if (!target) {
+    errorMessage.value = '请先输入邮箱'
+    return
+  }
+  if (code.value.trim().length === 0) {
+    errorMessage.value = '请输入验证码'
+    return
+  }
+  const passwordError = validateNewPassword(newPassword.value)
+  if (passwordError) {
+    errorMessage.value = passwordError
+    return
+  }
+  if (newPassword.value !== confirmPassword.value) {
+    errorMessage.value = '两次输入的新密码不一致'
+    return
+  }
+
+  submitting.value = true
+  errorMessage.value = ''
+  try {
+    await authApi.resetPassword({
+      email: target,
+      code: code.value.trim(),
+      newPassword: newPassword.value,
+    })
+    showToast('密码已重置，请使用新密码登录', 'success')
+    newPassword.value = ''
+    confirmPassword.value = ''
+    code.value = ''
+    switchMode('code')
+    stopCooldown()
+    cooldown.value = 0
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error)
+  } finally {
+    submitting.value = false
+  }
+}
+
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
+  if (mode.value === 'reset') {
+    await submitReset()
+    return
+  }
   const target = email.value.trim()
   if (mode.value === 'register' && displayName.value.trim().length === 0) {
     errorMessage.value = '请输入昵称'
@@ -243,8 +307,16 @@ function clearServerUrl(): void {
         <span class="login-mobile-brand__name">EiseChat</span>
       </div>
       <div class="login-card">
-        <h2 class="login-card__title">{{ mode === 'register' ? '创建账号' : '欢迎回来' }}</h2>
-        <p class="login-card__subtitle">内部聊天工具 · 邮箱验证码登录</p>
+        <h2 class="login-card__title">
+          {{ mode === 'reset' ? '找回密码' : mode === 'register' ? '创建账号' : '欢迎回来' }}
+        </h2>
+        <p class="login-card__subtitle">
+          {{
+            mode === 'reset'
+              ? '通过邮箱验证码重置登录密码'
+              : '内部聊天工具 · 邮箱验证码登录'
+          }}
+        </p>
 
         <div class="login-server">
           <p v-if="injectedServerUrl" class="login-server__locked">
@@ -274,7 +346,7 @@ function clearServerUrl(): void {
           </template>
         </div>
 
-        <div class="login-modes" role="tablist" aria-label="登录方式">
+        <div v-if="mode !== 'reset'" class="login-modes" role="tablist" aria-label="登录方式">
           <button
             v-for="item in modes"
             :key="item"
@@ -288,6 +360,15 @@ function clearServerUrl(): void {
             {{ MODE_LABELS[item] }}
           </button>
         </div>
+
+        <button
+          v-else
+          class="login-form__back"
+          type="button"
+          @click="switchMode('code')"
+        >
+          ← 返回登录
+        </button>
 
         <form class="login-form" @submit.prevent="submit">
           <label class="login-form__field">
@@ -321,7 +402,7 @@ function clearServerUrl(): void {
             </div>
           </label>
 
-          <div v-if="mode !== 'code'" class="login-form__field">
+          <div v-if="mode === 'password' || mode === 'register'" class="login-form__field">
             <label class="login-form__label" for="login-password">
               {{ mode === 'register' ? '密码（可选，设置后可用密码登录）' : '密码' }}
             </label>
@@ -345,7 +426,52 @@ function clearServerUrl(): void {
                 {{ passwordVisible ? '隐藏' : '显示' }}
               </button>
             </div>
+            <button
+              v-if="mode === 'password'"
+              class="login-form__forgot"
+              type="button"
+              @click="switchMode('reset')"
+            >
+              忘记密码？
+            </button>
           </div>
+
+          <template v-if="mode === 'reset'">
+            <div class="login-form__field">
+              <label class="login-form__label" for="login-new-password">新密码（8~128 个字符）</label>
+              <div class="login-form__password">
+                <input
+                  id="login-new-password"
+                  v-model="newPassword"
+                  :type="resetPasswordVisible ? 'text' : 'password'"
+                  autocomplete="new-password"
+                  minlength="8"
+                  maxlength="128"
+                  placeholder="8~128 个字符"
+                />
+                <button
+                  class="login-form__toggle-password"
+                  type="button"
+                  :aria-label="resetPasswordVisible ? '隐藏密码' : '显示密码'"
+                  :aria-pressed="resetPasswordVisible"
+                  @click="resetPasswordVisible = !resetPasswordVisible"
+                >
+                  {{ resetPasswordVisible ? '隐藏' : '显示' }}
+                </button>
+              </div>
+            </div>
+            <div class="login-form__field">
+              <label class="login-form__label" for="login-confirm-password">确认新密码</label>
+              <input
+                id="login-confirm-password"
+                v-model="confirmPassword"
+                :type="resetPasswordVisible ? 'text' : 'password'"
+                autocomplete="new-password"
+                maxlength="128"
+                placeholder="再次输入新密码"
+              />
+            </div>
+          </template>
 
           <p v-if="noticeMessage" class="login-form__notice" role="status">{{ noticeMessage }}</p>
           <p v-if="devCodeHint" class="login-form__hint">
@@ -709,6 +835,37 @@ function clearServerUrl(): void {
 .login-form__submit:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+/* F-13：找回密码模式——返回登录、忘记密码入口。 */
+.login-form__back {
+  align-self: flex-start;
+  margin-bottom: var(--ec-space-2);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.login-form__forgot {
+  align-self: flex-end;
+  margin-top: calc(var(--ec-space-1) * -1);
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+  .login-form__back:hover,
+  .login-form__forgot:hover {
+    text-decoration: underline;
+  }
 }
 
 .login-form__notice {
