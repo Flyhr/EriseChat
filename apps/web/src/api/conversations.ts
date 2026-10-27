@@ -1,6 +1,6 @@
 // 会话接口（对应 server/Chat.Server/Api/ConversationsEndpoints.cs；M3-08 按服务端实际契约校准）。
-// 群成员信息包含在 Conversation.members 中返回；服务端没有独立的 GET members / PATCH 标题路由，
-// 群成员变更走 POST /conversations/{id}/members 与 DELETE /conversations/{id}/members/{userId}。
+// 群成员信息包含在 Conversation.members 中返回；群成员变更走 POST /conversations/{id}/members 与
+// DELETE /conversations/{id}/members/{userId}；群资料（标题/公告）走 PATCH /conversations/{id}（仅群主，F-14）。
 import { http } from '../core/http'
 import type { Conversation } from '../types/frames'
 
@@ -19,6 +19,15 @@ export interface AddConversationMembersRequest {
 export interface MemberSettingsRequest {
   pinned?: boolean
   muted?: boolean
+}
+
+/**
+ * 群资料更新请求（F-14）：字段缺省 = 不修改；`announcement: ''` = 清空公告；
+ * title 必须为非空字符串（不传表示不改）。仅群聊群主可用。
+ */
+export interface GroupProfileUpdate {
+  title?: string
+  announcement?: string
 }
 
 export const conversationsApi = {
@@ -57,5 +66,15 @@ export const conversationsApi = {
     http.patch<Conversation>(
       `/conversations/${conversationId}/member-settings`,
       settings satisfies MemberSettingsRequest,
+    ),
+
+  /**
+   * 修改群资料（F-14）：仅群聊群主可用；字段缺省 = 不修改，`announcement: ''` = 清空公告。
+   * 返回当前用户视角的完整 Conversation；其他成员通过服务端按收件人下发的 conv.updated 刷新。
+   */
+  updateGroupProfile: (conversationId: string, body: GroupProfileUpdate) =>
+    http.patch<Conversation>(
+      `/conversations/${conversationId}`,
+      body satisfies GroupProfileUpdate,
     ),
 }

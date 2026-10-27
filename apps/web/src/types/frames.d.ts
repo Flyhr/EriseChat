@@ -141,6 +141,8 @@ export interface Conversation {
   pinned?: boolean
   /** 当前用户是否免打扰（F-10：成员级设置，按收件人填充，不广播） */
   muted?: boolean
+  /** 群公告（F-14）：≤500 字符、支持换行；null/缺省 = 无公告；单聊恒为 null */
+  announcement?: string | null
   lastMessage?: Message | null
   members: ConversationMember[]
 }
