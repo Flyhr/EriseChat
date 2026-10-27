@@ -104,6 +104,30 @@ describe('buildMessageItems', () => {
     expect(items[0].key).toBe('separator-2026-10-26')
     expect(items[1].key).toBe('m-cv-1-1')
   })
+
+  it('窗口切片传入前一条消息时，同一自然日不重复插入日期分隔', () => {
+    const previous = message(10, at(2026, 10, 26, 8))
+    const items = buildMessageItems([message(11, at(2026, 10, 26, 9))], NOW, previous)
+    expect(items.map((item) => item.kind)).toEqual(['message'])
+    expect(items[0]).toMatchObject({ kind: 'message', key: 'm-cv-1-11' })
+  })
+
+  it('窗口切片跨天时仍插入日期分隔', () => {
+    const previous = message(10, at(2026, 10, 25, 23))
+    const items = buildMessageItems([message(11, at(2026, 10, 26, 9))], NOW, previous)
+    expect(items.map((item) => item.kind)).toEqual(['separator', 'message'])
+    expect(items[0]).toMatchObject({ kind: 'separator', label: '今天' })
+    expect(items[1]).toMatchObject({ kind: 'message', key: 'm-cv-1-11' })
+  })
+
+  it('前一条消息时间非法时按无前置消息处理（窗口首条照常插分隔）', () => {
+    const items = buildMessageItems(
+      [message(11, at(2026, 10, 26, 9))],
+      NOW,
+      message(10, Number.NaN),
+    )
+    expect(items.map((item) => item.kind)).toEqual(['separator', 'message'])
+  })
 })
 
 describe('filterConversations', () => {

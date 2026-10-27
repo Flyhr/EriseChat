@@ -43,13 +43,17 @@ export function dateSeparatorLabel(timestamp: number, now: number = Date.now()):
 /**
  * 把按 seq 升序的消息组装为渲染项：跨天处插入日期分隔（相同时刻只插一次）。
  * 输入顺序即展示顺序，不重排（协议 §4.3：客户端按 seq 排序后渲染）。
+ *
+ * F-05：分片渲染时传入窗口的前一条消息（previousMessage），用它初始化日期状态，
+ * 避免同一自然日被窗口边界切成两段后，窗口首条消息前重复插入日期分隔。
  */
 export function buildMessageItems(
   messages: readonly Message[],
   now: number = Date.now(),
+  previousMessage?: Message | null,
 ): MessageListItem[] {
   const items: MessageListItem[] = []
-  let lastDateKey = ''
+  let lastDateKey = previousMessage ? dateKeyOf(previousMessage.createdAt) : ''
   for (const message of messages) {
     const key = dateKeyOf(message.createdAt)
     if (key && key !== lastDateKey) {
