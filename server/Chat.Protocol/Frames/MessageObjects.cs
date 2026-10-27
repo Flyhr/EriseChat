@@ -25,6 +25,26 @@ public sealed record SystemContent(
     string? Text = null);
 
 /// <summary>
+/// 回复引用摘要（protocol/protocol.md §4.3 Reply 对象；不落库、按需由被引用消息组装）。
+/// 文本摘要由服务端截断到 120 字符（超出追加省略号）；image/file 不返回 text、改带 fileId + name。
+/// </summary>
+/// <param name="MessageId">被引用消息 ID（= 发送时的 replyTo）。</param>
+/// <param name="Seq">被引用消息在会话内的序号。</param>
+/// <param name="SenderId">被引用消息的发送者用户 ID。</param>
+/// <param name="MsgType">被引用消息类型。</param>
+/// <param name="Text">文本摘要（text / system）；image / file 为 null。</param>
+/// <param name="FileId">image / file 消息的文件 ID。</param>
+/// <param name="Name">image / file 消息的文件名。</param>
+public sealed record MessageReply(
+    string MessageId,
+    long Seq,
+    string SenderId,
+    MessageType MsgType,
+    string? Text = null,
+    string? FileId = null,
+    string? Name = null);
+
+/// <summary>
 /// 消息 content：按 <c>msgType</c> 保留「字符串 / 对象」两态
 /// （text 为字符串；image/file 为 <see cref="FileContent"/>；system 为对象）。
 /// 序列化时原样写出原始 JSON，不做二次转换。
@@ -115,6 +135,7 @@ internal sealed class MessageContentJsonConverter : JsonConverter<MessageContent
 /// <param name="ClientMsgId">发送者客户端幂等键；服务端广播时可不带。</param>
 /// <param name="ReplyTo">被回复消息的 messageId。</param>
 /// <param name="DeletedAt">预留（v1 不做撤回，恒为空）。</param>
+/// <param name="Reply">回复引用摘要（可选，F-09）：仅当 replyTo 指向的消息存在时返回。</param>
 public sealed record Message(
     string MessageId,
     string ConversationId,
@@ -125,4 +146,5 @@ public sealed record Message(
     long CreatedAt,
     string? ClientMsgId = null,
     string? ReplyTo = null,
-    long? DeletedAt = null);
+    long? DeletedAt = null,
+    MessageReply? Reply = null);

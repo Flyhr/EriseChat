@@ -48,6 +48,7 @@ public sealed class MessageHub
                 message.CreatedAt)
             {
                 ReqId = request.ReqId,
+                Reply = message.Reply,
             };
             await sender.SendFrameAsync(ack, connectionAborted);
             _logger.LogInformation(

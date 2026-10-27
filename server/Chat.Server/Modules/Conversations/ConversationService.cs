@@ -608,8 +608,8 @@ public sealed class ConversationService
             .ToList();
     }
 
-    /// <summary>messages 实体 → 协议 Message 对象（content_json 原样解析为两态 content）。</summary>
-    public static Message ToProtocolMessage(MessageEntity message)
+    /// <summary>messages 实体 → 协议 Message 对象（content_json 原样解析为两态 content；reply 为可选的引用摘要）。</summary>
+    public static Message ToProtocolMessage(MessageEntity message, MessageReply? reply = null)
     {
         using var document = JsonDocument.Parse(message.ContentJson);
         return new Message(
@@ -622,7 +622,8 @@ public sealed class ConversationService
             message.CreatedAt,
             string.IsNullOrEmpty(message.ClientMsgId) ? null : message.ClientMsgId,
             message.ReplyTo,
-            message.DeletedAt);
+            message.DeletedAt,
+            reply);
     }
 
     /// <summary>

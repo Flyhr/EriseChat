@@ -23,12 +23,14 @@ public sealed record MessageSendFrame(
 /// <param name="ConversationId">会话 ID。</param>
 /// <param name="Seq">会话内序号，严格 +1。</param>
 /// <param name="CreatedAt">落库时间（UTC 毫秒）。</param>
+/// <param name="Reply">回复引用摘要（可选，F-09）；仅当本次为回复且被引用消息存在时返回。</param>
 public sealed record MessageAckFrame(
     string ClientMsgId,
     string MessageId,
     string ConversationId,
     long Seq,
-    long CreatedAt) : FrameEnvelope
+    long CreatedAt,
+    MessageReply? Reply = null) : FrameEnvelope
 {
     /// <inheritdoc />
     public override string Type => FrameTypes.MessageAck;

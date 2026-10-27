@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
@@ -45,6 +46,9 @@ public sealed class MessageService
     public const int HistoryMaxLimit = 200;
 
     private const int MaxIdLength = 64;
+
+    /// <summary>Reply 摘要文本上限（protocol/protocol.md §4.3：前 120 字符，超出追加省略号）。</summary>
+    public const int ReplyTextMaxLength = 120;
 
     private readonly ChatDbContext _db;
     private readonly AppOptions _appOptions;
@@ -98,24 +102,32 @@ public sealed class MessageService
     {
         var conversation = await EnsureMemberAsync(senderId, conversationId, cancellationToken);
 
+        // F-09：replyTo 必须指向同会话内已存在的消息；保留实体用于组装引用摘要（不额外查询）。
+        MessageEntity? replyEntity = null;
         if (replyTo is not null)
         {
-            var replyExists = await _db.Messages.AsNoTracking()
-                .AnyAsync(message => message.Id == replyTo && message.ConversationId == conversationId, cancellationToken);
-            if (!replyExists)
+            replyEntity = await _db.Messages.AsNoTracking()
+                .FirstOrDefaultAsync(
+                    message => message.Id == replyTo && message.ConversationId == conversationId,
+                    cancellationToken);
+            if (replyEntity is null)
             {
                 throw ApiException.ValidationFailed("replyTo 指向的消息不存在或不属于该会话");
             }
         }
 
-        // 幂等短路：同一会话内同一 clientMsgId 直接回执，不重复落库（协议 §4.3 规则 1）。
+        // 幂等短路：同一会话内同一 clientMsgId 直接回执，不重复落库（协议 §4.3 规则 1）；重发同样带回引用摘要。
         var existing = await _db.Messages.AsNoTracking()
             .FirstOrDefaultAsync(
                 message => message.ConversationId == conversationId && message.ClientMsgId == clientMsgId,
                 cancellationToken);
         if (existing is not null)
         {
-            return new MessageSendResult(ToProtocolMessage(existing), Array.Empty<string>(), Created: false);
+            var existingReply = await LoadReplyAsync(existing.ReplyTo, conversationId, cancellationToken);
+            return new MessageSendResult(
+                ToProtocolMessage(existing, ToOptionalReply(existingReply)),
+                Array.Empty<string>(),
+                Created: false);
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -147,7 +159,10 @@ public sealed class MessageService
                 .ToListAsync(cancellationToken);
 
             await transaction.CommitAsync(cancellationToken);
-            return new MessageSendResult(ToProtocolMessage(entity), memberUserIds, Created: true);
+            return new MessageSendResult(
+                ToProtocolMessage(entity, ToOptionalReply(replyEntity)),
+                memberUserIds,
+                Created: true);
         }
         catch (DbUpdateException)
         {
@@ -159,7 +174,11 @@ public sealed class MessageService
                     cancellationToken);
             if (raced is not null)
             {
-                return new MessageSendResult(ToProtocolMessage(raced), Array.Empty<string>(), Created: false);
+                var racedReply = await LoadReplyAsync(raced.ReplyTo, conversationId, cancellationToken);
+                return new MessageSendResult(
+                    ToProtocolMessage(raced, ToOptionalReply(racedReply)),
+                    Array.Empty<string>(),
+                    Created: false);
             }
 
             throw;
@@ -216,8 +235,8 @@ public sealed class MessageService
             lastSeqByConversation[cursor.ConversationId] = cursor.LastSeq;
         }
 
-        var batches = new List<SyncBatch>();
         var hasMore = false;
+        var pages = new List<(string ConversationId, List<MessageEntity> Rows)>();
         foreach (var (conversationId, lastSeq) in lastSeqByConversation)
         {
             var rows = await _db.Messages.AsNoTracking()
@@ -234,10 +253,17 @@ public sealed class MessageService
 
             if (rows.Count > 0)
             {
-                batches.Add(new SyncBatch(conversationId, rows.Select(ToProtocolMessage).ToList()));
+                pages.Add((conversationId, rows));
             }
         }
 
+        // F-09：本批所有会话的 replyTo 合并为一次批量查询，禁止逐条 N+1。
+        var replies = await LoadRepliesAsync(pages.SelectMany(page => page.Rows), cancellationToken);
+        var batches = pages
+            .Select(page => new SyncBatch(
+                page.ConversationId,
+                page.Rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList()))
+            .ToList();
         return new SyncPullResult(batches, hasMore);
     }
 
@@ -283,7 +309,11 @@ public sealed class MessageService
         }
 
         rows.Reverse();
-        return new MessageHistoryPage(rows.Select(ToProtocolMessage).ToList(), hasMore);
+        // F-09：历史分页同样先批量加载 replyTo，再逐条组装引用摘要（一次查询，避免 N+1）。
+        var replies = await LoadRepliesAsync(rows, cancellationToken);
+        return new MessageHistoryPage(
+            rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
+            hasMore);
     }
 
     /// <summary>规范化后的发送内容：image/file 的 content 与 messages.file_id 以 files 记录为准（M3-03）。</summary>
@@ -425,4 +455,129 @@ public sealed class MessageService
 
     private static ProtocolMessage ToProtocolMessage(MessageEntity message) =>
         ConversationService.ToProtocolMessage(message);
+
+    private static ProtocolMessage ToProtocolMessage(MessageEntity message, MessageReply? reply) =>
+        ConversationService.ToProtocolMessage(message, reply);
+
+    private static MessageReply? ToOptionalReply(MessageEntity? reply) =>
+        reply is null ? null : ToReply(reply);
+
+    /// <summary>按 replyTo 加载被引用消息（同会话、AsNoTracking）；不存在返回 null。</summary>
+    private async Task<MessageEntity?> LoadReplyAsync(
+        string? replyTo,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (replyTo is null)
+        {
+            return null;
+        }
+
+        return await _db.Messages.AsNoTracking()
+            .FirstOrDefaultAsync(
+                message => message.Id == replyTo && message.ConversationId == conversationId,
+                cancellationToken);
+    }
+
+    /// <summary>批量加载一页/一批消息引用的被引用消息（一次 IN 查询），返回 id → 实体字典。</summary>
+    private async Task<Dictionary<string, MessageEntity>> LoadRepliesAsync(
+        IEnumerable<MessageEntity> rows,
+        CancellationToken cancellationToken)
+    {
+        var ids = rows
+            .Select(row => row.ReplyTo)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return new Dictionary<string, MessageEntity>(StringComparer.Ordinal);
+        }
+
+        var replies = await _db.Messages.AsNoTracking()
+            .Where(message => ids.Contains(message.Id))
+            .ToListAsync(cancellationToken);
+        return replies.ToDictionary(message => message.Id, StringComparer.Ordinal);
+    }
+
+    private static MessageReply? ReplyOf(MessageEntity row, IReadOnlyDictionary<string, MessageEntity> replies) =>
+        row.ReplyTo is not null && replies.TryGetValue(row.ReplyTo, out var reply) ? ToReply(reply) : null;
+
+    /// <summary>
+    /// 被引用消息实体 → Reply 摘要（protocol §4.3）：text 前 120 字符（超出追加省略号）、
+    /// system 取系统文案、image/file 带 fileId + name 且不返回 text。
+    /// </summary>
+    private static MessageReply ToReply(MessageEntity message)
+    {
+        using var document = JsonDocument.Parse(message.ContentJson);
+        var root = document.RootElement;
+        string? text = null;
+        string? fileId = null;
+        string? name = null;
+        switch (message.MsgType)
+        {
+            case MessageType.Text:
+                text = root.ValueKind == JsonValueKind.String ? root.GetString() : null;
+                break;
+            case MessageType.System:
+                text = root.ValueKind == JsonValueKind.Object &&
+                       root.TryGetProperty("text", out var textElement) &&
+                       textElement.ValueKind == JsonValueKind.String
+                    ? textElement.GetString()
+                    : null;
+                break;
+            case MessageType.Image:
+            case MessageType.File:
+                fileId = message.FileId;
+                if (root.ValueKind == JsonValueKind.Object)
+                {
+                    if (fileId is null &&
+                        root.TryGetProperty("fileId", out var fileIdElement) &&
+                        fileIdElement.ValueKind == JsonValueKind.String)
+                    {
+                        fileId = fileIdElement.GetString();
+                    }
+
+                    if (root.TryGetProperty("name", out var nameElement) &&
+                        nameElement.ValueKind == JsonValueKind.String)
+                    {
+                        name = nameElement.GetString();
+                    }
+                }
+
+                break;
+        }
+
+        return new MessageReply(
+            message.Id,
+            message.Seq,
+            message.SenderId,
+            message.MsgType,
+            TruncateReplyText(text),
+            fileId,
+            name);
+    }
+
+    /// <summary>按 Unicode 码点截断到 120 字符（不拆代理对），超出追加省略号。</summary>
+    private static string? TruncateReplyText(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= ReplyTextMaxLength)
+        {
+            return text;
+        }
+
+        var index = 0;
+        var count = 0;
+        while (index < text.Length && count < ReplyTextMaxLength)
+        {
+            var isSurrogatePair = index + 1 < text.Length &&
+                                  char.IsHighSurrogate(text[index]) &&
+                                  char.IsLowSurrogate(text[index + 1]);
+            index += isSurrogatePair ? 2 : 1;
+            count++;
+        }
+
+        return string.Concat(text.AsSpan(0, index), "…");
+    }
 }
