@@ -284,6 +284,8 @@ batch 对象：
 | `createdAt` | integer | 是 | 创建时间（UTC 毫秒） |
 | `lastSeq` | integer | 是 | 会话最新序号 |
 | `lastReadSeq` | integer | 是 | 当前用户在该会话的已读游标 |
+| `pinned` | bool | 否 | 当前用户是否置顶该会话（成员级设置，默认 `false`；旧客户端忽略） |
+| `muted` | bool | 否 | 当前用户是否对该会话免打扰（成员级设置，默认 `false`；旧客户端忽略） |
 | `lastMessage` | object / null | 否 | 最新消息快照（Message，可为 `null`） |
 | `members` | array | 是 | 成员数组，见下表 |
 
@@ -299,6 +301,8 @@ batch 对象：
 | `avatarFileId` | string | 否 | 头像文件 ID |
 
 > 未读数由客户端按 `未读 = lastSeq − lastReadSeq` 计算，协议不单独下发 `unread`（`AGENTS.md` §5.6）。
+
+> `pinned` / `muted` 是**当前登录用户自己的成员级设置**（`conversation_members` 行上的列）：服务端在 `conv.list`、`conv.updated`、`GET /api/conversations` 中按各自收件人填充，不广播给其他成员；改动入口为 `PATCH /api/conversations/{conversationId}/member-settings`。会话排序规则属客户端展示层：`conv.list` 仍按最近消息时间倒序，客户端可将置顶会话排在前面（置顶组内保持时间倒序）。
 
 ### 4.6 `read.update` / `read.updated`（已读）
 
@@ -600,3 +604,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M3-05 校准） | 2026-10-25 | 明确已读语义（新成员 last_read_seq=加入前 lastSeq；只增不减、越界校验）、typing 服务端 1 秒/连接/会话节流、presence 仅在 0↔1 连接时推送、移出/退出只收 removedConversationIds；帧格式与 protocolVersion 不变 |
 | v1（F-17 好友关系） | 2026-10-27 | 新增 `friend.changed` 推送帧（共 18 个 type，§4.9）及 Friend/FriendRequest 对象、7 种 `kind`；presence 推送范围扩展为「有共同会话或好友关系」；新增好友/申请相关 REST（计划 §7）；`protocolVersion` 仍为 1 |
 | v1（F-09 回复引用） | 2026-10-27 | 新增可选 Reply 引用摘要（`Message.reply` 与 `message.ack.reply`）：不落库、按需组装，文本摘要 120 字符截断、image/file 带 fileId+name、被引用消息缺失时不返回；明确 `message.send.replyTo` 必须为同会话已存在 messageId，否则 `VALIDATION_FAILED`；帧 type 与 `protocolVersion` 仍为 1 |
+| v1（F-10 置顶与免打扰） | 2026-10-27 | Conversation 新增可选字段 `pinned` / `muted`（当前用户成员级设置，默认 false，按收件人填充、不广播）；新增 REST `PATCH /api/conversations/{conversationId}/member-settings`（body `{pinned?, muted?}`，至少一项）；`conversation_members` 新增 `pinned` / `muted` 两列（`protocol/schema.sql` 同步）；置顶排序属客户端展示层，`conv.list` 顺序不变；帧 type 与 `protocolVersion` 仍为 1 |
