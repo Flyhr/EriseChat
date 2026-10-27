@@ -40,6 +40,7 @@ const emit = defineEmits<{
   loadMore: []
   retry: [clientMsgId: string]
   'near-bottom-change': [atBottom: boolean]
+  'preview-image': [messageId: string]
 }>()
 
 const container = ref<HTMLDivElement | null>(null)
@@ -396,6 +397,7 @@ onMounted(() => {
           :sender-name="senderNameOf(item.message)"
           :receipt="receiptOf(item.message)"
           @image-loaded="onImageLoaded"
+          @preview-image="emit('preview-image', $event)"
         />
       </template>
 
@@ -407,6 +409,7 @@ onMounted(() => {
         :status="item.status"
         @retry="emit('retry', item.clientMsgId)"
         @image-loaded="onImageLoaded"
+        @preview-image="emit('preview-image', $event)"
       />
     </div>
 

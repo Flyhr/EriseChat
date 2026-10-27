@@ -7,15 +7,18 @@ import ConversationList from '../components/ConversationList.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
+import ImagePreview from '../components/ImagePreview.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import type { ConversationFilter } from '../core/chatLayout'
+import { getOrLoadBlobUrl } from '../core/blobCache'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
+import { imageItemsOf } from '../core/imageGallery'
 import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
@@ -155,6 +158,98 @@ const activeLoadingHistory = computed(() =>
 )
 const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
 
+// 图片预览（F-08）：会话内图片列表 = 已加载消息 + 乐观待发图片；blob URL 复用 core/blobCache
+// （按 fileId 去重、上限 100、退出登录时整体回收），避免与缩略图/下载重复请求，也不把 URL 写进 store。
+interface PreviewSource {
+  messageId: string
+  name: string
+  fileId: string
+}
+
+const previewOpen = ref(false)
+const previewIndex = ref(0)
+const previewLoading = ref(false)
+const previewUrls = ref<Record<string, string>>({})
+let previewRequestSeq = 0
+
+const previewSources = computed<PreviewSource[]>(() => {
+  if (!activeId.value) return []
+  const fileIds = new Map<string, string>()
+  for (const message of activeMessages.value) {
+    const content = message.content
+    if (message.msgType !== 'image' || typeof content !== 'object' || content === null) continue
+    const fileId = 'fileId' in content ? content.fileId : null
+    if (typeof fileId === 'string' && fileId) fileIds.set(message.messageId, fileId)
+  }
+  const sources: PreviewSource[] = imageItemsOf(activeMessages.value)
+    .map((item) => ({ messageId: item.messageId, name: item.name, fileId: fileIds.get(item.messageId) ?? '' }))
+    .filter((item) => Boolean(item.fileId))
+  for (const pending of activePending.value) {
+    const content = pending.content
+    if (pending.msgType !== 'image' || typeof content !== 'object' || content === null) continue
+    const fileId = 'fileId' in content ? content.fileId : null
+    if (typeof fileId !== 'string' || !fileId) continue
+    const name = 'name' in content && typeof content.name === 'string' && content.name ? content.name : '图片'
+    sources.push({ messageId: pending.clientMsgId, name, fileId })
+  }
+  return sources
+})
+
+const previewItems = computed(() =>
+  previewSources.value.map((source) => ({
+    messageId: source.messageId,
+    name: source.name,
+    url: previewUrls.value[source.messageId] ?? null,
+  })),
+)
+
+function onPreviewImage(messageId: string): void {
+  const index = previewSources.value.findIndex((source) => source.messageId === messageId)
+  if (index < 0) return
+  previewIndex.value = index
+  previewOpen.value = true
+  prefetchPreviewAround(index)
+}
+
+function onPreviewIndex(nextIndex: number): void {
+  if (nextIndex < 0 || nextIndex >= previewSources.value.length) return
+  previewIndex.value = nextIndex
+  prefetchPreviewAround(nextIndex)
+}
+
+/** 仅预取当前与左右各一张，控制并发与内存。 */
+function prefetchPreviewAround(index: number): void {
+  void ensurePreviewUrl(index)
+  void ensurePreviewUrl(index - 1)
+  void ensurePreviewUrl(index + 1)
+}
+
+async function ensurePreviewUrl(index: number): Promise<void> {
+  const source = previewSources.value[index]
+  if (!source || previewUrls.value[source.messageId]) return
+  const sequence = ++previewRequestSeq
+  previewLoading.value = true
+  try {
+    const url = await getOrLoadBlobUrl(source.fileId, () => filesApi.downloadBlob(source.fileId))
+    previewUrls.value = { ...previewUrls.value, [source.messageId]: url }
+  } catch {
+    // 加载失败保持空 url，预览面板显示「图片加载失败」。
+  } finally {
+    if (sequence === previewRequestSeq) previewLoading.value = false
+  }
+}
+
+function closePreview(): void {
+  previewOpen.value = false
+  previewLoading.value = false
+  previewRequestSeq += 1
+}
+
+watch(activeId, () => {
+  closePreview()
+  previewUrls.value = {}
+})
+
 // 已读回执（M3-09）：只有停留在底部（已看到最新消息）才推进已读；
 // 单聊展示对端已读状态，群聊 v1 无已读详情（协议 §4.6）。
 /** 消息列表是否停留在底部（由 MessageList 的 near-bottom-change 驱动）。 */
@@ -273,6 +368,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
   document.removeEventListener('keydown', onEmojiEscape)
   panelGuard.dispose()
+  closePreview()
 })
 
 function selectConversation(conversationId: string): void {
@@ -576,6 +672,7 @@ function onWindowDrop(event: DragEvent): void {
               @load-more="loadMoreMessages"
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
+              @preview-image="onPreviewImage"
             />
             <div class="chat-page__composer">
               <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
@@ -651,6 +748,14 @@ function onWindowDrop(event: DragEvent): void {
         </div>
       </div>
     </section>
+    <ImagePreview
+      :open="previewOpen"
+      :items="previewItems"
+      :index="previewIndex"
+      :loading="previewLoading"
+      @close="closePreview"
+      @update:index="onPreviewIndex"
+    />
   </main>
 </template>
 

@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
 import { splitLinks } from '../core/links'
 import Avatar from './Avatar.vue'
-import ImagePreview from './ImagePreview.vue'
 import MessageAttachment from './MessageAttachment.vue'
 
 // 消息气泡（纯展示，UI-02 批次2 按 D-05 调整）：自己蓝底白字、对方白底描边；时间与状态移到气泡下方；
@@ -29,6 +28,8 @@ const emit = defineEmits<{
   retry: []
   /** 图片加载完成（父级在用户停留底部时重新滚到底）。 */
   imageLoaded: []
+  /** F-08：请求打开图片预览（由会话页统一管理多图切换与 blob 加载）。 */
+  'preview-image': [messageId: string]
 }>()
 
 const contentText = computed(() => {
@@ -55,30 +56,14 @@ const showAttachment = computed(() => {
   return typeof content === 'object' && content !== null && 'fileId' in content
 })
 
-const previewOpen = ref(false)
-const previewUrl = ref('')
-const previewName = ref('')
-
 /** pending 消息没有 messageId，用 clientMsgId 兜底，作为预览条目的稳定键。 */
 function messageKeyOf(message: Message | PendingMessage): string {
   return 'messageId' in message ? message.messageId : message.clientMsgId
 }
 
-/** F-08 批次2 过渡：先以单图列表适配新的多图预览 API，批次3 再把预览状态提升到会话页。 */
-const previewItems = computed(() =>
-  previewUrl.value
-    ? [{ messageId: messageKeyOf(props.message), name: previewName.value, url: previewUrl.value }]
-    : [],
-)
-
-function onPreview(payload: { url: string; name: string }): void {
-  previewUrl.value = payload.url
-  previewName.value = payload.name
-  previewOpen.value = true
-}
-
-function closePreview(): void {
-  previewOpen.value = false
+/** F-08 批次3：预览状态提升到 Chat.vue，气泡只上报「需要预览哪条消息」；blob URL 由会话页加载/缓存。 */
+function onPreview(): void {
+  emit('preview-image', messageKeyOf(props.message))
 }
 
 const timeText = computed(() =>
@@ -152,12 +137,6 @@ const timeText = computed(() =>
         </button>
       </div>
     </div>
-    <ImagePreview
-      :open="previewOpen"
-      :items="previewItems"
-      :index="0"
-      @close="closePreview"
-    />
   </div>
 </template>
 
