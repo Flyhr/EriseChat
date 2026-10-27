@@ -1,6 +1,6 @@
 namespace Chat.Server.Data.Entities;
 
-/// <summary>验证码用途（对应 email_codes.purpose 的 register / login）。</summary>
+/// <summary>验证码用途（对应 email_codes.purpose 的 register / login / reset）。</summary>
 public enum EmailCodePurpose
 {
     /// <summary>注册。</summary>
@@ -8,6 +8,9 @@ public enum EmailCodePurpose
 
     /// <summary>登录。</summary>
     Login,
+
+    /// <summary>找回密码（F-13）。</summary>
+    Reset,
 }
 
 /// <summary>email_codes：邮箱验证码（只存哈希，不存明文）。</summary>
@@ -19,7 +22,7 @@ public sealed class EmailCode
     /// <summary>接收邮箱。</summary>
     public string Email { get; set; } = string.Empty;
 
-    /// <summary>用途：register / login。</summary>
+    /// <summary>用途：register / login / reset。</summary>
     public EmailCodePurpose Purpose { get; set; }
 
     /// <summary>验证码哈希（不存明文）。</summary>

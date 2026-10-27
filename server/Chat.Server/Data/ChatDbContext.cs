@@ -95,7 +95,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         modelBuilder.Entity<EmailCode>(entity =>
         {
             entity.ToTable("email_codes", table =>
-                table.HasCheckConstraint("ck_email_codes_purpose", "purpose IN ('register', 'login')"));
+                table.HasCheckConstraint("ck_email_codes_purpose", "purpose IN ('register', 'login', 'reset')"));
 
             entity.HasKey(code => code.Id);
             entity.Property(code => code.Id).HasColumnName("id");

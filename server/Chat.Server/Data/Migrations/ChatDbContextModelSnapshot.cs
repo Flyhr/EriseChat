@@ -223,7 +223,7 @@ namespace Chat.Server.Data.Migrations
 
                     b.ToTable("email_codes", null, t =>
                         {
-                            t.HasCheckConstraint("ck_email_codes_purpose", "purpose IN ('register', 'login')");
+                            t.HasCheckConstraint("ck_email_codes_purpose", "purpose IN ('register', 'login', 'reset')");
                         });
                 });
 

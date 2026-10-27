@@ -43,13 +43,13 @@ CREATE TABLE users (
 
 -- ------------------------------------------------------------
 -- email_codes：邮箱验证码（只存哈希，不存明文）
--- purpose : register / login
+-- purpose : register / login / reset（F-13 找回密码）
 -- ip      : 请求来源 IP（可为空，便于限流排查）
 -- ------------------------------------------------------------
 CREATE TABLE email_codes (
     id         TEXT PRIMARY KEY NOT NULL,
     email      TEXT NOT NULL,
-    purpose    TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
+    purpose    TEXT NOT NULL CHECK (purpose IN ('register', 'login', 'reset')),
     code_hash  TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
     attempts   INTEGER NOT NULL DEFAULT 0,
