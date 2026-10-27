@@ -23,6 +23,11 @@ export type AppIconName =
   | 'back'
   | 'mute'
   | 'pin'
+  // 设置中心分类图标：通知 / 外观 / 连接 / 账号安全。
+  | 'bell'
+  | 'palette'
+  | 'link'
+  | 'shield'
 
 export interface AppIconShape {
   paths?: string[]
@@ -81,4 +86,32 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
     paths: ['M4 9.5h4l5-4v13l-5-4H4v-5Z', 'M16.5 9.5l5 5', 'M21.5 9.5l-5 5'],
   },
   pin: { paths: ['M9 4h6l-1 6 3.5 3.5H6.5L10 10 9 4Z', 'M12 13.5V20'] },
+  bell: {
+    paths: [
+      'M6.5 9.5a5.5 5.5 0 0 1 11 0c0 3 .7 4.5 1.8 5.7H4.7C5.8 14 6.5 12.5 6.5 9.5Z',
+      'M10 18.5a2.2 2.2 0 0 0 4 0',
+    ],
+  },
+  palette: {
+    paths: [
+      'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 9 9c0 2.4-2 3.6-3.9 3.6h-1.9a2.1 2.1 0 0 0-1.5 3.6c.6.6.2 1.8-.8 1.8Z',
+    ],
+    circles: [
+      { cx: 8.5, cy: 10, r: 1.1 },
+      { cx: 12, cy: 7.6, r: 1.1 },
+      { cx: 15.5, cy: 9.8, r: 1.1 },
+    ],
+  },
+  link: {
+    paths: [
+      'M10.2 13.8a4 4 0 0 0 5.6 0l2.2-2.2a4 4 0 1 0-5.6-5.6l-1.3 1.3',
+      'M13.8 10.2a4 4 0 0 0-5.6 0l-2.2 2.2a4 4 0 1 0 5.6 5.6l1.3-1.3',
+    ],
+  },
+  shield: {
+    paths: [
+      'M12 3.5 5 6.2v5c0 4.1 2.9 7.5 7 8.8 4.1-1.3 7-4.7 7-8.8v-5L12 3.5Z',
+      'M9.2 12l2.1 2.1 3.7-3.9',
+    ],
+  },
 }
