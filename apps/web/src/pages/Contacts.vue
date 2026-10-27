@@ -612,7 +612,8 @@ onBeforeUnmount(() => {
 <style scoped>
 .contacts-page {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
+  /* 二级列表宽度与「消息/群聊」页共用同一 token，三处宽度保持一致。 */
+  grid-template-columns: var(--ec-list-width) minmax(0, 1fr);
   min-height: 0;
   height: 100%;
   background: var(--ec-bg-canvas);
@@ -949,6 +950,13 @@ onBeforeUnmount(() => {
     background: var(--ec-brand-050);
   }
 
+}
+
+/* 801~1199：与聊天页一致，列表收窄到 260px。 */
+@media (max-width: 1199px) {
+  .contacts-page {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
 }
 
 /* ≤800：单列；选中资料后隐藏列表，顶部提供返回条。 */
