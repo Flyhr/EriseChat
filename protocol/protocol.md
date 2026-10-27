@@ -132,7 +132,7 @@
 | `conversationId` | string | 是 | 目标会话 ID |
 | `msgType` | string | 是 | `text` / `image` / `file`；`system` 仅服务端生成，客户端发送会被拒绝 |
 | `content` | string / object | 是 | `text` 为字符串；`image` / `file` 为 FileContent（见 §7）；大小受服务端配置限制（当前 v1 实现：纯文本 ≤ 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）） |
-| `replyTo` | string | 否 | 被回复消息的 `messageId` |
+| `replyTo` | string | 否 | 被回复消息的 `messageId`；必须为**同一会话内已存在**的消息，否则回 `error`（`VALIDATION_FAILED`），不落库 |
 
 `message.ack`（S→C，仅发送者连接收到）：
 
@@ -145,6 +145,7 @@
 | `conversationId` | string | 是 | 会话 ID |
 | `seq` | integer | 是 | 会话内序号，严格 `+1` |
 | `createdAt` | integer | 是 | 落库时间（UTC 毫秒） |
+| `reply` | object | 否 | 回复引用摘要（见下「Reply 对象」）；仅当本次为回复且被引用消息存在时返回 |
 
 规则：
 
@@ -173,8 +174,28 @@
 | `msgType` | string | 是 | `text` / `image` / `file` / `system` |
 | `content` | string / object | 是 | 按 `msgType` 解释，见下 |
 | `replyTo` | string | 否 | 被回复消息的 `messageId` |
+| `reply` | object | 否 | 回复引用摘要（见下「Reply 对象」）；不落库、按需组装，仅当 `replyTo` 指向的消息存在时返回；旧客户端忽略即可 |
 | `createdAt` | integer | 是 | 创建时间（UTC 毫秒） |
 | `deletedAt` | integer | 否 | 预留（v1 不做撤回，恒为空） |
+
+**Reply 对象（回复引用摘要，`Message.reply` / `message.ack.reply`，均可选）**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `messageId` | string | 是 | 被引用消息 ID（= 发送时的 `replyTo`） |
+| `seq` | integer | 是 | 被引用消息在会话内的序号 |
+| `senderId` | string | 是 | 被引用消息的发送者用户 ID |
+| `msgType` | string | 是 | 被引用消息类型：`text` / `image` / `file` / `system` |
+| `text` | string | 否 | 文本摘要：`text` 取原文前 120 字符（超出截断并追加 `…`）；`system` 取系统文案；`image` / `file` 不返回 |
+| `fileId` | string | 否 | `image` / `file` 消息的文件 ID（§7 FileContent.fileId） |
+| `name` | string | 否 | `image` / `file` 消息的文件名 |
+
+规则：
+
+1. `reply` **不落库**，服务端由 `messages.reply_to`（存被引用消息的 `messageId`）按需组装；`replyTo` 指向的消息已不存在（如物理删除导致外键置 NULL）时省略 `reply`。
+2. 摘要截断在服务端完成（120 字符，按 Unicode 码点计，超出追加 `…`）；客户端展示时可再按自身宽度截断，但不得改写语义。
+3. `message.send.replyTo` 必须为同一会话内**已存在**的 `messageId`；不存在或属于其它会话 → 回 `error`（`VALIDATION_FAILED`，文案「replyTo 指向的消息不存在或不属于该会话」），不落库。
+4. `ack` 与 `message.new`、历史分页、`sync.response` 中的 Message 都携带同一套 `reply` 摘要；旧客户端忽略新增可选字段即可，帧 `type` 与 `protocolVersion` 不变（向后兼容增量）。
 
 `content` 按 `msgType` 的格式：
 
@@ -578,3 +599,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（M3-04 校准） | 2026-10-25 | 新增 conv.updated.removedConversationIds；系统消息事件名 group.created/member.joined/member.left/member.removed；群聊 REST 行为与推送时序；帧格式与 protocolVersion 不变 |
 | v1（M3-05 校准） | 2026-10-25 | 明确已读语义（新成员 last_read_seq=加入前 lastSeq；只增不减、越界校验）、typing 服务端 1 秒/连接/会话节流、presence 仅在 0↔1 连接时推送、移出/退出只收 removedConversationIds；帧格式与 protocolVersion 不变 |
 | v1（F-17 好友关系） | 2026-10-27 | 新增 `friend.changed` 推送帧（共 18 个 type，§4.9）及 Friend/FriendRequest 对象、7 种 `kind`；presence 推送范围扩展为「有共同会话或好友关系」；新增好友/申请相关 REST（计划 §7）；`protocolVersion` 仍为 1 |
+| v1（F-09 回复引用） | 2026-10-27 | 新增可选 Reply 引用摘要（`Message.reply` 与 `message.ack.reply`）：不落库、按需组装，文本摘要 120 字符截断、image/file 带 fileId+name、被引用消息缺失时不返回；明确 `message.send.replyTo` 必须为同会话已存在 messageId，否则 `VALIDATION_FAILED`；帧 type 与 `protocolVersion` 仍为 1 |
