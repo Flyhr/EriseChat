@@ -149,11 +149,7 @@ function openContacts(): void {
 
 const search = useSearchStore()
 
-/** F-11：搜索入口——左导航/移动端列表为全局搜索，聊天顶栏为当前会话内搜索。 */
-function openGlobalSearch(): void {
-  search.openGlobal()
-}
-
+/** F-11：聊天顶栏搜索为当前会话内搜索（列表搜索框已在列表内联展示结果）。 */
 function openConversationSearch(): void {
   if (activeId.value) search.openInConversation(activeId.value)
 }
@@ -763,7 +759,6 @@ function onWindowDrop(event: DragEvent): void {
       @select="selectConversation"
       @update:filter="changeListFilter"
       @create="openContacts"
-      @search="openGlobalSearch"
     />
 
     <section

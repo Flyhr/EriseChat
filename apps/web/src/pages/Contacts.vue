@@ -21,7 +21,6 @@ import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
 import { usePresenceStore } from '../stores/presence'
-import { useSearchStore } from '../stores/search'
 
 type ContactsTab = 'friends' | 'requests' | 'search'
 
@@ -40,7 +39,6 @@ const router = useRouter()
 const conversations = useConversationsStore()
 const presence = usePresenceStore()
 const friends = useFriendsStore()
-const globalSearch = useSearchStore()
 
 const tab = ref<ContactsTab>('friends')
 
@@ -130,6 +128,15 @@ function switchTab(next: ContactsTab): void {
 // 搜索
 // ---------------------------------------------------------------------------
 
+/** 头部搜索框获得焦点时切到「搜索」页签（输入直接触发防抖搜索）。 */
+function onHeaderSearchFocus(): void {
+  if (tab.value !== 'search') switchTab('search')
+}
+
+function clearKeyword(): void {
+  keyword.value = ''
+}
+
 async function search(immediate = false): Promise<void> {
   if (searchTimer) {
     clearTimeout(searchTimer)
@@ -168,6 +175,8 @@ async function search(immediate = false): Promise<void> {
 }
 
 watch(keyword, () => {
+  // 头部搜索框输入即切到「搜索」页签（不依赖 focus 事件，避免键盘/程序化输入时漏切）。
+  if (keyword.value.trim() && tab.value !== 'search') switchTab('search')
   if (tab.value === 'search') void search()
 })
 
@@ -322,16 +331,19 @@ onBeforeUnmount(() => {
   <main class="contacts-page" :class="{ 'contacts-page--profile': selectedUser }">
     <aside class="contacts-page__list">
       <header class="contacts-page__header">
-        <button
-          type="button"
-          class="contacts-page__searchbox"
-          title="搜索消息"
-          aria-label="搜索消息"
-          @click="globalSearch.openGlobal()"
-        >
-          <AppIcon name="search" :size="16" />
-          <span class="contacts-page__searchbox-label">搜索消息</span>
-        </button>
+        <div class="contacts-page__searchbox">
+          <AppIcon name="search" :size="16" class="contacts-page__searchbox-icon" />
+          <input
+            v-model="keyword"
+            type="search"
+            maxlength="64"
+            class="contacts-page__searchbox-input"
+            placeholder="搜索联系人"
+            aria-label="搜索联系人"
+            @focus="onHeaderSearchFocus"
+            @keydown.esc="clearKeyword"
+          />
+        </div>
         <button
           type="button"
           class="contacts-page__new-group"
@@ -471,16 +483,7 @@ onBeforeUnmount(() => {
 
       <!-- 搜索 -->
       <div v-else class="contacts-page__section">
-        <form class="contacts-page__search" @submit.prevent="search(true)">
-          <input
-            v-model="keyword"
-            type="search"
-            maxlength="64"
-            placeholder="输入邮箱或昵称搜索同事"
-            aria-label="搜索用户"
-          />
-          <button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button>
-        </form>
+        <p v-if="!keyword.trim()" class="contacts-page__hint">输入邮箱或昵称搜索同事。</p>
         <p v-if="searchError" class="contacts-page__error" role="alert">{{ searchError }}</p>
         <p v-if="searching" class="contacts-page__hint">搜索中…</p>
         <ul v-else-if="results.length" class="contacts-page__results">
@@ -651,19 +654,9 @@ onBeforeUnmount(() => {
   border-radius: var(--ec-radius-full);
   background: var(--ec-nav-bg);
   color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  text-align: left;
-  cursor: pointer;
   transition:
     background var(--ec-transition-fast) var(--ec-ease),
-    border-color var(--ec-transition-fast) var(--ec-ease),
-    color var(--ec-transition-fast) var(--ec-ease);
-}
-
-.contacts-page__searchbox-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+    border-color var(--ec-transition-fast) var(--ec-ease);
 }
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
@@ -671,13 +664,39 @@ onBeforeUnmount(() => {
 .contacts-page__searchbox:hover {
   border-color: var(--ec-border);
   background: var(--ec-surface-hover);
-  color: var(--ec-text-primary);
 }
 }
 
-.contacts-page__searchbox:focus-visible {
+.contacts-page__searchbox:focus-within {
+  border-color: var(--ec-border);
+  background: var(--ec-surface);
+}
+
+.contacts-page__searchbox-icon {
+  flex: none;
+  color: var(--ec-text-tertiary);
+}
+
+.contacts-page__searchbox-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ec-text-primary);
+  font-family: inherit;
+  font-size: var(--ec-font-size-secondary);
+}
+
+.contacts-page__searchbox-input::placeholder {
+  color: var(--ec-text-tertiary);
+}
+
+.contacts-page__searchbox-input:focus-visible {
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
+  border-radius: var(--ec-radius-sm);
 }
 
 .contacts-page__new-group {
@@ -750,43 +769,6 @@ onBeforeUnmount(() => {
   color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-small);
   font-weight: var(--ec-font-weight-medium);
-}
-
-.contacts-page__search {
-  display: flex;
-  gap: var(--ec-space-2);
-}
-
-.contacts-page__search input {
-  flex: 1;
-  min-width: 0;
-  padding: var(--ec-space-2) var(--ec-space-3);
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-input);
-  background: var(--ec-surface);
-  color: var(--ec-text-primary);
-  font-size: var(--ec-font-size-body);
-}
-
-.contacts-page__search input:focus-visible {
-  border-color: var(--ec-brand-500);
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
-}
-
-.contacts-page__search button {
-  padding: 0 var(--ec-space-4);
-  border: none;
-  border-radius: var(--ec-radius-input);
-  background: var(--ec-brand-600);
-  color: var(--ec-text-inverse);
-  font-size: var(--ec-font-size-secondary);
-  cursor: pointer;
-}
-
-.contacts-page__search button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .contacts-page__error {
@@ -1023,9 +1005,6 @@ onBeforeUnmount(() => {
     background: var(--ec-brand-050);
   }
 
-  .contacts-page__search button:hover:not(:disabled) {
-    background: var(--ec-brand-700);
-  }
 }
 
 /* ≤800：单列；选中资料后隐藏列表，顶部提供返回条。 */
@@ -1077,12 +1056,6 @@ onBeforeUnmount(() => {
 
   .contacts-page__section {
     padding: var(--ec-space-2) var(--ec-space-3) var(--ec-space-4);
-  }
-
-  .contacts-page__search input,
-  .contacts-page__search button {
-    min-height: var(--ec-touch-target);
-    border-radius: var(--ec-radius-mobile-input);
   }
 
   .contacts-page__result,

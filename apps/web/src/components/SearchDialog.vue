@@ -2,10 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { conversationLabel } from '../core/groupChat'
-import { highlightSegments, snippetOf } from '../core/searchHighlight'
+import SearchResultItem from './SearchResultItem.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
-import { useFriendsStore } from '../stores/friends'
 import { useSearchStore } from '../stores/search'
 import type { Message } from '../types/frames'
 
@@ -16,7 +15,6 @@ import type { Message } from '../types/frames'
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
-const friends = useFriendsStore()
 const search = useSearchStore()
 
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -48,39 +46,6 @@ function conversationName(conversationId: string): string {
   if (conversation.type === 'group') return conversationLabel(conversation)
   const other = conversation.members.find((member) => member.userId !== auth.user?.userId)
   return other?.displayName || conversation.title || conversationId.slice(0, 8)
-}
-
-/** 发送人：优先会话成员昵称，其次好友列表，最后兜底文案。 */
-function senderNameOf(message: Message): string {
-  const conversation = conversations.getById(message.conversationId)
-  const member = conversation?.members.find((item) => item.userId === message.senderId)
-  if (member?.displayName) return member.displayName
-  return friends.displayNameOf(message.senderId) || '未知用户'
-}
-
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return ''
-  const now = new Date()
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  if (timestamp >= startOfToday) return `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  if (timestamp >= startOfToday - 24 * 60 * 60 * 1000) return '昨天'
-  if (date.getFullYear() === now.getFullYear()) {
-    return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-  }
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
-/** 摘要：以命中为中心截取，再按关键词切高亮片段。 */
-function resultSnippet(message: Message): string {
-  const content = message.content
-  return typeof content === 'string' ? content : ''
-}
-
-function segmentsOf(message: Message) {
-  const snippet = snippetOf(resultSnippet(message), search.searchedQuery)
-  return highlightSegments(snippet, search.searchedQuery)
 }
 
 function close(): void {
@@ -217,27 +182,13 @@ onBeforeUnmount(() => {
 
           <ul v-else-if="search.results.length > 0" class="ec-search__results" role="listbox" :aria-label="'搜索结果'">
             <li v-for="(message, index) in search.results" :key="`${message.conversationId}-${message.messageId}`">
-              <button
-                type="button"
-                class="ec-search__result"
-                :class="{ 'ec-search__result--active': index === activeIndex }"
-                role="option"
-                :aria-selected="index === activeIndex"
-                @click="selectResult(message)"
+              <SearchResultItem
+                :message="message"
+                :query="search.searchedQuery"
+                :active="index === activeIndex"
+                @select="selectResult"
                 @mouseenter="activeIndex = index"
-              >
-                <span class="ec-search__result-top">
-                  <span class="ec-search__result-conversation">{{ conversationName(message.conversationId) }}</span>
-                  <span class="ec-search__result-time">{{ formatTime(message.createdAt) }}</span>
-                </span>
-                <span class="ec-search__result-sender">{{ senderNameOf(message) }}</span>
-                <span class="ec-search__result-snippet">
-                  <template v-for="(segment, segmentIndex) in segmentsOf(message)" :key="segmentIndex">
-                    <mark v-if="segment.hit" class="ec-search__hit">{{ segment.text }}</mark>
-                    <template v-else>{{ segment.text }}</template>
-                  </template>
-                </span>
-              </button>
+              />
             </li>
           </ul>
 
