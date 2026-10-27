@@ -160,7 +160,8 @@ public sealed class FileService
     }
 
     /// <summary>
-    /// 下载鉴权：上传者本人，或该文件被某条消息引用且请求者为该消息所在会话成员；否则 FORBIDDEN。
+    /// 下载鉴权：上传者本人、该文件被某条消息引用且请求者为该消息所在会话成员、
+    /// 或该文件被任一用户用作头像（F-12：内部版头像对已登录用户可见）；否则 FORBIDDEN。
     /// </summary>
     public async Task<DownloadFileResult> DownloadAsync(string userId, string fileId, CancellationToken cancellationToken)
     {
@@ -186,7 +187,13 @@ public sealed class FileService
                     cancellationToken);
             if (!isReferencedMember)
             {
-                throw ApiException.Forbidden("无权访问该文件");
+                // F-12：头像文件对已登录用户放行（内部版头像可见性，不开放给未登录请求）。
+                var isAvatarFile = await _db.Users.AsNoTracking()
+                    .AnyAsync(user => user.AvatarFileId == fileId, cancellationToken);
+                if (!isAvatarFile)
+                {
+                    throw ApiException.Forbidden("无权访问该文件");
+                }
             }
         }
 
