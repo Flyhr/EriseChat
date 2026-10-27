@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
+import { splitLinks } from '../core/links'
 import Avatar from './Avatar.vue'
 import ImagePreview from './ImagePreview.vue'
 import MessageAttachment from './MessageAttachment.vue'
@@ -36,6 +37,11 @@ const contentText = computed(() => {
   if ('fileId' in content) return content.name
   return content.text ?? '[系统消息]'
 })
+
+/** 文本消息按安全链接分段（仅字符串内容；附件名与 system 消息不参与，链接以文本节点渲染，禁止 v-html）。 */
+const linkSegments = computed(() =>
+  typeof props.message.content === 'string' ? splitLinks(props.message.content) : [],
+)
 
 /** system 消息：居中灰字、无气泡/头像，不参与附件/时间/状态渲染。 */
 const isSystem = computed(() => props.message.msgType === 'system')
@@ -97,7 +103,22 @@ const timeText = computed(() =>
           @preview="onPreview"
           @loaded="emit('imageLoaded')"
         />
-        <p v-else class="message-bubble__text">{{ contentText }}</p>
+        <p v-else class="message-bubble__text">
+          <template v-if="linkSegments.length > 0">
+            <template v-for="(segment, index) in linkSegments" :key="index">
+              <a
+                v-if="segment.kind === 'link'"
+                class="message-bubble__link"
+                :href="segment.href"
+                target="_blank"
+                rel="noopener noreferrer"
+                >{{ segment.value }}</a
+              >
+              <template v-else>{{ segment.value }}</template>
+            </template>
+          </template>
+          <template v-else>{{ contentText }}</template>
+        </p>
       </div>
       <div class="message-row__meta">
         <time class="message-row__time">{{ timeText }}</time>
@@ -206,7 +227,19 @@ const timeText = computed(() =>
 .message-bubble__text {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* 链接：对方气泡用品牌色，自己蓝底白字气泡继承文字色；下划线补偿 offset 保证可辨识。 */
+.message-bubble__link {
+  color: var(--ec-brand-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-bubble--self .message-bubble__link {
+  color: inherit;
 }
 
 .message-row__meta {
