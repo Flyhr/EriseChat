@@ -22,6 +22,11 @@ public static class UserEndpoints
             .RequireAuthorization()
             .Produces<MeResponse>();
 
+        app.MapPatch("/api/me/profile", UpdateMeAsync)
+            .WithName("UpdateMeProfile")
+            .RequireAuthorization()
+            .Produces<MeResponse>();
+
         app.MapGet("/api/users", SearchUsersAsync)
             .WithName("SearchUsers")
             .RequireAuthorization()
@@ -37,6 +42,25 @@ public static class UserEndpoints
     {
         var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
         var profile = await auth.GetProfileAsync(userId, cancellationToken);
+        return Results.Json(new MeResponse(
+            profile.UserId,
+            profile.Email,
+            profile.DisplayName,
+            profile.AvatarFileId,
+            profile.Role,
+            profile.Status,
+            profile.CreatedAt));
+    }
+
+    /// <summary>F-12：修改当前用户昵称与头像引用（计划 §F-12）；两项至少一项，null 表示不修改。</summary>
+    private static async Task<IResult> UpdateMeAsync(
+        ClaimsPrincipal principal,
+        UpdateMeRequest request,
+        AuthService auth,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var profile = await auth.UpdateProfileAsync(userId, request.DisplayName, request.AvatarFileId, cancellationToken);
         return Results.Json(new MeResponse(
             profile.UserId,
             profile.Email,
@@ -119,6 +143,9 @@ public static class UserEndpoints
         value.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
+
+    /// <summary>F-12：PATCH /api/me/profile 请求体（两项至少一项；null 表示不修改，v1 不支持清除头像）。</summary>
+    public sealed record UpdateMeRequest(string? DisplayName = null, string? AvatarFileId = null);
 
     /// <summary>当前用户资料（字段与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
     public sealed record MeResponse(

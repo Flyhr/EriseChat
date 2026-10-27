@@ -32,6 +32,15 @@ public sealed class AuthService
     private const int DeviceIdMaxLength = 128;
     private const int CodeMaxLength = 16;
 
+    /// <summary>F-12：可作为头像的文件 MIME 白名单（与上传校验一致）。</summary>
+    private static readonly HashSet<string> AvatarMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+    };
+
     private readonly ChatDbContext _db;
     private readonly JwtOptions _jwtOptions;
     private readonly RateLimitOptions _rateLimitOptions;
@@ -253,6 +262,96 @@ public sealed class AuthService
             user.Role.ToString().ToLowerInvariant(),
             user.Status.ToString().ToLowerInvariant(),
             user.CreatedAt);
+    }
+
+    /// <summary>
+    /// F-12：修改当前用户昵称与头像引用（计划 §F-12）。两项至少一项，null 表示不修改；
+    /// displayName 去空白后 1~32 字符且不含控制字符；头像只能引用本人上传的图片文件；返回最新资料。
+    /// </summary>
+    public async Task<UserProfileDto> UpdateProfileAsync(
+        string userId,
+        string? displayName,
+        string? avatarFileId,
+        CancellationToken cancellationToken)
+    {
+        if (displayName is null && avatarFileId is null)
+        {
+            throw ApiException.ValidationFailed("displayName 与 avatarFileId 至少提供一个");
+        }
+
+        var user = await _db.Users.FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null || user.Status != UserStatus.Active)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        if (displayName is not null)
+        {
+            user.DisplayName = NormalizeDisplayName(displayName);
+        }
+
+        if (avatarFileId is not null)
+        {
+            user.AvatarFileId = await ValidateAvatarFileAsync(userId, avatarFileId, cancellationToken);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("更新个人资料：用户 {UserId}", user.Id);
+
+        return new UserProfileDto(
+            user.Id,
+            user.Email,
+            user.DisplayName,
+            user.AvatarFileId,
+            user.Role.ToString().ToLowerInvariant(),
+            user.Status.ToString().ToLowerInvariant(),
+            user.CreatedAt);
+    }
+
+    private static string NormalizeDisplayName(string raw)
+    {
+        var value = raw.Trim();
+        if (value.Length is < 1 or > DisplayNameMaxLength)
+        {
+            throw ApiException.ValidationFailed($"昵称长度应为 1~{DisplayNameMaxLength} 个字符");
+        }
+
+        foreach (var character in value)
+        {
+            if (char.IsControl(character))
+            {
+                throw ApiException.ValidationFailed("昵称不能包含控制字符");
+            }
+        }
+
+        return value;
+    }
+
+    private async Task<string> ValidateAvatarFileAsync(string userId, string rawFileId, CancellationToken cancellationToken)
+    {
+        var fileId = rawFileId.Trim();
+        if (fileId.Length is < 1 or > 64 || fileId.Any(char.IsWhiteSpace))
+        {
+            throw ApiException.ValidationFailed("avatarFileId 格式不正确");
+        }
+
+        var file = await _db.Files.AsNoTracking().FirstOrDefaultAsync(item => item.Id == fileId, cancellationToken);
+        if (file is null)
+        {
+            throw ApiException.ValidationFailed("头像文件不存在");
+        }
+
+        if (file.OwnerId != userId)
+        {
+            throw ApiException.Forbidden("只能使用自己上传的文件作为头像");
+        }
+
+        if (!AvatarMimeTypes.Contains(file.Mime))
+        {
+            throw ApiException.Forbidden("头像仅支持图片文件");
+        }
+
+        return file.Id;
     }
 
     /// <summary>
