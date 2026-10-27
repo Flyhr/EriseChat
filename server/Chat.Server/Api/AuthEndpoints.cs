@@ -37,7 +37,36 @@ public static class AuthEndpoints
             .WithName("Logout")
             .RequireAuthorization();
 
+        group.MapPost("/password/reset/request", RequestPasswordResetAsync)
+            .WithName("RequestPasswordReset")
+            .Produces<SendEmailCodeResponse>();
+
+        group.MapPost("/password/reset", ResetPasswordAsync)
+            .WithName("ResetPassword")
+            .Produces(StatusCodes.Status204NoContent);
+
         return app;
+    }
+
+    /// <summary>F-13：请求密码重置验证码（未注册邮箱也返回同样冷却时间，不泄漏账号存在性）。</summary>
+    private static async Task<IResult> RequestPasswordResetAsync(
+        PasswordResetRequest request,
+        HttpContext context,
+        EmailCodeService emailCodes,
+        CancellationToken cancellationToken)
+    {
+        var result = await emailCodes.SendPasswordResetAsync(request.Email, GetClientIp(context), cancellationToken);
+        return Results.Json(new SendEmailCodeResponse(result.CooldownSec, result.DevCode));
+    }
+
+    /// <summary>F-13：验证码重置密码（成功 204；邮箱/验证码问题统一错误，不泄漏账号存在性）。</summary>
+    private static async Task<IResult> ResetPasswordAsync(
+        ResetPasswordRequest request,
+        AuthService auth,
+        CancellationToken cancellationToken)
+    {
+        await auth.ResetPasswordAsync(request.Email, request.Code, request.NewPassword, cancellationToken);
+        return Results.NoContent();
     }
 
     private static async Task<IResult> SendEmailCodeAsync(
@@ -99,7 +128,8 @@ public static class AuthEndpoints
     {
         "register" => EmailCodePurpose.Register,
         "login" => EmailCodePurpose.Login,
-        _ => throw ApiException.ValidationFailed("purpose 必须是 register 或 login"),
+        "reset" => EmailCodePurpose.Reset,
+        _ => throw ApiException.ValidationFailed("purpose 必须是 register、login 或 reset"),
     };
 
     private static AuthSessionResponse ToResponse(AuthSessionResult result) => new(
@@ -126,6 +156,12 @@ public static class AuthEndpoints
 
     /// <summary>发送验证码请求（字段小写 camelCase，与 apps/web 的 SendEmailCodeRequest 对齐）。</summary>
     public sealed record SendEmailCodeRequest(string? Email, string? Purpose);
+
+    /// <summary>F-13：请求密码重置验证码。</summary>
+    public sealed record PasswordResetRequest(string? Email);
+
+    /// <summary>F-13：验证码重置密码。</summary>
+    public sealed record ResetPasswordRequest(string? Email, string? Code, string? NewPassword);
 
     /// <summary>发送验证码响应：devCode 仅 Development 返回，且为 null 时不输出该字段。</summary>
     public sealed record SendEmailCodeResponse(

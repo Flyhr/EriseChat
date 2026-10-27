@@ -8,6 +8,7 @@ using Chat.Server.Data;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Email;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -82,6 +83,51 @@ public sealed class EmailCodeService
             throw BuildRateLimitException(rejection);
         }
 
+        return await SendCoreAsync(email, purpose, ip, now, cancellationToken);
+    }
+
+    /// <summary>
+    /// F-13：发送「找回密码」验证码。未注册/已禁用邮箱同样消耗限流额度并返回同样冷却时间，
+    /// 但不会生成验证码记录、不会发信（避免通过响应差异枚举账号）。
+    /// </summary>
+    public async Task<EmailCodeSendResult> SendPasswordResetAsync(
+        string? rawEmail,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
+        if (!EmailAddress.TryNormalize(rawEmail, out var email))
+        {
+            throw ApiException.ValidationFailed("邮箱格式不正确");
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var rejection = _rateLimiter.TryAcquire(email, ip, now);
+        if (rejection != EmailCodeRateLimitRejection.None)
+        {
+            throw BuildRateLimitException(rejection);
+        }
+
+        var cooldownSec = Math.Max(1, _rateLimitOptions.EmailCodePerEmailIntervalSeconds);
+        var userExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Email == email && user.Status == UserStatus.Active, cancellationToken);
+        if (!userExists)
+        {
+            _logger.LogInformation("密码重置验证码请求：邮箱未注册，按冷却时间返回，不发送：{Email}", email);
+            return new EmailCodeSendResult(email, EmailCodePurpose.Reset, cooldownSec, DevCode: null);
+        }
+
+        return await SendCoreAsync(email, EmailCodePurpose.Reset, ip, now, cancellationToken);
+    }
+
+    /// <summary>生成验证码、落库（只存哈希）并通过邮件通道发送；失败时清理刚写入的记录。</summary>
+    private async Task<EmailCodeSendResult> SendCoreAsync(
+        string email,
+        EmailCodePurpose purpose,
+        string? ip,
+        long nowUtcMilliseconds,
+        CancellationToken cancellationToken)
+    {
         var code = GenerateCode();
         var entity = new EmailCode
         {
@@ -89,9 +135,9 @@ public sealed class EmailCodeService
             Email = email,
             Purpose = purpose,
             CodeHash = EmailCodeHasher.Hash(_jwtOptions.Key, email, purpose, code),
-            ExpiresAt = now + ExpiresMinutes * 60_000L,
+            ExpiresAt = nowUtcMilliseconds + ExpiresMinutes * 60_000L,
             Attempts = 0,
-            CreatedAt = now,
+            CreatedAt = nowUtcMilliseconds,
             Ip = string.IsNullOrWhiteSpace(ip) ? null : ip,
         };
 

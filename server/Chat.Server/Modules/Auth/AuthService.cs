@@ -352,6 +352,51 @@ public sealed class AuthService
         _logger.LogInformation("修改密码：用户 {UserId}", user.Id);
     }
 
+    /// <summary>
+    /// F-13：邮箱验证码重置密码（计划 §F-13）。先消费 reset 用途验证码，再按邮箱查找用户；
+    /// 邮箱不存在/已禁用时仍消费并落库消费记录（防重放），随后返回统一错误，不泄漏账号是否存在；
+    /// 成功后更新密码哈希并清除登录失败计数，不撤销已有会话。
+    /// </summary>
+    public async Task ResetPasswordAsync(
+        string? rawEmail,
+        string? code,
+        string? newPassword,
+        CancellationToken cancellationToken)
+    {
+        if (!EmailAddress.TryNormalize(rawEmail, out var email))
+        {
+            throw ApiException.ValidationFailed("邮箱格式不正确");
+        }
+
+        if (string.IsNullOrEmpty(code) || code.Length > CodeMaxLength)
+        {
+            throw ApiException.ValidationFailed("验证码格式不正确");
+        }
+
+        if (string.IsNullOrEmpty(newPassword) ||
+            newPassword.Length is < PasswordMinLength or > PasswordMaxLength)
+        {
+            throw ApiException.ValidationFailed($"密码长度应为 {PasswordMinLength}~{PasswordMaxLength} 个字符");
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await ConsumeEmailCodeAsync(email, EmailCodePurpose.Reset, code, now, cancellationToken);
+
+        var user = await _db.Users.FirstOrDefaultAsync(item => item.Email == email, cancellationToken);
+        if (user is null || user.Status != UserStatus.Active)
+        {
+            // 邮箱不存在/禁用：保留消费结果（验证码已删除，避免被重放），返回不泄漏存在性的统一错误。
+            await _db.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("密码重置失败：邮箱未注册或账号不可用");
+            throw ApiException.Unauthorized("邮箱或验证码错误");
+        }
+
+        user.PasswordHash = PasswordHasher.Hash(newPassword);
+        await _db.SaveChangesAsync(cancellationToken);
+        _loginAttempts.Clear(email);
+        _logger.LogInformation("重置密码：用户 {UserId}", user.Id);
+    }
+
     private static string NormalizeDisplayName(string raw)
     {
         var value = raw.Trim();
