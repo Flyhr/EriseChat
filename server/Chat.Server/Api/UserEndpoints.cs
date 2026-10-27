@@ -27,6 +27,11 @@ public static class UserEndpoints
             .RequireAuthorization()
             .Produces<MeResponse>();
 
+        app.MapPost("/api/me/password", ChangePasswordAsync)
+            .WithName("ChangePassword")
+            .RequireAuthorization()
+            .Produces(StatusCodes.Status204NoContent);
+
         app.MapGet("/api/users", SearchUsersAsync)
             .WithName("SearchUsers")
             .RequireAuthorization()
@@ -49,7 +54,20 @@ public static class UserEndpoints
             profile.AvatarFileId,
             profile.Role,
             profile.Status,
-            profile.CreatedAt));
+            profile.CreatedAt,
+            profile.HasPassword));
+    }
+
+    /// <summary>F-13：修改/设置密码（已有密码须校验旧密码；从未设置过密码时直接设置）。</summary>
+    private static async Task<IResult> ChangePasswordAsync(
+        ClaimsPrincipal principal,
+        ChangePasswordRequest request,
+        AuthService auth,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        await auth.ChangePasswordAsync(userId, request.OldPassword, request.NewPassword ?? string.Empty, cancellationToken);
+        return Results.NoContent();
     }
 
     /// <summary>F-12：修改当前用户昵称与头像引用（计划 §F-12）；两项至少一项，null 表示不修改。</summary>
@@ -68,7 +86,8 @@ public static class UserEndpoints
             profile.AvatarFileId,
             profile.Role,
             profile.Status,
-            profile.CreatedAt));
+            profile.CreatedAt,
+            profile.HasPassword));
     }
 
     /// <summary>
@@ -136,6 +155,7 @@ public static class UserEndpoints
         user.Role.ToString().ToLowerInvariant(),
         user.Status.ToString().ToLowerInvariant(),
         user.CreatedAt,
+        user.PasswordHash is not null,
         relation);
 
     /// <summary>SQLite LIKE 通配符转义（配合 EF.Functions.Like 的 escape 参数 '\'）。</summary>
@@ -147,6 +167,9 @@ public static class UserEndpoints
     /// <summary>F-12：PATCH /api/me/profile 请求体（两项至少一项；null 表示不修改，v1 不支持清除头像）。</summary>
     public sealed record UpdateMeRequest(string? DisplayName = null, string? AvatarFileId = null);
 
+    /// <summary>F-13：POST /api/me/password 请求体（已有密码须 oldPassword；从未设置过密码可省略）。</summary>
+    public sealed record ChangePasswordRequest(string? OldPassword = null, string? NewPassword = null);
+
     /// <summary>当前用户资料（字段与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
     public sealed record MeResponse(
         string UserId,
@@ -156,6 +179,8 @@ public static class UserEndpoints
         string Role,
         string Status,
         long CreatedAt,
+        /// <summary>F-13：是否已设置密码（前端据此显示「修改密码」或「设置密码」）。</summary>
+        bool HasPassword = false,
         /// <summary>F-17：与当前用户的关系（friend/outgoing/incoming），仅 /api/users 搜索时返回。</summary>
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Relation = null);
 

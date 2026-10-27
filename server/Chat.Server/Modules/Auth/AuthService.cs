@@ -18,7 +18,7 @@ public sealed record AuthUserDto(string UserId, string Email, string DisplayName
 public sealed record AuthSessionResult(string AccessToken, long ExpiresAt, AuthUserDto User);
 
 /// <summary>当前用户资料（与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
-public sealed record UserProfileDto(string UserId, string Email, string DisplayName, string? AvatarFileId, string Role, string Status, long CreatedAt);
+public sealed record UserProfileDto(string UserId, string Email, string DisplayName, string? AvatarFileId, string Role, string Status, long CreatedAt, bool HasPassword);
 
 /// <summary>
 /// 账号认证业务（计划 §4.1 / §7）：邮箱验证码注册、验证码登录、密码登录、注销、当前用户资料。
@@ -261,7 +261,8 @@ public sealed class AuthService
             user.AvatarFileId,
             user.Role.ToString().ToLowerInvariant(),
             user.Status.ToString().ToLowerInvariant(),
-            user.CreatedAt);
+            user.CreatedAt,
+            user.PasswordHash is not null);
     }
 
     /// <summary>
@@ -305,7 +306,50 @@ public sealed class AuthService
             user.AvatarFileId,
             user.Role.ToString().ToLowerInvariant(),
             user.Status.ToString().ToLowerInvariant(),
-            user.CreatedAt);
+            user.CreatedAt,
+            user.PasswordHash is not null);
+    }
+
+    /// <summary>
+    /// F-13：修改/设置密码（计划 §F-13）。已有密码时必须校验旧密码；新密码 8~128 且不得与当前密码相同；
+    /// 从未设置过密码的用户忽略旧密码直接设置（即「设置密码」）；不撤销已有会话。
+    /// </summary>
+    public async Task ChangePasswordAsync(
+        string userId,
+        string? oldPassword,
+        string newPassword,
+        CancellationToken cancellationToken)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null || user.Status != UserStatus.Active)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        if (string.IsNullOrEmpty(newPassword) ||
+            newPassword.Length is < PasswordMinLength or > PasswordMaxLength)
+        {
+            throw ApiException.ValidationFailed($"密码长度应为 {PasswordMinLength}~{PasswordMaxLength} 个字符");
+        }
+
+        var hasPassword = !string.IsNullOrEmpty(user.PasswordHash);
+        if (hasPassword)
+        {
+            if (string.IsNullOrEmpty(oldPassword) || !PasswordHasher.Verify(oldPassword, user.PasswordHash!))
+            {
+                throw new ApiException(ErrorCodes.PasswordInvalid, "旧密码不正确", StatusCodes.Status401Unauthorized);
+            }
+
+            if (PasswordHasher.Verify(newPassword, user.PasswordHash!))
+            {
+                throw ApiException.ValidationFailed("新密码不能与当前密码相同");
+            }
+        }
+
+        user.PasswordHash = PasswordHasher.Hash(newPassword);
+        await _db.SaveChangesAsync(cancellationToken);
+        _loginAttempts.Clear(user.Email);
+        _logger.LogInformation("修改密码：用户 {UserId}", user.Id);
     }
 
     private static string NormalizeDisplayName(string raw)
