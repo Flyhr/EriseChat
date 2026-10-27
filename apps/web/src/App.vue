@@ -4,6 +4,7 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 import ConnectionBanner from './components/ConnectionBanner.vue'
 import AppToast from './components/AppToast.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
+import SearchDialog from './components/SearchDialog.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
@@ -93,6 +94,8 @@ function reconnect(): void {
     </div>
     <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
     <AppToast />
+    <!-- F-11：消息搜索面板（全局单例，左导航/聊天顶栏/移动端列表共用）。 -->
+    <SearchDialog />
   </div>
 </template>
 

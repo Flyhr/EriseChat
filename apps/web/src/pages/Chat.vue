@@ -30,6 +30,7 @@ import { useMessagesStore } from '../stores/messages'
 import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
 import { useDraftsStore } from '../stores/drafts'
+import { useSearchStore } from '../stores/search'
 import type { Conversation, Message } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
@@ -146,6 +147,17 @@ function openContacts(): void {
   void router.push('/contacts')
 }
 
+const search = useSearchStore()
+
+/** F-11：搜索入口——左导航/移动端列表为全局搜索，聊天顶栏为当前会话内搜索。 */
+function openGlobalSearch(): void {
+  search.openGlobal()
+}
+
+function openConversationSearch(): void {
+  if (activeId.value) search.openInConversation(activeId.value)
+}
+
 // 当前会话的消息缓存（已落库事实消息 + 乐观发送中的本地消息）与历史分页状态。
 const activeMessages = computed(() =>
   activeId.value ? messages.messagesOf(activeId.value) : [],
@@ -186,16 +198,81 @@ function cancelReply(): void {
   replyTarget.value = null
 }
 
+/** 在已加载消息中定位；不在当前窗口时循环补拉历史（≤8 页），返回是否成功定位。 */
+async function ensureMessageVisible(messageId: string): Promise<boolean> {
+  const conversationId = activeId.value
+  if (!conversationId) return false
+
+  if (messageListRef.value?.scrollToMessage(messageId)) return true
+  for (let page = 0; page < JUMP_MAX_LOAD_PAGES && activeHasMore.value; page += 1) {
+    await messages.loadMore(conversationId)
+    await nextTick()
+    if (activeId.value !== conversationId) return false
+    if (messageListRef.value?.scrollToMessage(messageId)) return true
+  }
+  return messageListRef.value?.scrollToMessage(messageId) ?? false
+}
+
 async function onJumpToMessage(messageId: string): Promise<void> {
   if (!activeId.value) return
-  for (let page = 0; page < JUMP_MAX_LOAD_PAGES && activeHasMore.value; page += 1) {
-    if (messageListRef.value?.scrollToMessage(messageId)) return
-    await messages.loadMore(activeId.value)
-    await nextTick()
+  if (!(await ensureMessageVisible(messageId))) {
+    pageNotice.value = '被引用的消息不在本地缓存中，可手动加载更早消息查看'
   }
-  if (messageListRef.value?.scrollToMessage(messageId)) return
-  pageNotice.value = '被引用的消息不在本地缓存中，可手动加载更早消息查看'
 }
+
+// F-11：搜索结果跳转（?jumpSeq=）复用 F-09 的定位机制——按 seq 在已加载消息里找 messageId，
+// 找不到则循环补拉（≤8 页）；定位完成后清掉查询参数，避免刷新页面重复跳转。
+let pendingJumpSeq: number | null = null
+
+function clearJumpQuery(): void {
+  if (!('jumpSeq' in route.query)) return
+  const query = { ...route.query }
+  delete query.jumpSeq
+  void router.replace({ query })
+}
+
+async function runPendingJump(): Promise<void> {
+  const conversationId = activeId.value
+  const seq = pendingJumpSeq
+  if (!conversationId || seq === null) return
+
+  for (let page = 0; page < JUMP_MAX_LOAD_PAGES; page += 1) {
+    const target = activeMessages.value.find((message) => message.seq === seq)
+    if (target && messageListRef.value?.scrollToMessage(target.messageId)) {
+      pendingJumpSeq = null
+      clearJumpQuery()
+      return
+    }
+    if (!activeHasMore.value) break
+    await messages.loadMore(conversationId)
+    await nextTick()
+    if (activeId.value !== conversationId || pendingJumpSeq !== seq) return
+  }
+
+  if (pendingJumpSeq !== seq) return
+  pendingJumpSeq = null
+  clearJumpQuery()
+  pageNotice.value = '消息不在当前加载范围，可手动加载更早消息查看'
+}
+
+watch(
+  () => route.query.jumpSeq,
+  (value) => {
+    const seq = typeof value === 'string' ? Number(value) : Number.NaN
+    if (!Number.isFinite(seq) || seq <= 0) {
+      pendingJumpSeq = null
+      return
+    }
+    pendingJumpSeq = seq
+    void runPendingJump()
+  },
+  { immediate: true },
+)
+
+// 目标会话的消息可能还在异步加载：加载完成后再尝试一次定位。
+watch(activeLoaded, (loaded) => {
+  if (loaded && pendingJumpSeq !== null) void runPendingJump()
+})
 
 // 切换会话时清空回复目标，避免把引用带到另一个会话（F-09）。
 watch(activeId, () => {
@@ -686,6 +763,7 @@ function onWindowDrop(event: DragEvent): void {
       @select="selectConversation"
       @update:filter="changeListFilter"
       @create="openContacts"
+      @search="openGlobalSearch"
     />
 
     <section
@@ -711,6 +789,7 @@ function onWindowDrop(event: DragEvent): void {
           :show-back="true"
           @open-group="toggleGroupDrawer"
           @back="backToList"
+          @search="openConversationSearch"
         />
         <div class="chat-page__content" :class="{ 'chat-page__content--members': membersOpen }">
           <div class="chat-page__chat">

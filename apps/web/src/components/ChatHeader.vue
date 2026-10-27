@@ -23,6 +23,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'open-group': []
   back: []
+  search: []
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.peerPresence))
@@ -52,9 +53,15 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
     </div>
 
     <div class="ec-chat-header__actions">
-      <ComingSoonHint label="搜索消息" layout="inline" :show-hint="false" class="ec-chat-header__action">
+      <button
+        type="button"
+        class="ec-chat-header__action ec-chat-header__icon-button"
+        aria-label="搜索当前会话消息"
+        title="搜索当前会话消息"
+        @click="emit('search')"
+      >
         <AppIcon name="search" />
-      </ComingSoonHint>
+      </button>
       <ComingSoonHint label="更多" layout="inline" :show-hint="false" class="ec-chat-header__action">
         <AppIcon name="more" />
       </ComingSoonHint>

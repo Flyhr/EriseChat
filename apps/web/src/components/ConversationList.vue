@@ -25,6 +25,8 @@ const emit = defineEmits<{
   select: [conversationId: string]
   'update:filter': [filter: ConversationFilter]
   create: []
+  /** F-11：移动端头部搜索入口（全局搜索由 Chat 页打开面板）。 */
+  search: []
 }>()
 
 const conversationsStore = useConversationsStore()
@@ -82,15 +84,26 @@ async function onUpdateSettings(payload: {
   <section class="ec-conversation-list" aria-label="会话列表">
     <header class="ec-conversation-list__header">
       <h2 class="ec-conversation-list__title">消息</h2>
-      <button
-        type="button"
-        class="ec-conversation-list__create"
-        aria-label="发起聊天"
-        @click="emit('create')"
-      >
-        <AppIcon name="plus" :size="16" />
-        <span class="ec-conversation-list__create-label">发起聊天</span>
-      </button>
+      <div class="ec-conversation-list__header-actions">
+        <button
+          type="button"
+          class="ec-conversation-list__search"
+          aria-label="搜索消息"
+          title="搜索消息"
+          @click="emit('search')"
+        >
+          <AppIcon name="search" :size="18" />
+        </button>
+        <button
+          type="button"
+          class="ec-conversation-list__create"
+          aria-label="发起聊天"
+          @click="emit('create')"
+        >
+          <AppIcon name="plus" :size="16" />
+          <span class="ec-conversation-list__create-label">发起聊天</span>
+        </button>
+      </div>
     </header>
 
     <div class="ec-conversation-list__filters" role="tablist" aria-label="会话筛选">
@@ -176,6 +189,27 @@ async function onUpdateSettings(payload: {
 }
 }
 
+.ec-conversation-list__header-actions {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-1);
+  align-items: center;
+}
+
+/* F-11：搜索入口只在移动端出现（桌面端左导航与聊天顶栏已有入口）。 */
+.ec-conversation-list__search {
+  display: none;
+  place-items: center;
+  min-width: var(--ec-touch-target);
+  min-height: var(--ec-touch-target);
+  padding: 0;
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  cursor: pointer;
+}
+
 .ec-conversation-list__filters {
   display: flex;
   flex: none;
@@ -252,6 +286,15 @@ async function onUpdateSettings(payload: {
 
   .ec-conversation-list__create-label {
     display: none;
+  }
+
+  .ec-conversation-list__search {
+    display: grid;
+  }
+
+  .ec-conversation-list__search:focus-visible {
+    outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+    outline-offset: var(--ec-focus-offset);
   }
 
   .ec-conversation-list__filters {
