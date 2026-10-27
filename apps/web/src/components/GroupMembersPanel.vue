@@ -2,10 +2,21 @@
 import { computed, ref } from 'vue'
 import { conversationsApi } from '../api/conversations'
 import { usersApi, type UserProfile } from '../api/users'
-import Avatar from './Avatar.vue'
 import AppDialog from './AppDialog.vue'
+import AppIcon from './AppIcon.vue'
+import Avatar from './Avatar.vue'
 import PresenceDot from './PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
+import {
+  ANNOUNCEMENT_MAX_LENGTH,
+  GROUP_TITLE_MAX_LENGTH,
+  announcementCountOf,
+  announcementIsEmpty,
+  announcementPreview,
+  canEditGroupProfile,
+  normalizeAnnouncementInput,
+  validateGroupTitle,
+} from '../core/groupProfile'
 import { sortMembers } from '../core/groupChat'
 import { showToast } from '../core/toast'
 import { usePresenceStore } from '../stores/presence'
@@ -37,6 +48,21 @@ const inviteKeyword = ref('')
 const inviteResults = ref<UserProfile[]>([])
 const selectedInviteIds = ref<string[]>([])
 const searching = ref(false)
+
+// 群资料（F-14）：群主可编辑群名与公告，其余成员只读。
+const canEditProfile = computed(() => canEditGroupProfile(props.conversation, props.selfUserId))
+const titleDialogOpen = ref(false)
+const titleDraft = ref('')
+const announcementDialogOpen = ref(false)
+const announcementDraft = ref('')
+const announcementExpanded = ref(false)
+const clearAnnouncementOpen = ref(false)
+const profileSaving = ref(false)
+const announcementText = computed(() => props.conversation.announcement ?? '')
+const announcementPreviewText = computed(() => announcementPreview(announcementText.value))
+const hasAnnouncement = computed(() => !announcementIsEmpty(announcementText.value))
+const titleDraftLength = computed(() => Array.from(titleDraft.value).length)
+const announcementDraftLength = computed(() => announcementCountOf(announcementDraft.value))
 
 const members = computed(() => sortMembers(props.conversation.members))
 /** 已知在线的成员数（未知状态不计入，v1 无初始查询，M3-09）。 */
@@ -162,6 +188,84 @@ async function confirmDialog(): Promise<void> {
     busy.value = false
   }
 }
+
+function openTitleDialog(): void {
+  if (!canEditProfile.value) return
+  titleDraft.value = props.conversation.title
+  titleDialogOpen.value = true
+}
+
+async function saveTitle(): Promise<void> {
+  if (!canEditProfile.value || profileSaving.value) return
+  const validation = validateGroupTitle(titleDraft.value)
+  if (!validation.ok) {
+    showToast(validation.message, 'error')
+    return
+  }
+
+  profileSaving.value = true
+  try {
+    const updated = await conversationsApi.updateGroupProfile(props.conversation.conversationId, {
+      title: validation.value,
+    })
+    emit('updated', updated)
+    titleDialogOpen.value = false
+    showToast('群名已更新', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    profileSaving.value = false
+  }
+}
+
+function openAnnouncementDialog(): void {
+  if (!canEditProfile.value) return
+  announcementDraft.value = announcementText.value
+  announcementDialogOpen.value = true
+}
+
+async function saveAnnouncement(): Promise<void> {
+  if (!canEditProfile.value || profileSaving.value) return
+  const normalized = normalizeAnnouncementInput(announcementDraft.value)
+  profileSaving.value = true
+  try {
+    const updated = await conversationsApi.updateGroupProfile(props.conversation.conversationId, {
+      announcement: normalized,
+    })
+    emit('updated', updated)
+    announcementDialogOpen.value = false
+    announcementExpanded.value = false
+    showToast('群公告已更新', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    profileSaving.value = false
+  }
+}
+
+function askClearAnnouncement(): void {
+  if (!canEditProfile.value) return
+  clearAnnouncementOpen.value = true
+}
+
+async function clearAnnouncement(): Promise<void> {
+  if (!canEditProfile.value || profileSaving.value) return
+  profileSaving.value = true
+  try {
+    const updated = await conversationsApi.updateGroupProfile(props.conversation.conversationId, {
+      announcement: '',
+    })
+    emit('updated', updated)
+    clearAnnouncementOpen.value = false
+    announcementDialogOpen.value = false
+    showToast('群公告已清空', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+    clearAnnouncementOpen.value = false
+  } finally {
+    profileSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -169,6 +273,49 @@ async function confirmDialog(): Promise<void> {
     <p class="group-panel__subtitle">{{ members.length }} 位成员 · 在线 {{ onlineCount }} 人</p>
 
     <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
+
+    <section v-if="conversation.type === 'group'" class="group-panel__section group-panel__profile">
+      <div class="group-panel__profile-head">
+        <h3 class="group-panel__profile-title">群资料</h3>
+        <button
+          v-if="canEditProfile"
+          type="button"
+          class="group-panel__link"
+          :disabled="busy || profileSaving"
+          @click="openTitleDialog"
+        >
+          <AppIcon name="edit" :size="14" /> 修改群名
+        </button>
+      </div>
+      <p class="group-panel__profile-name" :title="conversation.title">{{ conversation.title }}</p>
+      <div class="group-panel__announcement">
+        <span class="group-panel__announcement-label">群公告</span>
+        <template v-if="hasAnnouncement">
+          <p class="group-panel__announcement-text">
+            {{ announcementExpanded ? announcementText : announcementPreviewText.text }}
+          </p>
+          <button
+            v-if="announcementPreviewText.truncated || announcementExpanded"
+            type="button"
+            class="group-panel__link"
+            @click="announcementExpanded = !announcementExpanded"
+          >
+            {{ announcementExpanded ? '收起' : '展开' }}
+          </button>
+        </template>
+        <p v-else class="group-panel__hint">暂无公告</p>
+        <button
+          v-if="canEditProfile"
+          type="button"
+          class="group-panel__link"
+          :disabled="busy || profileSaving"
+          @click="openAnnouncementDialog"
+        >
+          <AppIcon name="edit" :size="14" /> {{ hasAnnouncement ? '编辑公告' : '添加公告' }}
+        </button>
+      </div>
+      <p v-if="!canEditProfile" class="group-panel__hint">仅群主可修改群资料</p>
+    </section>
 
     <ul class="group-panel__members">
       <li v-for="member in members" :key="member.userId" class="group-panel__member">
@@ -257,6 +404,57 @@ async function confirmDialog(): Promise<void> {
       :busy="busy"
       @confirm="confirmDialog"
       @cancel="confirmState = null"
+    />
+    <AppDialog
+      :open="titleDialogOpen"
+      title="修改群名"
+      confirm-text="保存"
+      :busy="profileSaving"
+      wide
+      @confirm="saveTitle"
+      @cancel="titleDialogOpen = false"
+    >
+      <label class="group-panel__field">
+        <span class="group-panel__field-label">群名称</span>
+        <input v-model="titleDraft" type="text" :maxlength="GROUP_TITLE_MAX_LENGTH" />
+      </label>
+      <p class="group-panel__count">{{ titleDraftLength }}/{{ GROUP_TITLE_MAX_LENGTH }}</p>
+    </AppDialog>
+
+    <AppDialog
+      :open="announcementDialogOpen"
+      title="编辑群公告"
+      confirm-text="保存"
+      :busy="profileSaving"
+      wide
+      @confirm="saveAnnouncement"
+      @cancel="announcementDialogOpen = false"
+    >
+      <label class="group-panel__field">
+        <span class="group-panel__field-label">群公告（{{ ANNOUNCEMENT_MAX_LENGTH }} 字符以内，支持换行）</span>
+        <textarea v-model="announcementDraft" rows="5" :maxlength="ANNOUNCEMENT_MAX_LENGTH" />
+      </label>
+      <p class="group-panel__count">{{ announcementDraftLength }}/{{ ANNOUNCEMENT_MAX_LENGTH }}</p>
+      <button
+        v-if="hasAnnouncement"
+        type="button"
+        class="group-panel__danger group-panel__clear"
+        :disabled="profileSaving"
+        @click="askClearAnnouncement"
+      >
+        清空公告
+      </button>
+    </AppDialog>
+
+    <AppDialog
+      :open="clearAnnouncementOpen"
+      title="清空群公告"
+      message="清空后所有成员将看不到当前公告，确定清空吗？"
+      confirm-text="清空"
+      tone="danger"
+      :busy="profileSaving"
+      @confirm="clearAnnouncement"
+      @cancel="clearAnnouncementOpen = false"
     />
   </div>
 </template>
@@ -427,5 +625,127 @@ async function confirmDialog(): Promise<void> {
 
 .group-panel__leave {
   margin-top: var(--ec-space-2);
+}
+
+/* F-14：群资料区（群名 + 公告，群主可编辑，其余成员只读）。 */
+.group-panel__profile {
+  margin-top: var(--ec-space-1);
+  padding: var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-md);
+  background: var(--ec-bg-canvas);
+}
+
+.group-panel__profile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ec-space-2);
+}
+
+.group-panel__profile-title {
+  margin: 0;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-secondary);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.group-panel__profile-name {
+  margin: var(--ec-space-1) 0 0;
+  overflow: hidden;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-panel__announcement {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  margin-top: var(--ec-space-2);
+}
+
+.group-panel__announcement-label {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.group-panel__announcement-text {
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.group-panel__link {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+}
+
+.group-panel__link:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .group-panel__link:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+}
+
+.group-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+}
+
+.group-panel__field-label {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.group-panel__field input,
+.group-panel__field textarea {
+  width: 100%;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  outline: none;
+  font: inherit;
+  resize: vertical;
+}
+
+.group-panel__field input:focus,
+.group-panel__field textarea:focus {
+  border-color: var(--ec-brand-600);
+}
+
+.group-panel__count {
+  margin: var(--ec-space-1) 0 0;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+  text-align: right;
+}
+
+.group-panel__clear {
+  margin-top: var(--ec-space-2);
+}
+
+@media (max-width: 800px) {
+  .group-panel__link,
+  .group-panel__clear {
+    min-height: 44px;
+  }
 }
 </style>

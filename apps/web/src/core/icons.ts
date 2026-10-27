@@ -23,6 +23,7 @@ export type AppIconName =
   | 'back'
   | 'mute'
   | 'pin'
+  | 'edit'
   // 设置中心分类图标：通知 / 外观 / 连接 / 账号安全。
   | 'bell'
   | 'palette'
@@ -86,6 +87,8 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
     paths: ['M4 9.5h4l5-4v13l-5-4H4v-5Z', 'M16.5 9.5l5 5', 'M21.5 9.5l-5 5'],
   },
   pin: { paths: ['M9 4h6l-1 6 3.5 3.5H6.5L10 10 9 4Z', 'M12 13.5V20'] },
+  // F-14：编辑群资料（铅笔）。
+  edit: { paths: ['M4 20h4L18.5 9.5l-4-4L4 16v4Z', 'M14.5 5.5l4 4'] },
   bell: {
     paths: [
       'M6.5 9.5a5.5 5.5 0 0 1 11 0c0 3 .7 4.5 1.8 5.7H4.7C5.8 14 6.5 12.5 6.5 9.5Z',

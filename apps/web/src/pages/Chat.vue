@@ -841,9 +841,9 @@ function onWindowDrop(event: DragEvent): void {
             @click="activeDrawer = null"
           />
           <!-- 群成员面板：位于聊天顶栏下方的同层右侧栏（不遮罩、不盖住「群资料」），默认隐藏。 -->
-          <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群成员">
+          <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群资料与成员">
             <header class="chat-page__members-header">
-              <h2 class="chat-page__members-title">群成员</h2>
+              <h2 class="chat-page__members-title">群资料与成员</h2>
               <button
                 type="button"
                 class="chat-page__members-close"
