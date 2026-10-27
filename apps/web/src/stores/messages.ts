@@ -39,6 +39,7 @@ import {
   shouldShowDesktopNotification,
   showWebNotification,
 } from '../core/notify'
+import type { ReplyPreviewLike } from '../core/replyPreview'
 import { useConversationsStore } from './conversations'
 import { useAuthStore } from './auth'
 import { useSettingsStore } from './settings'
@@ -72,6 +73,10 @@ export interface PendingMessage {
   status: PendingStatus
   /** 已重试次数（0 = 首次发送，最多 RETRY_DELAYS_MS.length 次重试）。 */
   retries: number
+  /** F-09：回复引用目标 messageId（可选；重试/恢复重发都会带上）。 */
+  replyTo?: string
+  /** F-09：本地引用条预览（仅内存；ack/message.new 后由服务端 reply 摘要取代）。 */
+  replyPreview?: ReplyPreviewLike
 }
 
 /** message.send 的 reqId（error 帧据此把失败落到具体待发消息）。 */
@@ -259,6 +264,7 @@ export const useMessagesStore = defineStore('messages', () => {
         createdAt: record.createdAt,
         status: record.status,
         retries: record.retries,
+        ...(record.replyTo ? { replyTo: record.replyTo } : {}),
       })
     }
 
@@ -509,6 +515,7 @@ export const useMessagesStore = defineStore('messages', () => {
       // M3-07：图片/文件消息必须沿用原 msgType，否则服务端会按纯文本拒绝或落错类型。
       msgType: pending.msgType,
       content: pending.content,
+      ...(pending.replyTo ? { replyTo: pending.replyTo } : {}),
     }
     if (chatWs.send(frame)) {
       scheduleAckTimeout(pending)
@@ -549,6 +556,8 @@ export const useMessagesStore = defineStore('messages', () => {
     msgType: MessageSendType,
     content: string | FileContent,
     senderId: string,
+    replyTo?: string,
+    replyPreview?: ReplyPreviewLike,
   ): boolean {
     if (!conversationId || !senderId) return false
     const pending: PendingMessage = {
@@ -560,6 +569,8 @@ export const useMessagesStore = defineStore('messages', () => {
       createdAt: Date.now(),
       status: 'sending',
       retries: 0,
+      ...(replyTo ? { replyTo } : {}),
+      ...(replyPreview ? { replyPreview } : {}),
     }
     pendingByConversation.value = {
       ...pendingByConversation.value,
@@ -572,7 +583,13 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /** 乐观发送文本消息：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
-  function sendText(conversationId: string, text: string, senderId: string): boolean {
+  function sendText(
+    conversationId: string,
+    text: string,
+    senderId: string,
+    replyTo?: string,
+    replyPreview?: ReplyPreviewLike,
+  ): boolean {
     const content = text.trim()
     if (!content) return false
     if (content.length > MAX_TEXT_LENGTH) {
@@ -580,7 +597,7 @@ export const useMessagesStore = defineStore('messages', () => {
       console.warn(`[messages] 文本超过 ${MAX_TEXT_LENGTH} 字符上限，已拦截`)
       return false
     }
-    return sendContent(conversationId, 'text', content, senderId)
+    return sendContent(conversationId, 'text', content, senderId, replyTo, replyPreview)
   }
 
   /** 乐观发送图片/文件消息（M3-07）：content 必须是已上传成功的 FileContent（服务端会按 files 记录再归一）。 */
@@ -589,6 +606,8 @@ export const useMessagesStore = defineStore('messages', () => {
     msgType: 'image' | 'file',
     content: FileContent,
     senderId: string,
+    replyTo?: string,
+    replyPreview?: ReplyPreviewLike,
   ): boolean {
     if (
       !content.fileId ||
@@ -600,7 +619,7 @@ export const useMessagesStore = defineStore('messages', () => {
       console.warn('[messages] 文件消息 content 不完整，已拦截')
       return false
     }
-    return sendContent(conversationId, msgType, { ...content }, senderId)
+    return sendContent(conversationId, msgType, { ...content }, senderId, replyTo, replyPreview)
   }
 
   /** 重发失败消息：复用同一 clientMsgId（服务端幂等，不会重复落库）。 */
@@ -630,6 +649,7 @@ export const useMessagesStore = defineStore('messages', () => {
       msgType: pending.msgType,
       content: pending.content,
       createdAt: frame.createdAt,
+      ...(frame.reply ? { reply: frame.reply } : {}),
     }
     merge(frame.conversationId, [message])
     useConversationsStore().applyMessage(frame.conversationId, message)

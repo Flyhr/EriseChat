@@ -30,6 +30,8 @@ export interface PendingRecord {
   createdAt: number
   status: PendingRecordStatus
   retries: number
+  /** F-09：回复引用目标 messageId（可选；恢复后重发仍带引用）。 */
+  replyTo?: string
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null

@@ -89,6 +89,20 @@ export interface SystemContent {
 
 export type MessageContent = string | FileContent | SystemContent
 
+/**
+ * 回复引用摘要（F-09，protocol.md §4.3「Reply 对象」）：不落库，服务端随消息/ack 按需组装。
+ * text 已由服务端截断到 120 字符；图片/文件只带 fileId + name，不带 text。
+ */
+export interface MessageReply {
+  messageId: string
+  seq: number
+  senderId: string
+  msgType: MessageType
+  text?: string
+  fileId?: string
+  name?: string
+}
+
 /** 消息对象（protocol.md §4.3） */
 export interface Message {
   messageId: string
@@ -99,6 +113,8 @@ export interface Message {
   msgType: MessageType
   content: MessageContent
   replyTo?: string
+  /** F-09：被引用消息摘要（服务端组装；不存在/已删除时不返回）。 */
+  reply?: MessageReply
   createdAt: number
   deletedAt?: number
 }
@@ -174,6 +190,8 @@ export interface MessageAckFrame extends FrameBase {
   conversationId: string
   seq: number
   createdAt: number
+  /** F-09：回复引用摘要（仅当发送时带 replyTo 且被引用消息存在）。 */
+  reply?: MessageReply
 }
 
 export interface MessageNewFrame extends FrameBase {

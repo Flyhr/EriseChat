@@ -14,6 +14,8 @@ export interface PendingLike {
   createdAt: number
   status: 'sending' | 'failed'
   retries: number
+  /** F-09：回复引用目标 messageId（可选）。 */
+  replyTo?: string
 }
 
 const MESSAGE_SEND_TYPES: readonly MessageSendType[] = ['text', 'image', 'file']
@@ -47,6 +49,7 @@ export function toPendingRecord(pending: PendingLike): PendingRecord {
     createdAt: pending.createdAt,
     status: pending.status,
     retries: pending.retries,
+    ...(pending.replyTo ? { replyTo: pending.replyTo } : {}),
   }
 }
 
@@ -75,6 +78,10 @@ export function fromPendingRecord(record: unknown): PendingRecord | null {
   if (typeof value.retries !== 'number' || !Number.isInteger(value.retries) || value.retries < 0) {
     return null
   }
+  // F-09：replyTo 可选；存在时必须是 1~64 字符的字符串（与协议 id 长度约束一致）。
+  if (value.replyTo !== undefined) {
+    if (!isNonEmptyString(value.replyTo) || value.replyTo.length > 64) return null
+  }
   return {
     clientMsgId: value.clientMsgId,
     conversationId: value.conversationId,
@@ -85,6 +92,7 @@ export function fromPendingRecord(record: unknown): PendingRecord | null {
     createdAt: value.createdAt,
     status: value.status,
     retries: value.retries,
+    ...(value.replyTo !== undefined ? { replyTo: value.replyTo as string } : {}),
   }
 }
 
