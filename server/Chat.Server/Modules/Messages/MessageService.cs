@@ -25,6 +25,12 @@ public sealed record SyncPullResult(IReadOnlyList<SyncBatch> Batches, bool HasMo
 public sealed record MessageHistoryPage(IReadOnlyList<ProtocolMessage> Messages, bool HasMore);
 
 /// <summary>
+/// REST 消息搜索结果（F-11，不属于协议帧）：messages 按 seq 降序；hasMore 表示还能继续往后翻候选。
+/// 响应形状与 apps/web/src/api/messages.ts 的 MessageSearchPage 对齐。
+/// </summary>
+public sealed record MessageSearchPage(IReadOnlyList<ProtocolMessage> Messages, bool HasMore);
+
+/// <summary>
 /// 消息核心业务（M1-08，计划 §4.3/§4.4 + AGENTS §5）：
 /// 1) message.send：成员校验 → 事务内分配严格 +1 seq → 落库（唯一约束幂等）→ 更新 last_message_id；
 /// 2) sync.request：按游标补拉，每会话每批 ≤200 条、按 seq 升序；
@@ -44,6 +50,16 @@ public sealed class MessageService
 
     /// <summary>REST 历史分页上限。</summary>
     public const int HistoryMaxLimit = 200;
+
+    // F-11 消息搜索（REST，非协议帧）：q 长 1~50、limit 1~50（默认 20）。
+    public const int SearchDefaultLimit = 20;
+    public const int SearchMaxLimit = 50;
+    public const int SearchQueryMaxLength = 50;
+
+    /// <summary>最多扫描 4 个候选窗口（每窗口 min(limit*4, 200) 条），避免 LIKE 全表无限翻页。</summary>
+    private const int SearchMaxCandidateRounds = 4;
+
+    private const int SearchMaxCandidateWindow = 200;
 
     private const int MaxIdLength = 64;
 
@@ -316,7 +332,203 @@ public sealed class MessageService
             hasMore);
     }
 
-    /// <summary>规范化后的发送内容：image/file 的 content 与 messages.file_id 以 files 记录为准（M3-03）。</summary>
+    /// <summary>
+    /// F-11 消息搜索（REST）：只搜本人所在会话、仅 text 且未删除，按 seq 降序返回。
+    /// 实现分两层：先用 SQLite 的 json_extract 取出解码后的文本做 LIKE 粗筛（中文按字面、
+    /// ASCII 大小写不敏感），再在内存中 OrdinalIgnoreCase 复核原文，纠正 %/_ 通配符造成的假命中；
+    /// 复核后不足 limit 时用 beforeSeq 继续往后翻候选窗口（每轮 ≤200 条，最多 4 轮）。
+    /// 注意：content_json 由 FrameCodec 序列化，非 ASCII 字符会被转义成 \uXXXX，因此不能直接
+    /// LIKE 原始 JSON 列（会漏掉中文），必须经 json_extract(content_json, '$') 取回原文。
+    /// 已知限制：LIKE 全表扫描，数据量大后需 FTS5；日志与异常中不打印 q 与消息内容。
+    /// </summary>
+    public async Task<MessageSearchPage> SearchAsync(
+        string userId,
+        string? query,
+        string? conversationId,
+        long? beforeSeq,
+        int? limit,
+        CancellationToken cancellationToken)
+    {
+        var keyword = (query ?? string.Empty).Trim();
+        if (keyword.Length == 0)
+        {
+            throw ApiException.ValidationFailed("搜索关键词 q 不能为空");
+        }
+
+        if (keyword.Length > SearchQueryMaxLength)
+        {
+            throw ApiException.ValidationFailed($"搜索关键词 q 不能超过 {SearchQueryMaxLength} 个字符");
+        }
+
+        var pageSize = limit ?? SearchDefaultLimit;
+        if (pageSize is < 1 or > SearchMaxLimit)
+        {
+            throw ApiException.ValidationFailed($"limit 应为 1~{SearchMaxLimit}");
+        }
+
+        if (beforeSeq is <= 0)
+        {
+            throw ApiException.ValidationFailed("beforeSeq 必须为正整数");
+        }
+
+        string? scopeConversationId = null;
+        if (!string.IsNullOrWhiteSpace(conversationId))
+        {
+            scopeConversationId = ValidateId(conversationId, "conversationId");
+            await EnsureMemberAsync(userId, scopeConversationId, cancellationToken);
+        }
+
+        // LIKE 只做粗筛（%q%）；q 中的 % / _ 会被当通配符，内存复核会按字面 Contains 纠正误命中。
+        var pattern = $"%{keyword}%";
+        var collected = new List<MessageEntity>();
+        long? cursor = beforeSeq;
+        var hasMore = false;
+
+        for (var round = 0; round < SearchMaxCandidateRounds && collected.Count < pageSize; round++)
+        {
+            var windowSize = Math.Min(pageSize * 4, SearchMaxCandidateWindow);
+            var candidates = await SearchCandidateIdsAsync(
+                userId,
+                pattern,
+                scopeConversationId,
+                cursor,
+                windowSize + 1,
+                cancellationToken);
+
+            hasMore = candidates.Count > windowSize;
+            if (hasMore)
+            {
+                candidates.RemoveAt(candidates.Count - 1);
+            }
+
+            if (candidates.Count == 0)
+            {
+                break;
+            }
+
+            var ids = candidates.Select(candidate => candidate.Id).ToList();
+            var rows = await _db.Messages.AsNoTracking()
+                .Where(message => ids.Contains(message.Id))
+                .ToListAsync(cancellationToken);
+            var byId = rows.ToDictionary(message => message.Id, StringComparer.Ordinal);
+
+            foreach (var candidate in candidates)
+            {
+                if (!byId.TryGetValue(candidate.Id, out var entity))
+                {
+                    continue;
+                }
+
+                var text = ExtractTextContent(entity.ContentJson);
+                if (text is not null && text.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    collected.Add(entity);
+                    if (collected.Count >= pageSize)
+                    {
+                        // 窗口内可能仍有未复核的候选，保守返回 hasMore=true 供客户端继续翻页。
+                        hasMore = true;
+                        break;
+                    }
+                }
+            }
+
+            cursor = candidates[^1].Seq;
+            if (!hasMore)
+            {
+                break;
+            }
+        }
+
+        // F-09：搜索结果同样批量加载被引用消息，返回 reply 摘要（一次查询，避免 N+1）。
+        var replies = await LoadRepliesAsync(collected, cancellationToken);
+        return new MessageSearchPage(
+            collected.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
+            hasMore);
+    }
+
+    /// <summary>从 content_json 中取出文本原文；非文本（对象/非法 JSON）返回 null。</summary>
+    private static string? ExtractTextContent(string contentJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson);
+            return document.RootElement.ValueKind == JsonValueKind.String
+                ? document.RootElement.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// LIKE 粗筛候选（按 seq 降序，最多 take 条）：json_extract 取出解码后的文本再匹配
+    /// （content_json 里中文被转义为 \uXXXX，直接 LIKE JSON 列会漏掉中文），
+    /// 同时限定当前用户所在会话；返回 (id, seq) 供上层复核与游标推进。
+    /// </summary>
+    private async Task<List<(string Id, long Seq)>> SearchCandidateIdsAsync(
+        string userId,
+        string pattern,
+        string? conversationId,
+        long? beforeSeq,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        var connection = _db.Database.GetDbConnection();
+        var shouldClose = connection.State != System.Data.ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            // GetDbConnection().CreateCommand() 返回 DbCommand，这里转成 SqliteCommand 以使用
+            // AddWithValue；连接由 EF Core 管理，打开/关闭按需处理。
+            await using var command = (SqliteCommand)connection.CreateCommand();
+            command.CommandText =
+                """
+                SELECT m.id, m.seq
+                FROM messages AS m
+                WHERE m.msg_type = 'text'
+                  AND m.deleted_at IS NULL
+                  AND json_extract(m.content_json, '$') LIKE @pattern
+                  AND EXISTS (
+                      SELECT 1 FROM conversation_members AS cm
+                      WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
+                  AND (@conversationId IS NULL OR m.conversation_id = @conversationId)
+                  AND (@beforeSeq IS NULL OR m.seq < @beforeSeq)
+                ORDER BY m.seq DESC
+                LIMIT @take
+                """;
+            command.Parameters.AddWithValue("@pattern", pattern);
+            command.Parameters.AddWithValue("@userId", userId);
+            command.Parameters.AddWithValue("@conversationId", (object?)conversationId ?? DBNull.Value);
+            command.Parameters.AddWithValue("@beforeSeq", (object?)beforeSeq ?? DBNull.Value);
+            command.Parameters.AddWithValue("@take", take);
+
+            var candidates = new List<(string Id, long Seq)>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                candidates.Add((reader.GetString(0), reader.GetInt64(1)));
+            }
+
+            return candidates;
+        }
+        finally
+        {
+            if (shouldClose)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 规范化后的发送内容：image/file 的 content 与 messages.file_id 以 files 记录为准（M3-03）。
+    /// </summary>
     private sealed record NormalizedSendContent(MessageContent Content, string? FileId, MessageType MsgType);
 
     /// <summary>
