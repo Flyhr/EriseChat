@@ -2,12 +2,15 @@
 import { onBeforeUnmount, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
+import { filesApi } from '../api/files'
 import AppDialog from '../components/AppDialog.vue'
 import Avatar from '../components/Avatar.vue'
 import ComingSoonHint from '../components/ComingSoonHint.vue'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
 import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
+import { friendlyError } from '../core/errorMessages'
+import { compressImageFile } from '../core/imageCompress'
 import { showToast } from '../core/toast'
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
@@ -141,6 +144,117 @@ function toggleSound(): void {
 function previewSound(): void {
   playIncomingSound()
 }
+
+// F-12：个人资料（头像 + 昵称）。头像先压缩（最长边 512、≤200KB）再上传，暂存 fileId；
+// 「保存资料」一次 PATCH 提交变更（昵称/头像任一变化），成功即刷新本机登录用户与会话成员展示。
+const PROFILE_AVATAR_MAX_EDGE = 512
+const PROFILE_AVATAR_MAX_BYTES = 200 * 1024
+const displayNameInput = ref(auth.user?.displayName ?? '')
+const avatarFileIdInput = ref<string | null>(auth.user?.avatarFileId ?? null)
+const avatarUploading = ref(false)
+const profileSaving = ref(false)
+const profileError = ref('')
+const avatarInputEl = ref<HTMLInputElement | null>(null)
+
+const displayNameLength = ref(displayNameInput.value.trim().length)
+/** 是否有未保存的资料改动（昵称 trim 后比较，头像按 fileId 比较）。 */
+const profileDirty = ref(false)
+
+function refreshProfileDirty(): void {
+  const nameChanged = displayNameInput.value.trim() !== (auth.user?.displayName ?? '')
+  const avatarChanged = (avatarFileIdInput.value ?? null) !== (auth.user?.avatarFileId ?? null)
+  profileDirty.value = nameChanged || avatarChanged
+}
+
+displayNameInput.value = auth.user?.displayName ?? ''
+avatarFileIdInput.value = auth.user?.avatarFileId ?? null
+displayNameLength.value = displayNameInput.value.trim().length
+
+function onDisplayNameInput(): void {
+  displayNameLength.value = displayNameInput.value.trim().length
+  refreshProfileDirty()
+}
+
+function triggerAvatarPick(): void {
+  if (avatarUploading.value || profileSaving.value) return
+  avatarInputEl.value?.click()
+}
+
+/** 选择头像：校验图片类型 → 压缩 → 上传 → 暂存 fileId（点「保存资料」才写回服务端）。 */
+async function onAvatarPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    showToast('头像仅支持图片文件（png/jpeg/gif/webp）', 'error')
+    return
+  }
+
+  avatarUploading.value = true
+  profileError.value = ''
+  try {
+    const compressed = await compressImageFile(file, {
+      maxEdge: PROFILE_AVATAR_MAX_EDGE,
+      targetBytes: PROFILE_AVATAR_MAX_BYTES,
+    })
+    const uploaded = await filesApi.upload(compressed)
+    avatarFileIdInput.value = uploaded.fileId
+    refreshProfileDirty()
+    showToast('头像已上传，点击「保存资料」生效', 'info')
+  } catch (error) {
+    profileError.value = friendlyError(error)
+  } finally {
+    avatarUploading.value = false
+  }
+}
+
+/** 保存资料：按变更字段组请求（两项都无变化时不发请求）。 */
+async function saveProfile(): Promise<void> {
+  if (profileSaving.value || avatarUploading.value) return
+  const trimmedName = displayNameInput.value.trim()
+  if (trimmedName.length < 1 || trimmedName.length > 32) {
+    profileError.value = '昵称长度应为 1~32 个字符'
+    return
+  }
+
+  const patch: { displayName?: string; avatarFileId?: string } = {}
+  if (trimmedName !== (auth.user?.displayName ?? '')) patch.displayName = trimmedName
+  const nextAvatarFileId = avatarFileIdInput.value ?? undefined
+  if (nextAvatarFileId !== (auth.user?.avatarFileId ?? undefined)) {
+    if (nextAvatarFileId) patch.avatarFileId = nextAvatarFileId
+  }
+  if (patch.displayName === undefined && patch.avatarFileId === undefined) {
+    profileDirty.value = false
+    return
+  }
+
+  profileSaving.value = true
+  profileError.value = ''
+  try {
+    const profile = await authApi.updateProfile(patch)
+    auth.applyProfile({
+      userId: profile.userId,
+      email: profile.email,
+      displayName: profile.displayName,
+      avatarFileId: profile.avatarFileId,
+      role: profile.role,
+    })
+    conversations.patchSelfProfile({
+      displayName: profile.displayName,
+      avatarFileId: profile.avatarFileId,
+    })
+    displayNameInput.value = profile.displayName
+    avatarFileIdInput.value = profile.avatarFileId ?? null
+    displayNameLength.value = profile.displayName.trim().length
+    refreshProfileDirty()
+    showToast('资料已更新', 'success')
+  } catch (error) {
+    profileError.value = friendlyError(error)
+  } finally {
+    profileSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -150,9 +264,68 @@ function previewSound(): void {
     </header>
 
     <section class="settings-card">
+      <h3 class="settings-card__title">个人资料</h3>
+      <div class="settings-profile">
+        <Avatar
+          :display-name="displayNameInput || auth.user?.displayName || ''"
+          :avatar-file-id="avatarFileIdInput ?? undefined"
+          :size="56"
+        />
+        <div class="settings-profile__avatar-actions">
+          <input
+            ref="avatarInputEl"
+            type="file"
+            class="settings-profile__file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            aria-label="选择头像图片"
+            @change="onAvatarPicked"
+          />
+          <button
+            type="button"
+            class="settings-profile__upload"
+            :disabled="avatarUploading || profileSaving"
+            @click="triggerAvatarPick"
+          >
+            {{ avatarUploading ? '上传中…' : '上传头像' }}
+          </button>
+          <span class="settings-card__hint">支持 png / jpeg / gif / webp，自动压缩到最长边 512、约 200KB</span>
+        </div>
+      </div>
+      <label class="settings-profile__field">
+        <span class="settings-row__label">昵称</span>
+        <span class="settings-profile__input-row">
+          <input
+            v-model="displayNameInput"
+            type="text"
+            maxlength="32"
+            placeholder="1~32 个字符"
+            aria-label="昵称"
+            @input="onDisplayNameInput"
+          />
+          <span class="settings-profile__count">{{ displayNameLength }}/32</span>
+        </span>
+      </label>
+      <p v-if="profileError" class="settings-profile__error" role="alert">{{ profileError }}</p>
+      <div class="settings-profile__actions">
+        <button
+          type="button"
+          class="settings-profile__save"
+          :disabled="!profileDirty || profileSaving || avatarUploading"
+          @click="saveProfile"
+        >
+          {{ profileSaving ? '保存中…' : '保存资料' }}
+        </button>
+      </div>
+    </section>
+
+    <section class="settings-card">
       <h3 class="settings-card__title">账号与安全</h3>
       <div class="settings-account">
-        <Avatar :display-name="auth.user?.displayName ?? ''" :size="48" />
+        <Avatar
+          :display-name="auth.user?.displayName ?? ''"
+          :avatar-file-id="auth.user?.avatarFileId"
+          :size="48"
+        />
         <span class="settings-account__info">
           <span class="settings-account__name">{{ auth.user?.displayName ?? '未登录' }}</span>
           <span class="settings-account__email">{{ auth.user?.email }}</span>
@@ -389,6 +562,99 @@ function previewSound(): void {
   border: 1px solid var(--ec-brand-600);
   border-radius: var(--ec-radius-full);
   background: var(--ec-surface);
+}
+
+/* F-12 个人资料卡片 */
+.settings-profile {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+}
+
+.settings-profile__avatar-actions {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  min-width: 0;
+}
+
+.settings-profile__file {
+  display: none;
+}
+
+.settings-profile__upload {
+  align-self: flex-start;
+  padding: 6px var(--ec-space-3);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.settings-profile__upload:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-profile__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+}
+
+.settings-profile__input-row {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+}
+
+.settings-profile__input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.settings-profile__input-row input:focus {
+  border-color: var(--ec-brand-600);
+}
+
+.settings-profile__count {
+  flex: none;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.settings-profile__error {
+  margin: 0;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
+}
+
+.settings-profile__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-profile__save {
+  padding: 8px var(--ec-space-4);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.settings-profile__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .settings-row {

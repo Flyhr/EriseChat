@@ -102,6 +102,20 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /** F-12：资料更新后写回内存与持久化登录态（token/过期时间不变）。 */
+  function applyProfile(nextUser: AuthUser): void {
+    user.value = { ...nextUser }
+    if (accessToken.value === null || expiresAt.value <= 0) return
+    try {
+      window.localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({ accessToken: accessToken.value, expiresAt: expiresAt.value, user: user.value }),
+      )
+    } catch {
+      // localStorage 不可用时仅保留内存态。
+    }
+  }
+
   function clearSession(): void {
     accessToken.value = null
     user.value = null
@@ -122,6 +136,7 @@ export const useAuthStore = defineStore('auth', () => {
     isLoggedIn,
     isAdmin,
     setSession,
+    applyProfile,
     clearSession,
   }
 })

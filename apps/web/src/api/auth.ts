@@ -55,6 +55,20 @@ export interface LoginResponse {
   user: AuthUser
 }
 
+/** F-12：修改个人资料请求（两项至少一项；不传=不修改，暂不支持清除头像）。 */
+export interface UpdateProfileRequest {
+  /** 新昵称：trim 后 1~32 字符，禁控制字符 */
+  displayName?: string
+  /** 头像文件 ID：须为本人上传的 png/jpeg/gif/webp */
+  avatarFileId?: string
+}
+
+/** F-12：PATCH /api/me/profile 响应（`/api/me` 同形状；前端只取资料字段）。 */
+export interface ProfileResponse extends AuthUser {
+  status: 'active' | 'disabled'
+  createdAt: number
+}
+
 export const authApi = {
   /** 发送邮箱验证码（purpose = register | login） */
   sendEmailCode: (body: SendEmailCodeRequest) =>
@@ -73,4 +87,8 @@ export const authApi = {
 
   /** 注销当前会话（服务端写 sessions.revoked_at，token 立即失效） */
   logout: () => http.post<void>('/auth/logout'),
+
+  /** F-12：修改昵称/头像引用（两项至少一项），返回更新后的资料 */
+  updateProfile: (patch: UpdateProfileRequest) =>
+    http.patch<ProfileResponse>('/me/profile', patch),
 }

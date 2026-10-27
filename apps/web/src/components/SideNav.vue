@@ -96,7 +96,11 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
     </ul>
 
     <RouterLink class="ec-sidenav__account" to="/settings" title="账号与设置">
-      <Avatar :display-name="displayName" :size="28" />
+      <Avatar
+        :display-name="displayName"
+        :avatar-file-id="auth.user?.avatarFileId"
+        :size="28"
+      />
       <span class="ec-sidenav__account-name">{{ displayName }}</span>
     </RouterLink>
   </nav>

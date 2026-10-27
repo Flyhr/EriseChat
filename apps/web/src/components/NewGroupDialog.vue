@@ -166,7 +166,11 @@ watch(
 
       <ul v-if="results.length > 0" class="new-group__results">
         <li v-for="user in results" :key="user.userId" class="new-group__result">
-          <Avatar :display-name="user.displayName" :size="28" />
+          <Avatar
+            :display-name="user.displayName"
+            :avatar-file-id="user.avatarFileId"
+            :size="28"
+          />
           <span class="new-group__result-info">
             <span class="new-group__result-name">{{ user.displayName }}</span>
             <span class="new-group__result-email">{{ user.email }}</span>

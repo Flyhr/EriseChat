@@ -87,6 +87,33 @@ export const useConversationsStore = defineStore('conversations', () => {
     return items.value.find((item) => item.conversationId === conversationId)
   }
 
+  /**
+   * F-12：本机资料（昵称/头像）更新后，同步所有会话 members 中自己的条目，
+   * 让会话列表/群成员面板/消息发送者名立即刷新；不写服务端、不广播（服务端仍是事实源）。
+   */
+  function patchSelfProfile(patch: { displayName?: string; avatarFileId?: string }): void {
+    const selfUserId = useAuthStore().user?.userId
+    if (!selfUserId) return
+    if (patch.displayName === undefined && patch.avatarFileId === undefined) return
+
+    let anyChanged = false
+    const nextItems = items.value.map((conversation) => {
+      let changed = false
+      const members = conversation.members.map((member) => {
+        if (member.userId !== selfUserId) return member
+        const nextDisplayName = patch.displayName !== undefined ? patch.displayName : member.displayName
+        const nextAvatarFileId = patch.avatarFileId !== undefined ? patch.avatarFileId : member.avatarFileId
+        if (nextDisplayName === member.displayName && nextAvatarFileId === member.avatarFileId) return member
+        changed = true
+        return { ...member, displayName: nextDisplayName, avatarFileId: nextAvatarFileId }
+      })
+      if (!changed) return conversation
+      anyChanged = true
+      return { ...conversation, members }
+    })
+    if (anyChanged) items.value = nextItems
+  }
+
   function unreadOf(conversationId: string): number {
     const conversation = getById(conversationId)
     if (!conversation) return 0
@@ -381,6 +408,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     upsert,
     applyMessage,
     getById,
+    patchSelfProfile,
     unreadOf,
     isMuted,
     setMemberSettings,

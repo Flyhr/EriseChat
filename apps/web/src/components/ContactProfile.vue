@@ -93,7 +93,11 @@ function saveFriend(): void {
 <template>
   <div class="contact-profile">
     <div v-if="user" class="contact-profile__card">
-      <Avatar :display-name="displayName" :size="64" />
+      <Avatar
+        :display-name="displayName"
+        :avatar-file-id="user.avatarFileId ?? undefined"
+        :size="64"
+      />
       <h3 class="contact-profile__name">{{ displayName }}</h3>
       <p class="contact-profile__presence">
         <PresenceDot :online="presence" />
