@@ -5,6 +5,8 @@ import type { AuthUser } from './auth'
 export interface UserProfile extends AuthUser {
   status: 'active' | 'disabled'
   createdAt: number
+  /** F-13：是否已设置密码（仅 /api/me 返回；搜索结果为 undefined） */
+  hasPassword?: boolean
   /** F-17：与当前用户的关系（仅搜索结果返回；/api/me 不返回） */
   relation?: 'friend' | 'outgoing' | 'incoming'
 }
