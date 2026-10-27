@@ -41,6 +41,10 @@ const emit = defineEmits<{
   retry: [clientMsgId: string]
   'near-bottom-change': [atBottom: boolean]
   'preview-image': [messageId: string]
+  /** F-09：请求回复某条消息（由会话页记录回复目标）。 */
+  reply: [messageId: string]
+  /** F-09：请求定位到被引用的消息（由会话页处理未加载时的补拉）。 */
+  'jump-to-message': [messageId: string]
 }>()
 
 const container = ref<HTMLDivElement | null>(null)
@@ -113,6 +117,13 @@ function showSenderOf(message: Message): boolean {
 
 function senderNameOf(message: Message): string {
   return memberNameById.value.get(message.senderId) ?? ''
+}
+
+/** F-09：被引用消息的发送者昵称（群聊展示「昵称：摘要」；取不到时留空）。 */
+function replySenderNameOf(message: Message): string {
+  const reply = message.reply
+  if (!reply) return ''
+  return memberNameById.value.get(reply.senderId) ?? ''
 }
 
 function scrollToBottom(): void {
@@ -274,6 +285,41 @@ function onImageLoaded(): void {
   void nextTick(scrollToBottom)
 }
 
+/**
+ * F-09：定位到指定消息（被引用消息跳转）。目标不在当前渲染窗口时先扩窗，
+ * 滚动到视口中央并短暂高亮；消息不在本地缓存时返回 false，由父组件尝试补拉历史。
+ */
+function scrollToMessage(messageId: string): boolean {
+  const index = props.messages.findIndex((message) => message.messageId === messageId)
+  if (index < 0) return false
+
+  const range = currentRange()
+  if (index < range.start || index >= range.end) {
+    windowRange.value = clampWindow(
+      {
+        start: Math.max(0, index - 20),
+        end: Math.min(totalMessages(), index + INITIAL_WINDOW_SIZE),
+      },
+      totalMessages(),
+    )
+  }
+  stickToBottom.value = false
+  emitNearBottom(false)
+
+  void nextTick(() => {
+    const element = container.value?.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(messageId)}"]`,
+    )
+    if (!element) return
+    element.scrollIntoView({ block: 'center' })
+    element.classList.add('message-row--highlight')
+    window.setTimeout(() => element.classList.remove('message-row--highlight'), 1600)
+  })
+  return true
+}
+
+defineExpose({ scrollToMessage })
+
 // 切换会话：窗口重置到末尾、重新贴底、清浮标并上报，父组件据此推进新会话的已读。
 watch(
   () => props.conversationId ?? '',
@@ -392,12 +438,16 @@ onMounted(() => {
         <MessageBubble
           v-else
           :message="item.message"
+          :data-message-id="item.message.messageId"
           :self="item.message.senderId === selfUserId"
           :show-sender="showSenderOf(item.message)"
           :sender-name="senderNameOf(item.message)"
+          :reply-sender-name="replySenderNameOf(item.message)"
           :receipt="receiptOf(item.message)"
           @image-loaded="onImageLoaded"
           @preview-image="emit('preview-image', $event)"
+          @reply="emit('reply', $event)"
+          @jump-to-message="emit('jump-to-message', $event)"
         />
       </template>
 

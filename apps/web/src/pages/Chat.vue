@@ -22,6 +22,7 @@ import { imageItemsOf } from '../core/imageGallery'
 import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { TypingThrottle } from '../core/typingThrottle'
+import type { ReplyPreviewLike } from '../core/replyPreview'
 import { chatWs, type WsState } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -29,7 +30,7 @@ import { useMessagesStore } from '../stores/messages'
 import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
 import { useDraftsStore } from '../stores/drafts'
-import type { Conversation } from '../types/frames'
+import type { Conversation, Message } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
 // 规则：页面只做编排，状态走 stores/，连接走 core/ws.ts，不直接 new WebSocket / fetch。
@@ -87,7 +88,7 @@ const membersOpen = computed(
     activeDrawer.value === 'group',
 )
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
-const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void } | null>(null)
+const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void; focusInput: () => void } | null>(null)
 
 // 连接状态页内提示（UI-02 批次4）：断线/重连就地提示，恢复后短暂显示 3 秒；
 // 只读取 core/ws.ts 的真实状态，不替代全局 ConnectionBanner，也不伪造连接状态。
@@ -157,6 +158,49 @@ const activeLoadingHistory = computed(() =>
   activeId.value ? messages.isLoadingMore(activeId.value) : false,
 )
 const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
+
+// 回复引用（F-09）：replyTarget 记录当前回复目标与本地引用条摘要，发送成功或取消后清空；
+// 点击引用条先在本窗口定位，未加载时循环补拉历史（≤8 页）。
+const replyTarget = ref<{ messageId: string; preview: ReplyPreviewLike } | null>(null)
+const messageListRef = ref<{ scrollToMessage: (messageId: string) => boolean } | null>(null)
+const JUMP_MAX_LOAD_PAGES = 8
+
+function replyPreviewOf(message: Message): ReplyPreviewLike {
+  const content = message.content
+  if (typeof content === 'string') return { msgType: 'text', text: content }
+  if ('fileId' in content) {
+    return { msgType: message.msgType === 'image' ? 'image' : 'file', name: content.name }
+  }
+  // system 消息不提供回复入口，这里仅做类型兜底（按文本摘要展示）。
+  return { msgType: 'text', text: content.text ?? '' }
+}
+
+function onReplyMessage(messageId: string): void {
+  const message = activeMessages.value.find((item) => item.messageId === messageId)
+  if (!message) return
+  replyTarget.value = { messageId, preview: replyPreviewOf(message) }
+  void nextTick(() => sendBoxRef.value?.focusInput())
+}
+
+function cancelReply(): void {
+  replyTarget.value = null
+}
+
+async function onJumpToMessage(messageId: string): Promise<void> {
+  if (!activeId.value) return
+  for (let page = 0; page < JUMP_MAX_LOAD_PAGES && activeHasMore.value; page += 1) {
+    if (messageListRef.value?.scrollToMessage(messageId)) return
+    await messages.loadMore(activeId.value)
+    await nextTick()
+  }
+  if (messageListRef.value?.scrollToMessage(messageId)) return
+  pageNotice.value = '被引用的消息不在本地缓存中，可手动加载更早消息查看'
+}
+
+// 切换会话时清空回复目标，避免把引用带到另一个会话（F-09）。
+watch(activeId, () => {
+  replyTarget.value = null
+})
 
 // 图片预览（F-08）：会话内图片列表 = 已加载消息 + 乐观待发图片；blob URL 复用 core/blobCache
 // （按 fileId 去重、上限 100、退出登录时整体回收），避免与缩略图/下载重复请求，也不把 URL 写进 store。
@@ -388,7 +432,16 @@ function backToList(): void {
 function sendMessage(text: string): void {
   const conversationId = activeId.value
   if (!conversationId || !selfUserId.value) return
-  messages.sendText(conversationId, text, selfUserId.value)
+  const reply = replyTarget.value
+  const sent = messages.sendText(
+    conversationId,
+    text,
+    selfUserId.value,
+    reply?.messageId,
+    reply?.preview,
+  )
+  if (!sent) return
+  replyTarget.value = null
   // 发送成功即清空该会话草稿：发送框随后会把空串回传，这里先按语义删除并立即写盘（F-04）。
   drafts.removeDraft(conversationId)
 }
@@ -522,6 +575,8 @@ async function uploadAndSendFile(file: File): Promise<void> {
   const conversationId = activeId.value
   const senderId = selfUserId.value
   if (!conversationId || !senderId) return
+  // F-09：附件同样支持回复引用；发送成功才清空回复目标（失败保留，便于重试）。
+  const reply = replyTarget.value
 
   const validation = validateAttachment(file)
   if (!validation.ok) {
@@ -549,7 +604,10 @@ async function uploadAndSendFile(file: File): Promise<void> {
         mime: uploaded.mime,
       },
       senderId,
+      reply?.messageId,
+      reply?.preview,
     )
+    if (sent && replyTarget.value === reply) replyTarget.value = null
     if (!sent && !uploadError.value) uploadError.value = '消息发送失败，请重试'
   } catch (error) {
     if (!uploadError.value) {
@@ -659,6 +717,7 @@ function onWindowDrop(event: DragEvent): void {
             <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <MessageList
+              ref="messageListRef"
               :messages="activeMessages"
               :pending="activePending"
               :self-user-id="selfUserId"
@@ -673,6 +732,8 @@ function onWindowDrop(event: DragEvent): void {
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
               @preview-image="onPreviewImage"
+              @reply="onReplyMessage"
+              @jump-to-message="onJumpToMessage"
             />
             <div class="chat-page__composer">
               <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
@@ -688,11 +749,13 @@ function onWindowDrop(event: DragEvent): void {
                 :uploading="uploadBusy"
                 :upload-error="uploadError"
                 :emoji-open="activeDrawer === 'emoji'"
+                :reply-to="replyTarget?.preview ?? null"
                 @send="sendMessage"
                 @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"
                 @typing="sendTyping"
                 @pick-emoji="toggleEmojiDrawer"
+                @cancel-reply="cancelReply"
               />
             </div>
           </div>

@@ -5,6 +5,7 @@ import { MAX_TEXT_LENGTH } from '../core/config'
 import { ALLOWED_EXTENSIONS } from '../core/attachments'
 import { insertAtCursor } from '../core/emoji'
 import { filesOfClipboard, normalizeDroppedFile } from '../core/fileDrop'
+import { replyCardText, type ReplyPreviewLike } from '../core/replyPreview'
 
 // 发送框（纯展示 + 本地输入）：文本只 emit send，附件只 emit file-selected；
 // 上传、压缩、发送状态机由 pages/Chat.vue 与 stores/messages.ts 负责。
@@ -22,6 +23,8 @@ const emit = defineEmits<{
   'pick-emoji': []
   /** 输入文本变化（含清空）：由 Chat 页写入草稿存储（F-04）。 */
   'draft-change': [text: string]
+  /** F-09：取消当前回复引用。 */
+  'cancel-reply': []
 }>()
 
 const props = withDefaults(
@@ -36,8 +39,10 @@ const props = withDefaults(
     conversationId?: string
     /** 当前会话的初始草稿（F-04）：仅作为切换会话时的恢复值，输入后由 draft-change 回传。 */
     initialDraft?: string
+    /** F-09：当前回复目标摘要（空 = 未回复），显示在输入框上方的引用条。 */
+    replyTo?: ReplyPreviewLike | null
   }>(),
-  { uploading: false, uploadError: null, emojiOpen: false, conversationId: '', initialDraft: '' },
+  { uploading: false, uploadError: null, emojiOpen: false, conversationId: '', initialDraft: '', replyTo: null },
 )
 
 /** 输入框最大高度（计划 §5.5：自动增长至约 360px，超出后内部滚动）。 */
@@ -144,11 +149,29 @@ function onEnter(event: KeyboardEvent): void {
   event.preventDefault()
   submit()
 }
+
+/** F-09：Esc 取消回复引用（不拦截默认行为之外的其他键）。 */
+function onEscape(): void {
+  if (!props.replyTo) return
+  emit('cancel-reply')
+}
 </script>
 
 <template>
   <form class="send-box" @submit.prevent="submit">
     <div class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
+      <div v-if="replyTo" class="send-box__reply">
+        <span class="send-box__reply-text">{{ replyCardText(replyTo) }}</span>
+        <button
+          class="send-box__reply-cancel"
+          type="button"
+          title="取消回复"
+          aria-label="取消回复"
+          @click="emit('cancel-reply')"
+        >
+          <AppIcon name="close" :size="14" />
+        </button>
+      </div>
       <textarea
         ref="input"
         v-model="text"
@@ -160,6 +183,7 @@ function onEnter(event: KeyboardEvent): void {
         aria-label="消息输入框"
         @input="onInput"
         @keydown.enter.exact="onEnter"
+        @keydown.esc="onEscape"
         @paste="onPaste"
       />
       <!-- 工具栏与正文同处一个输入框：图标放在输入框下侧，分隔线用浅色避免抢视觉。 -->
@@ -284,6 +308,48 @@ function onEnter(event: KeyboardEvent): void {
 
 .send-box__field--error {
   border-color: var(--ec-danger);
+}
+
+/* F-09：回复引用条（输入框左上角），点击 × 或按 Esc 取消。 */
+.send-box__reply {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  margin-bottom: var(--ec-space-1);
+  padding: 5px 10px;
+  border-left: 3px solid var(--ec-brand-500);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-brand-050);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.send-box__reply-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send-box__reply-cancel {
+  display: grid;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+.send-box__reply-cancel:hover {
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-primary);
+}
 }
 
 .send-box__input {
