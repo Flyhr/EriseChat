@@ -42,6 +42,12 @@ const CODE_MESSAGES: Record<string, string> = {
 /** 网络层异常的通用提示（浏览器对网络/CORS 失败只抛 TypeError）。 */
 const NETWORK_MESSAGE = '无法连接服务器，请检查网络或服务器地址'
 
+/**
+ * TypeError 也可能是前端代码错误（如旧缓存模块缺少新方法），不能一律当成网络异常；
+ * 浏览器网络/CORS 失败的 TypeError message 固定为 Failed to fetch 等（Chrome/Edge/Firefox/Safari）。
+ */
+const NETWORK_ERROR_PATTERN = /failed to fetch|networkerror|network error|load failed/i
+
 /** 未知异常的保底提示。 */
 const FALLBACK_MESSAGE = '操作失败，请稍后重试'
 
@@ -60,7 +66,9 @@ export function friendlyError(error: unknown): string {
     if (message.length > 0 && message !== `请求失败（HTTP ${error.status}）`) return message
     return FALLBACK_MESSAGE
   }
-  if (error instanceof TypeError) return NETWORK_MESSAGE
+  if (error instanceof TypeError) {
+    return NETWORK_ERROR_PATTERN.test(error.message) ? NETWORK_MESSAGE : FALLBACK_MESSAGE
+  }
   if (error instanceof Error) {
     const message = error.message.trim()
     return message.length > 0 ? message : FALLBACK_MESSAGE

@@ -57,6 +57,15 @@ describe('friendlyError - 非 ApiError 异常', () => {
     expect(friendlyError(new TypeError('Failed to fetch'))).toBe(
       '无法连接服务器，请检查网络或服务器地址',
     )
+    expect(friendlyError(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(
+      '无法连接服务器，请检查网络或服务器地址',
+    )
+  })
+
+  it('前端代码 TypeError 不误报为网络异常', () => {
+    expect(friendlyError(new TypeError('auth.applyProfile is not a function'))).toBe(
+      '操作失败，请稍后重试',
+    )
   })
 
   it('普通 Error 使用其 message', () => {
