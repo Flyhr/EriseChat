@@ -145,6 +145,18 @@ namespace Chat.Server.Data.Migrations
                         .HasDefaultValue(0L)
                         .HasColumnName("last_read_seq");
 
+                    b.Property<bool>("Muted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("muted");
+
+                    b.Property<bool>("Pinned")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("pinned");
+
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasColumnType("TEXT")

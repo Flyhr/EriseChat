@@ -19,4 +19,10 @@ public sealed class ConversationMember
 
     /// <summary>已读游标，只增不减（未读 = 会话 last_seq − last_read_seq）。</summary>
     public long LastReadSeq { get; set; }
+
+    /// <summary>是否置顶该会话（F-10：当前用户自己的成员级设置，默认 false）。</summary>
+    public bool Pinned { get; set; }
+
+    /// <summary>是否消息免打扰（F-10：当前用户自己的成员级设置，默认 false）。</summary>
+    public bool Muted { get; set; }
 }

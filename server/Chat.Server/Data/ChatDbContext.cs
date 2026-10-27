@@ -190,6 +190,9 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .ValueGeneratedNever();
             entity.Property(member => member.JoinedAt).HasColumnName("joined_at");
             entity.Property(member => member.LastReadSeq).HasColumnName("last_read_seq").HasDefaultValue(0L);
+            // F-10：成员级设置（当前用户自己的置顶/免打扰）；只新增列，旧数据按默认值 0 兼容。
+            entity.Property(member => member.Pinned).HasColumnName("pinned").HasDefaultValue(false);
+            entity.Property(member => member.Muted).HasColumnName("muted").HasDefaultValue(false);
 
             entity.HasOne<Conversation>().WithMany()
                 .HasForeignKey(member => member.ConversationId)
