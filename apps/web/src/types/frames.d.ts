@@ -6,7 +6,7 @@
 // 本文件只是类型镜像，不做运行时校验；帧解析/序列化在 core/ws.ts。
 // 协议版本运行时值见 core/config.ts（默认 1，可由 VITE_PROTOCOL_VERSION 覆盖）。
 
-/** 18 个帧 type（protocol.md §3） */
+/** 22 个帧 type（protocol.md §3；F-18 新增撤回/编辑 4 个） */
 export type FrameType =
   | 'auth'
   | 'hello'
@@ -15,6 +15,10 @@ export type FrameType =
   | 'message.send'
   | 'message.ack'
   | 'message.new'
+  | 'message.recall'
+  | 'message.recalled'
+  | 'message.edit'
+  | 'message.edited'
   | 'sync.request'
   | 'sync.response'
   | 'conv.list'
@@ -117,6 +121,8 @@ export interface Message {
   reply?: MessageReply
   createdAt: number
   deletedAt?: number
+  /** F-18：编辑时间（UTC 毫秒）；非空表示编辑过。 */
+  editedAt?: number
 }
 
 /** 会话成员（protocol.md §4.5） */
@@ -205,6 +211,38 @@ export interface MessageAckFrame extends FrameBase {
 export interface MessageNewFrame extends FrameBase {
   type: 'message.new'
   message: Message
+}
+
+export interface MessageRecallFrame extends FrameBase {
+  type: 'message.recall'
+  conversationId: string
+  messageId: string
+}
+
+export interface MessageRecalledFrame extends FrameBase {
+  type: 'message.recalled'
+  conversationId: string
+  messageId: string
+  seq: number
+  deletedAt: number
+  operatorId: string
+}
+
+export interface MessageEditFrame extends FrameBase {
+  type: 'message.edit'
+  conversationId: string
+  messageId: string
+  content: string
+}
+
+export interface MessageEditedFrame extends FrameBase {
+  type: 'message.edited'
+  conversationId: string
+  messageId: string
+  seq: number
+  content: string
+  editedAt: number
+  operatorId: string
 }
 
 export interface SyncCursor {
@@ -345,6 +383,8 @@ export type ClientFrame =
   | PingFrame
   | PongFrame
   | MessageSendFrame
+  | MessageRecallFrame
+  | MessageEditFrame
   | SyncRequestFrame
   | ConvListRequestFrame
   | ReadUpdateFrame
@@ -357,6 +397,8 @@ export type ServerFrame =
   | PongFrame
   | MessageAckFrame
   | MessageNewFrame
+  | MessageRecalledFrame
+  | MessageEditedFrame
   | SyncResponseFrame
   | ConvListResponseFrame
   | ConvUpdatedFrame

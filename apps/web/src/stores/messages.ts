@@ -4,6 +4,10 @@ import type {
   FileContent,
   Message,
   MessageAckFrame,
+  MessageEditFrame,
+  MessageEditedFrame,
+  MessageRecallFrame,
+  MessageRecalledFrame,
   MessageSendFrame,
   MessageSendType,
   ServerFrame,
@@ -151,6 +155,37 @@ export const useMessagesStore = defineStore('messages', () => {
     if (messages.length === 0) return
     void saveMessages(messages).catch(() => {
       // 缓存写入失败不影响主流程。
+    })
+  }
+
+  /** F-18：用服务端推送的撤回/编辑结果覆盖本地消息（按 messageId 定位），并持久化。 */
+  function patchStoredMessage(
+    conversationId: string,
+    messageId: string,
+    patch: Partial<Pick<Message, 'content' | 'deletedAt' | 'editedAt'>>,
+  ): void {
+    const list = messagesOf(conversationId)
+    const index = list.findIndex((message) => message.messageId === messageId)
+    if (index < 0) return
+    const updated: Message = { ...list[index], ...patch }
+    const next = list.slice()
+    next[index] = updated
+    byConversation.value = { ...byConversation.value, [conversationId]: next }
+    persistMessages([updated])
+  }
+
+  function handleRecalled(frame: MessageRecalledFrame): void {
+    // 撤回后内容为空文本、不再带文件信息；deletedAt 非空即视为已撤回。
+    patchStoredMessage(frame.conversationId, frame.messageId, {
+      content: '',
+      deletedAt: frame.deletedAt,
+    })
+  }
+
+  function handleEdited(frame: MessageEditedFrame): void {
+    patchStoredMessage(frame.conversationId, frame.messageId, {
+      content: frame.content,
+      editedAt: frame.editedAt,
     })
   }
 
@@ -312,6 +347,8 @@ export const useMessagesStore = defineStore('messages', () => {
         ...loadedConversations.value,
         [conversationId]: true,
       }
+      // F-18：缓存可能落后于服务端（离线期间的撤回/编辑），打开会话后拉最新一页校正。
+      void refreshRecent(conversationId)
       return
     }
     loadingInitialByConversation.value = {
@@ -333,6 +370,7 @@ export const useMessagesStore = defineStore('messages', () => {
         [conversationId]: page.hasMore,
       }
       loadedConversations.value = { ...loadedConversations.value, [conversationId]: true }
+      void refreshRecent(conversationId)
     } finally {
       loadingInitialByConversation.value = {
         ...loadingInitialByConversation.value,
@@ -362,6 +400,47 @@ export const useMessagesStore = defineStore('messages', () => {
         ...loadingMoreByConversation.value,
         [conversationId]: false,
       }
+    }
+  }
+
+  function isSameContent(a: Message['content'], b: Message['content']): boolean {
+    if (typeof a === 'string' || typeof b === 'string') return a === b
+    return JSON.stringify(a) === JSON.stringify(b)
+  }
+
+  /**
+   * F-18：打开会话后用 REST 拉最新一页历史，按 messageId 覆盖本地 content/deletedAt/editedAt/reply。
+   * 已知限制：离线期间最近 50 条以外的撤回/编辑不会自动回放（需手动加载历史或刷新）。
+   */
+  async function refreshRecent(conversationId: string): Promise<void> {
+    try {
+      const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
+      const freshById = new Map(page.messages.map((message) => [message.messageId, message]))
+      const changed: Message[] = []
+      const next = messagesOf(conversationId).map((message) => {
+        const fresh = freshById.get(message.messageId)
+        if (!fresh) return message
+        if (
+          fresh.deletedAt === message.deletedAt &&
+          fresh.editedAt === message.editedAt &&
+          isSameContent(fresh.content, message.content)
+        ) {
+          return message
+        }
+        const updated: Message = { ...message, content: fresh.content }
+        if (fresh.deletedAt === undefined) delete updated.deletedAt
+        else updated.deletedAt = fresh.deletedAt
+        if (fresh.editedAt === undefined) delete updated.editedAt
+        else updated.editedAt = fresh.editedAt
+        if (fresh.reply) updated.reply = fresh.reply
+        changed.push(updated)
+        return updated
+      })
+      if (changed.length === 0) return
+      byConversation.value = { ...byConversation.value, [conversationId]: next }
+      persistMessages(changed)
+    } catch (error) {
+      console.warn('[messages] 刷新最近消息状态失败（将以补拉为准）', error)
     }
   }
 
@@ -633,6 +712,18 @@ export const useMessagesStore = defineStore('messages', () => {
     transmit(pending)
   }
 
+  /** F-18：撤回自己的消息（结果通过 message.recalled 广播/错误帧返回，不在本地乐观更新）。 */
+  function sendRecall(conversationId: string, messageId: string): boolean {
+    const frame: MessageRecallFrame = { type: 'message.recall', conversationId, messageId }
+    return chatWs.send(frame)
+  }
+
+  /** F-18：编辑自己的文本消息（结果通过 message.edited 广播返回）。 */
+  function sendEdit(conversationId: string, messageId: string, content: string): boolean {
+    const frame: MessageEditFrame = { type: 'message.edit', conversationId, messageId, content }
+    return chatWs.send(frame)
+  }
+
   function handleAck(frame: MessageAckFrame): void {
     const pending = findPending(frame.conversationId, frame.clientMsgId)
     if (!pending) return
@@ -754,6 +845,12 @@ export const useMessagesStore = defineStore('messages', () => {
         break
       case 'message.new':
         handleIncoming(frame.message)
+        break
+      case 'message.recalled':
+        handleRecalled(frame)
+        break
+      case 'message.edited':
+        handleEdited(frame)
         break
       case 'error': {
         const match = /^msg-(.+)$/.exec(frame.reqId ?? '')
@@ -919,6 +1016,9 @@ export const useMessagesStore = defineStore('messages', () => {
     syncAll,
     sendText,
     sendFileMessage,
+    sendRecall,
+    sendEdit,
+    refreshRecent,
     retrySend,
     removeConversation,
     subscribeRealtime,
