@@ -61,3 +61,30 @@ export function countLocalMatches(messages: readonly Message[], query: string): 
     return text !== null && text.toLowerCase().includes(keyword) ? total + 1 : total
   }, 0)
 }
+
+/**
+ * F-19-05：合并服务端结果与本地结果——服务端只检索 text 消息，本地还会命中文件消息名，
+ * 因此服务端结果返回后仍要保留本地独有的文件命中。
+ * 规则：按 messageId 去重（服务端优先，内容以服务端为准），合并后按 seq 降序；不改入参。
+ */
+export function mergeLocalSearchResults(
+  serverResults: readonly Message[],
+  localResults: readonly Message[],
+): Message[] {
+  const merged: Message[] = []
+  const seen = new Set<string>()
+
+  for (const message of serverResults) {
+    if (seen.has(message.messageId)) continue
+    seen.add(message.messageId)
+    merged.push(message)
+  }
+  for (const message of localResults) {
+    if (seen.has(message.messageId)) continue
+    seen.add(message.messageId)
+    merged.push(message)
+  }
+
+  merged.sort((left, right) => right.seq - left.seq)
+  return merged
+}

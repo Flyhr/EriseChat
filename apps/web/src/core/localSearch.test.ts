@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LOCAL_SEARCH_LIMIT,
   countLocalMatches,
+  mergeLocalSearchResults,
   searchLocalMessages,
   searchableTextOf,
 } from './localSearch'
@@ -168,5 +169,42 @@ describe('searchableTextOf', () => {
       content: { fileId: 'f-1' } as unknown as Message['content'],
     })
     expect(searchableTextOf(broken)).toBeNull()
+  })
+})
+
+describe('mergeLocalSearchResults', () => {
+  it('服务端结果返回后仍保留本地独有的文件命中', () => {
+    const server = [textMessage('会议纪要', 5, { messageId: 'srv-text-5' })]
+    const local = [fileMessage('会议纪要.pdf', 3, { messageId: 'local-file-3' })]
+
+    const merged = mergeLocalSearchResults(server, local)
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map((message) => message.messageId)).toContain('local-file-3')
+    expect(merged.some((message) => message.msgType === 'file')).toBe(true)
+  })
+
+  it('重复 messageId 去重且以服务端结果为准', () => {
+    const local = [textMessage('旧内容', 2, { messageId: 'dup-1' })]
+    const server = [textMessage('服务端内容', 2, { messageId: 'dup-1' })]
+
+    const merged = mergeLocalSearchResults(server, local)
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].content).toBe('服务端内容')
+  })
+
+  it('合并后按 seq 降序排序且不修改入参', () => {
+    const server = [
+      textMessage('a', 1, { messageId: 'srv-1' }),
+      textMessage('b', 7, { messageId: 'srv-7' }),
+    ]
+    const local = [fileMessage('c.pdf', 4, { messageId: 'local-4' })]
+
+    const merged = mergeLocalSearchResults(server, local)
+
+    expect(merged.map((message) => message.seq)).toEqual([7, 4, 1])
+    expect(server.map((message) => message.seq)).toEqual([1, 7])
+    expect(local).toHaveLength(1)
   })
 })

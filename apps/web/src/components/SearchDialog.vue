@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { conversationLabel } from '../core/groupChat'
+import { mergeLocalSearchResults } from '../core/localSearch'
 import NoticeBar from './NoticeBar.vue'
 import SearchResultItem from './SearchResultItem.vue'
 import { useAuthStore } from '../stores/auth'
@@ -35,7 +36,12 @@ const title = computed(() =>
 
 /** F-19：当前展示的列表——服务端结果优先；会话内尚未返回时展示本地即时结果。 */
 const displayList = computed<Message[]>(() => {
-  if (search.results.length > 0) return search.results
+  if (search.results.length > 0) {
+    // F-19-05：服务端只检索 text 消息，本地还会命中文件名；合并后保留本地独有命中（去重按服务端优先）。
+    return search.isGlobal
+      ? search.results
+      : mergeLocalSearchResults(search.results, search.localResults)
+  }
   if (!search.isGlobal) return search.localResults
   return []
 })
@@ -52,11 +58,18 @@ const displayQuery = computed(() =>
 
 const hasKeyword = computed(() => Boolean(search.query.trim()))
 
-/** F-19：会话内命中数提示（本地 N 条 / 服务端 M 条）。 */
+/** F-19：会话内命中数提示（区分搜索中/离线/服务端无结果等状态）。 */
 const countsText = computed(() => {
   if (search.isGlobal || !hasKeyword.value || search.localTotal === 0) return ''
-  if (isLocalList.value) return `本地 ${search.localTotal} 条，正在搜索更早历史…`
-  return `本地 ${search.localTotal} 条 / 服务端 ${search.results.length}${search.hasMore ? '+' : ''} 条`
+  if (search.offlineFallback) return `本地 ${search.localTotal} 条（网络不可用，仅显示本地已加载）`
+  if (search.loading && search.results.length === 0) {
+    return `本地 ${search.localTotal} 条，正在搜索更早历史…`
+  }
+  if (search.results.length > 0) {
+    return `共 ${displayList.value.length} 条（本地命中 ${search.localTotal} 条）`
+  }
+  if (search.localResults.length > 0) return `本地 ${search.localTotal} 条（更早历史无匹配）`
+  return ''
 })
 
 const emptyText = computed(() => {
