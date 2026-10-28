@@ -1,6 +1,7 @@
 // 会话接口（对应 server/Chat.Server/Api/ConversationsEndpoints.cs；M3-08 按服务端实际契约校准）。
 // 群成员信息包含在 Conversation.members 中返回；群成员变更走 POST /conversations/{id}/members 与
 // DELETE /conversations/{id}/members/{userId}；群资料（标题/公告）走 PATCH /conversations/{id}（仅群主，F-14）。
+// 会话共享文件走 GET /conversations/{id}/files（F-15：只读汇总 image/file 消息附件）。
 import { http } from '../core/http'
 import type { Conversation } from '../types/frames'
 
@@ -29,6 +30,27 @@ export interface GroupProfileUpdate {
   title?: string
   announcement?: string
   avatarFileId?: string
+}
+
+/** 共享文件类型（F-15）：与消息 msgType 对应。 */
+export type SharedFileType = 'image' | 'file'
+
+/** 共享文件条目（F-15）：每个文件取其在会话中最新引用的消息（messageSeq 最大）。 */
+export interface SharedFileItem {
+  fileId: string
+  name: string
+  size: number
+  mime: string
+  messageId: string
+  messageSeq: number
+  senderId: string
+  createdAt: number
+}
+
+/** 共享文件分页（F-15）：items 按 messageSeq 降序；beforeSeq 为排他游标。 */
+export interface SharedFilesPage {
+  items: SharedFileItem[]
+  hasMore: boolean
 }
 
 export const conversationsApi = {
@@ -78,4 +100,20 @@ export const conversationsApi = {
       `/conversations/${conversationId}`,
       body satisfies GroupProfileUpdate,
     ),
+
+  /**
+   * 会话共享文件分页（F-15）：需登录且为会话成员；type 必填，limit 1~100（默认 50），
+   * beforeSeq 为排他游标（传上一页最后一项的 messageSeq 继续向前翻）。
+   */
+  listFiles: (
+    conversationId: string,
+    options: { type: SharedFileType; beforeSeq?: number; limit?: number },
+  ) => {
+    const params = new URLSearchParams({ type: options.type })
+    if (options.beforeSeq !== undefined) params.set('beforeSeq', String(options.beforeSeq))
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    return http.get<SharedFilesPage>(
+      `/conversations/${conversationId}/files?${params.toString()}`,
+    )
+  },
 }
