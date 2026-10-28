@@ -25,6 +25,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   'open-group': []
+  'open-files': []
   back: []
   search: []
 }>()
@@ -72,6 +73,16 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
         @click="emit('search')"
       >
         <AppIcon name="search" />
+      </button>
+      <!-- F-15：会话共享文件入口（群聊/单聊都可用），打开右侧 aside 的「文件」页签。 -->
+      <button
+        type="button"
+        class="ec-chat-header__action ec-chat-header__icon-button"
+        aria-label="查看会话共享文件"
+        title="查看会话共享文件"
+        @click="emit('open-files')"
+      >
+        <AppIcon name="file" />
       </button>
       <ComingSoonHint label="更多" layout="inline" :show-hint="false" class="ec-chat-header__action">
         <AppIcon name="more" />

@@ -7,6 +7,7 @@ import ConversationList from '../components/ConversationList.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
+import ConversationFilesPanel from '../components/ConversationFilesPanel.vue'
 import ImagePreview from '../components/ImagePreview.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
@@ -75,19 +76,16 @@ const activeTitle = computed(() => {
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
-// 右侧面板（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，group 由群聊顶栏触发。
+// 右侧面板（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，aside 由群聊「群资料」或顶栏「文件」按钮触发。
 const activeDrawer = ref<'emoji' | 'group' | null>(null)
+/** aside 当前页签（F-15）：群聊可在「群资料与成员」「文件」间切换；单聊仅有「文件」。 */
+const asideTab = ref<'members' | 'files'>('members')
 /** 面板打开时压入 history 哨兵：Android 返回/浏览器后退先关面板，不直接退出会话（UI-04）。 */
 const panelGuard = createPanelHistoryGuard(() => {
   activeDrawer.value = null
 })
-/** 群成员面板改为与聊天窗口同层的右侧栏（内嵌 grid 列，不再用遮罩抽屉覆盖聊天区）。 */
-const membersOpen = computed(
-  () =>
-    Boolean(activeId.value) &&
-    activeConversation.value?.type === 'group' &&
-    activeDrawer.value === 'group',
-)
+/** 右侧 aside（群资料与成员 / 共享文件）：与聊天窗口同层的 grid 列，打开时聊天区收窄。 */
+const asideOpen = computed(() => Boolean(activeId.value) && activeDrawer.value === 'group')
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void; focusInput: () => void } | null>(null)
 
@@ -592,7 +590,30 @@ watch(activeDrawer, (drawer) => {
 
 function toggleGroupDrawer(): void {
   if (!isGroup.value) return
-  activeDrawer.value = activeDrawer.value === 'group' ? null : 'group'
+  if (activeDrawer.value === 'group' && asideTab.value === 'members') {
+    activeDrawer.value = null
+    return
+  }
+  asideTab.value = 'members'
+  activeDrawer.value = 'group'
+}
+
+/** F-15：顶栏「文件」按钮——打开 aside 并定位文件页签；再次点击收起。 */
+function toggleFilesPanel(): void {
+  if (!activeId.value) return
+  if (activeDrawer.value === 'group' && asideTab.value === 'files') {
+    activeDrawer.value = null
+    return
+  }
+  asideTab.value = 'files'
+  activeDrawer.value = 'group'
+}
+
+/** F-15：aside 内页签切换（群聊：群资料与成员 / 文件）。 */
+function switchAsideTab(tab: 'members' | 'files'): void {
+  if (tab === 'members' && !isGroup.value) return
+  asideTab.value = tab
+  activeDrawer.value = 'group'
 }
 
 // Emoji 面板选择：插入到发送框光标处，不发送、不关闭面板（可连续选多个）。
@@ -747,7 +768,7 @@ function onWindowDrop(event: DragEvent): void {
 <template>
   <main
     class="chat-page"
-    :class="{ 'chat-page--conversation': Boolean(activeId), 'chat-page--members': membersOpen }"
+    :class="{ 'chat-page--conversation': Boolean(activeId), 'chat-page--members': asideOpen }"
   >
     <ConversationList
       class="chat-page__list"
@@ -784,10 +805,11 @@ function onWindowDrop(event: DragEvent): void {
           :avatar-file-id="activeConversation.avatarFileId ?? null"
           :show-back="true"
           @open-group="toggleGroupDrawer"
+          @open-files="toggleFilesPanel"
           @back="backToList"
           @search="openConversationSearch"
         />
-        <div class="chat-page__content" :class="{ 'chat-page__content--members': membersOpen }">
+        <div class="chat-page__content" :class="{ 'chat-page__content--members': asideOpen }">
           <div class="chat-page__chat">
             <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
@@ -836,19 +858,45 @@ function onWindowDrop(event: DragEvent): void {
           </div>
           <!-- 801~1199 覆盖式成员面板的遮罩；≥1200 推挤与 ≤800 全宽时由 CSS 隐藏。 -->
           <div
-            v-if="membersOpen"
+            v-if="asideOpen"
             class="chat-page__members-mask"
             aria-hidden="true"
             @click="activeDrawer = null"
           />
-          <!-- 群成员面板：位于聊天顶栏下方的同层右侧栏（不遮罩、不盖住「群资料」），默认隐藏。 -->
-          <aside v-if="membersOpen && activeConversation" class="chat-page__members" aria-label="群资料与成员">
+          <!-- 会话侧栏（F-15 页签）：群聊「群资料与成员」「文件」，单聊仅「文件」；与聊天窗口同层。 -->
+          <aside v-if="asideOpen && activeConversation" class="chat-page__members" aria-label="会话侧栏">
             <header class="chat-page__members-header">
-              <h2 class="chat-page__members-title">群资料与成员</h2>
+              <div v-if="isGroup" class="chat-page__members-tabs" role="tablist" aria-label="侧栏页签">
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="asideTab === 'members'"
+                  :class="[
+                    'chat-page__members-tab',
+                    { 'chat-page__members-tab--active': asideTab === 'members' },
+                  ]"
+                  @click="switchAsideTab('members')"
+                >
+                  群资料与成员
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="asideTab === 'files'"
+                  :class="[
+                    'chat-page__members-tab',
+                    { 'chat-page__members-tab--active': asideTab === 'files' },
+                  ]"
+                  @click="switchAsideTab('files')"
+                >
+                  文件
+                </button>
+              </div>
+              <h2 v-else class="chat-page__members-title">文件</h2>
               <button
                 type="button"
                 class="chat-page__members-close"
-                aria-label="关闭群成员面板"
+                aria-label="关闭侧栏"
                 @click="activeDrawer = null"
               >
                 <AppIcon name="close" :size="18" />
@@ -856,10 +904,15 @@ function onWindowDrop(event: DragEvent): void {
             </header>
             <div class="chat-page__members-body">
               <GroupMembersPanel
+                v-if="asideTab === 'members' && isGroup"
                 :conversation="activeConversation"
                 :self-user-id="selfUserId"
                 @updated="onGroupUpdated"
                 @left="onLeftGroup"
+              />
+              <ConversationFilesPanel
+                v-else-if="asideTab === 'files' && activeId"
+                :conversation-id="activeId"
               />
             </div>
           </aside>
@@ -1020,6 +1073,36 @@ function onWindowDrop(event: DragEvent): void {
   font-weight: var(--ec-font-weight-semibold);
 }
 
+/* F-15：aside 页签（群聊：群资料与成员 / 文件）。 */
+.chat-page__members-tabs {
+  display: flex;
+  gap: var(--ec-space-1);
+  min-width: 0;
+  padding: 3px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface-hover);
+}
+
+.chat-page__members-tab {
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--ec-space-3);
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-page__members-tab--active {
+  background: var(--ec-surface);
+  color: var(--ec-text-primary);
+  font-weight: var(--ec-font-weight-semibold);
+  box-shadow: var(--ec-shadow-sm);
+}
+
 .chat-page__members-close {
   display: grid;
   flex: none;
@@ -1153,10 +1236,14 @@ function onWindowDrop(event: DragEvent): void {
   }
 }
 
-/* UI-04 批次4：移动端群成员面板关闭按钮触控热区。 */
+/* UI-04 批次4 / F-15：移动端侧栏关闭按钮与页签触控热区。 */
 @media (max-width: 800px) {
   .chat-page__members-close {
     min-width: 44px;
+    min-height: 44px;
+  }
+
+  .chat-page__members-tab {
     min-height: 44px;
   }
 }
