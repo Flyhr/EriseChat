@@ -227,6 +227,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(message => message.ReplyTo).HasColumnName("reply_to");
             entity.Property(message => message.CreatedAt).HasColumnName("created_at");
             entity.Property(message => message.DeletedAt).HasColumnName("deleted_at");
+            entity.Property(message => message.EditedAt).HasColumnName("edited_at");
 
             entity.HasIndex(message => new { message.ConversationId, message.ClientMsgId }).IsUnique();
             entity.HasIndex(message => new { message.ConversationId, message.Seq })

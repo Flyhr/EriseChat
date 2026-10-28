@@ -385,6 +385,10 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("INTEGER")
                         .HasColumnName("deleted_at");
 
+                    b.Property<long?>("EditedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("edited_at");
+
                     b.Property<string>("FileId")
                         .HasColumnType("TEXT")
                         .HasColumnName("file_id");

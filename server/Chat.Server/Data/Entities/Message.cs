@@ -42,6 +42,9 @@ public sealed class Message
     /// <summary>创建时间（UTC 毫秒）。</summary>
     public long CreatedAt { get; set; }
 
-    /// <summary>删除时间（预留：v1 不做撤回，恒为 NULL；P2 撤回使用）。</summary>
+    /// <summary>撤回时间（UTC 毫秒；非空表示已撤回，content 置空；F-18）。</summary>
     public long? DeletedAt { get; set; }
+
+    /// <summary>编辑时间（UTC 毫秒；未编辑为 NULL；F-18）。</summary>
+    public long? EditedAt { get; set; }
 }

@@ -134,8 +134,9 @@ internal sealed class MessageContentJsonConverter : JsonConverter<MessageContent
 /// <param name="CreatedAt">创建时间（UTC 毫秒）。</param>
 /// <param name="ClientMsgId">发送者客户端幂等键；服务端广播时可不带。</param>
 /// <param name="ReplyTo">被回复消息的 messageId。</param>
-/// <param name="DeletedAt">预留（v1 不做撤回，恒为空）。</param>
+/// <param name="DeletedAt">撤回时间（UTC 毫秒）；非空表示已撤回，此时 content 为空文本且不带文件信息（F-18）。</param>
 /// <param name="Reply">回复引用摘要（可选，F-09）：仅当 replyTo 指向的消息存在时返回。</param>
+/// <param name="EditedAt">最近一次编辑时间（UTC 毫秒）；未编辑过则缺省（F-18）。</param>
 public sealed record Message(
     string MessageId,
     string ConversationId,
@@ -147,4 +148,5 @@ public sealed record Message(
     string? ClientMsgId = null,
     string? ReplyTo = null,
     long? DeletedAt = null,
-    MessageReply? Reply = null);
+    MessageReply? Reply = null,
+    long? EditedAt = null);
