@@ -167,6 +167,7 @@ CREATE TABLE messages (
     reply_to        TEXT,
     created_at      INTEGER NOT NULL,
     deleted_at      INTEGER,
+    edited_at       INTEGER,
     UNIQUE (conversation_id, client_msg_id),
     FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users (id),

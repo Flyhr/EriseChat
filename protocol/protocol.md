@@ -47,7 +47,7 @@
 - 认证完成前只接受 `auth` 帧；收到其它帧 → `error`（`AUTH_REQUIRED`）并关闭 `4002`。
 - `seq` 由服务端在事务内分配，客户端不得携带、不得修改；消息落库后不可变。
 
-## 3. 帧总表（与计划 §4.2 一一对应，共 18 个 type）
+## 3. 帧总表（与计划 §4.2 一一对应，共 22 个 type）
 
 | type | 方向 | 用途 | 备注 |
 |---|---|---|---|
@@ -58,6 +58,10 @@
 | `message.send` | C→S | 发送消息 | 带 `clientMsgId` 幂等键 |
 | `message.ack` | S→C | 落库回执 | 仅发送者连接收到 |
 | `message.new` | S→C | 新消息广播 | 会话成员（发送连接除外） |
+| `message.recall` | C→S | 撤回消息 | 仅发送者本人、120 秒窗口内（F-18） |
+| `message.recalled` | S→C | 撤回广播 | 会话全部在线连接，含操作者连接（F-18） |
+| `message.edit` | C→S | 编辑文本消息 | 仅发送者本人、900 秒窗口内（F-18） |
+| `message.edited` | S→C | 编辑广播 | 会话全部在线连接，含操作者连接（F-18） |
 | `sync.request` | C→S | 补拉请求 | 每会话携带 `lastSeq` |
 | `sync.response` | S→C | 补拉响应 | 每会话每批 ≤200 条 |
 | `conv.list` | 双向 | 会话列表 | C→S 请求 / S→C 返回全量 |
@@ -176,7 +180,8 @@
 | `replyTo` | string | 否 | 被回复消息的 `messageId` |
 | `reply` | object | 否 | 回复引用摘要（见下「Reply 对象」）；不落库、按需组装，仅当 `replyTo` 指向的消息存在时返回；旧客户端忽略即可 |
 | `createdAt` | integer | 是 | 创建时间（UTC 毫秒） |
-| `deletedAt` | integer | 否 | 预留（v1 不做撤回，恒为空） |
+| `deletedAt` | integer | 否 | 撤回时间（UTC 毫秒）；非空表示已撤回，此时 `content` 为空文本、不再返回 `fileId` 等文件信息（F-18） |
+| `editedAt` | integer | 否 | 最近一次编辑时间（UTC 毫秒）；未编辑过则缺省（F-18） |
 
 **Reply 对象（回复引用摘要，`Message.reply` / `message.ack.reply`，均可选）**：
 
@@ -203,6 +208,63 @@
 - `image` / `file`：FileContent 对象，格式见 §7。
 - `system`：服务端生成的系统事件对象（M3 使用），核心字段为 `event`（事件名，必填）、`actorId`（触发者，可选）、`targetUserIds`（涉及成员，可选）、`text`（服务端生成的中文描述，可选）；后续新增可选字段属向后兼容增量。
 - 系统消息事件名（v1，M3）：`group.created`、`member.joined`、`member.left`、`member.removed`；`text` 为服务端生成的中文描述，客户端渲染为居中小字，不做 i18n。
+
+#### 消息撤回 / 编辑（`message.recall` / `message.recalled` / `message.edit` / `message.edited`，F-18）
+
+`message.recall`（C→S）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `message.recall` |
+| `reqId` | string | 否 | 建议携带，失败时 `error` 回传 |
+| `conversationId` | string | 是 | 目标会话 ID |
+| `messageId` | string | 是 | 待撤回消息 ID |
+
+`message.recalled`（S→C）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `message.recalled` |
+| `conversationId` | string | 是 | 会话 ID |
+| `messageId` | string | 是 | 被撤回消息 ID |
+| `seq` | integer | 是 | 被撤回消息的会话内序号 |
+| `deletedAt` | integer | 是 | 撤回时间（UTC 毫秒） |
+| `operatorId` | string | 是 | 操作者用户 ID（当前仅发送者本人） |
+
+`message.edit`（C→S）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `message.edit` |
+| `reqId` | string | 否 | 建议携带，失败时 `error` 回传 |
+| `conversationId` | string | 是 | 目标会话 ID |
+| `messageId` | string | 是 | 待编辑消息 ID |
+| `content` | string | 是 | 新文本内容，trim 后 1..4096 字符 |
+
+`message.edited`（S→C）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `message.edited` |
+| `conversationId` | string | 是 | 会话 ID |
+| `messageId` | string | 是 | 被编辑消息 ID |
+| `seq` | integer | 是 | 被编辑消息的会话内序号 |
+| `content` | string | 是 | 编辑后的文本内容 |
+| `editedAt` | integer | 是 | 编辑时间（UTC 毫秒） |
+| `operatorId` | string | 是 | 操作者用户 ID（当前仅发送者本人） |
+
+规则：
+
+1. 时间窗口自消息 `createdAt` 起算（服务端 `AppOptions` 可配置）：撤回 **120 秒**、编辑 **900 秒**；超出窗口 → `error`（`VALIDATION_FAILED`，文案「超过可撤回时间」/「超过可编辑时间」）。
+2. 撤回仅允许**发送者本人**，`msgType` ∈ `text` / `image` / `file`；编辑仅允许**发送者本人**、仅 `msgType=text`。非发送者 → `error`（`FORBIDDEN`）；消息不存在或不属于该会话 → `error`（`NOT_FOUND`）；`system` 消息或已撤回消息编辑 → `error`（`VALIDATION_FAILED`）。
+3. 撤回幂等：已撤回消息再次 `message.recall` 视为成功，仅向请求连接重发一条 `message.recalled`（`deletedAt` 不变），不重复广播、不重复落库。
+4. 撤回后服务端返回的 Message：`content` 为空文本、不再携带 `fileId` / `name` 等文件信息；`messages.file_id` 保留供孤儿清理引用，文件不立即删除。
+5. 编辑内容 trim 后必须 1..4096 字符（按 Unicode 码点计），否则 `VALIDATION_FAILED`；窗口内可多次编辑，每次刷新 `editedAt`；`seq` / `clientMsgId` / 幂等语义不变。
+6. 广播：`message.recalled` / `message.edited` 发送给该会话**全部在线连接（含操作者自己的连接）**，用于发送方确认与多端一致；离线成员不推送，重连后以历史/同步数据为准。
+7. 历史分页与 `sync.response` 返回最新 `deletedAt` / `editedAt` / `content`；`sync` 只补新 `seq`，客户端需在进入会话时拉取最新一页并覆盖本地缓存，以补上离线期间的撤回/编辑（已知限制：离线期间、最近一页之外的修改需向上加载历史或刷新后才会更新）。
+8. `reply` 摘要：被引用消息已撤回时 `reply.text` 固定为「[已撤回]」、`messageId` 保留（点击可定位到占位行）。
+
+
 
 ### 4.4 `sync.request` / `sync.response`（补拉同步）
 
@@ -616,3 +678,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-14 群资料） | 2026-10-28 | Conversation 新增可选字段 `announcement`（群公告，≤500 字符、支持换行，`null` = 无公告，单聊恒为 null）；`conv.updated` 触发场景补充「标题/公告变更」并明确按收件人视角逐连接下发；`conversations` 新增 `announcement TEXT` 列（`protocol/schema.sql` 同步）；新增 REST `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?}`，仅群主）；无新帧、`protocolVersion` 仍为 1 |
 | v1（群头像） | 2026-10-28 | Conversation 新增可选字段 `avatarFileId`（群头像 `files.id`，仅 group、单聊恒 null、null=未设置）；`conv.updated` 触发场景补充「群头像变更」；`conversations` 新增 `avatar_file_id TEXT` 列（`protocol/schema.sql` 同步）；`PATCH /api/conversations/{conversationId}` body 增加 `avatarFileId`（空串清空、缺省不修改，仅群主）；头像文件对已登录用户可见；无新帧、`protocolVersion` 仍为 1 |
 | v1（F-15 共享文件） | 2026-10-28 | 新增 `GET /api/conversations/{conversationId}/files`（type=image 或 file、beforeSeq、limit）共享文件汇总接口：只统计 `messages.file_id` 非空的 image/file 消息、按文件去重取最新引用 seq、按 seq 降序分页（beforeSeq 排他）；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（F-18 撤回与编辑） | 2026-10-28 | 新增 4 个帧（共 22 个 type）：`message.recall` / `message.recalled` / `message.edit` / `message.edited`（§4.3）；撤回窗口 120s、编辑窗口 900s，仅发送者本人，撤回后 content 为空且不再返回文件信息，编辑仅 text、内容 1..4096；Message 新增可选 `editedAt`，`deletedAt` 语义改为「非空=已撤回」；messages 新增 `edited_at INTEGER` 列（`protocol/schema.sql` 同步）；无新 REST 端点，历史/同步返回最新状态；`protocolVersion` 仍为 1 |
