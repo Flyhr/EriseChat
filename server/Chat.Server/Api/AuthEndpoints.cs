@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
 using Microsoft.AspNetCore.Http;
@@ -118,8 +119,8 @@ public static class AuthEndpoints
         AuthService auth,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
-        var jwtId = principal.FindFirst("jti")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
+        var jwtId = principal.JwtId();
         await auth.LogoutAsync(userId, jwtId, cancellationToken);
         return Results.NoContent();
     }

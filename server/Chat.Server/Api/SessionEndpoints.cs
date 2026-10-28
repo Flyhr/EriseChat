@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Http;
@@ -33,8 +34,8 @@ public static class SessionEndpoints
         AuthService auth,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
-        var currentJwtId = principal.FindFirst("jti")?.Value;
+        var userId = principal.UserId();
+        var currentJwtId = principal.JwtIdOrNull();
         var sessions = await auth.ListSessionsAsync(userId, currentJwtId, cancellationToken);
         return Results.Json(sessions);
     }
@@ -46,7 +47,7 @@ public static class SessionEndpoints
         ConnectionManager connections,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         await auth.RevokeSessionAsync(userId, sessionId, cancellationToken);
 
         // 撤销成功后踢掉仍在线的该会话连接（前端走既有 kicked 清理，不自动重连）。

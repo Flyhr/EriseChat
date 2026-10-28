@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Modules.Files;
 using Microsoft.AspNetCore.Http;
 
@@ -48,7 +49,7 @@ public static class FileEndpoints
             throw ApiException.ValidationFailed("一次只能上传 1 个文件");
         }
 
-        var userId = GetUserId(context.User);
+        var userId = context.User.UserId();
         await using var stream = file.OpenReadStream();
         var result = await files.UploadAsync(userId, file.FileName, stream, file.Length, cancellationToken);
         return Results.Json(new UploadFileResponse(result.FileId, result.Name, result.Size, result.Mime, result.CreatedAt));
@@ -60,7 +61,7 @@ public static class FileEndpoints
         FileService files,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(context.User);
+        var userId = context.User.UserId();
         var result = await files.DownloadAsync(userId, fileId, cancellationToken);
 
         var isImage = result.File.Mime.StartsWith("image/", StringComparison.Ordinal);
@@ -78,9 +79,6 @@ public static class FileEndpoints
             lastModified: DateTimeOffset.FromUnixTimeMilliseconds(result.File.CreatedAt),
             enableRangeProcessing: true);
     }
-
-    private static string GetUserId(ClaimsPrincipal principal)
-        => principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
 
     /// <summary>上传响应（字段与 apps/web/src/api/files.ts 的 UploadFileResponse 一致）。</summary>
     public sealed record UploadFileResponse(string FileId, string Name, long Size, string Mime, long CreatedAt);

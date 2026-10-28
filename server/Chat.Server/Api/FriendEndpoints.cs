@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Modules.Friends;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -34,7 +35,7 @@ public static class FriendEndpoints
         FriendService friends,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await friends.ListAsync(userId, cancellationToken);
         return Results.Json(new FriendsResponse(result));
     }
@@ -44,7 +45,7 @@ public static class FriendEndpoints
         FriendService friends,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await friends.ListRequestsAsync(userId, cancellationToken);
         return Results.Json(new FriendRequestsResponse(result.Incoming, result.Outgoing));
     }
@@ -56,7 +57,7 @@ public static class FriendEndpoints
         [FromBody] CreateFriendRequestRequest request,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await friends.SendRequestAsync(userId, request.ToUserId, request.Message, cancellationToken);
 
         if (result.AutoAccepted && result.Friend is not null)
@@ -85,7 +86,7 @@ public static class FriendEndpoints
         string requestId,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await friends.AcceptAsync(userId, requestId, cancellationToken);
 
         // result.Friend 为「我（接受方）」的视角（friend.UserId = 申请人）。
@@ -103,7 +104,7 @@ public static class FriendEndpoints
         string requestId,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var request = await friends.RejectAsync(userId, requestId, cancellationToken);
         notifier.PushRequestRejected(request.FromUserId, request);
         return Results.NoContent();
@@ -116,7 +117,7 @@ public static class FriendEndpoints
         string requestId,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var request = await friends.CancelAsync(userId, requestId, cancellationToken);
         notifier.PushRequestCancelled(request.ToUserId, request);
         return Results.NoContent();
@@ -130,7 +131,7 @@ public static class FriendEndpoints
         [FromBody] UpdateFriendRequest request,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var friend = await friends.UpdateFriendAsync(
             userId, friendUserId, request.Remark, request.GroupName, cancellationToken);
         notifier.PushFriendUpdated(userId, friend);
@@ -144,7 +145,7 @@ public static class FriendEndpoints
         string friendUserId,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await friends.RemoveAsync(userId, friendUserId, cancellationToken);
 
         // 双向删除：双方各收到自己视角的 friend.removed。
@@ -152,11 +153,6 @@ public static class FriendEndpoints
         notifier.PushFriendRemoved(friendUserId, result.Other);
         return Results.NoContent();
     }
-
-    private static string GetUserId(ClaimsPrincipal principal) =>
-        principal.FindFirst("sub")?.Value ??
-        principal.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
-        throw ApiException.Unauthorized("未登录");
 
     public sealed record FriendsResponse(IReadOnlyList<Friend> Friends);
 

@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Modules.Messages;
 using Microsoft.AspNetCore.Http;
 
@@ -38,7 +39,7 @@ public static class MessageEndpoints
         MessageService messages,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         var page = await messages.GetHistoryAsync(userId, conversationId, beforeSeq, limit, cancellationToken);
         return Results.Json(new MessagePageResponse(page.Messages, page.HasMore));
     }
@@ -55,7 +56,7 @@ public static class MessageEndpoints
         MessageService messages,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         var page = await messages.SearchAsync(userId, q, conversationId, beforeSeq, limit, cancellationToken);
         return Results.Json(new MessageSearchPageResponse(page.Messages, page.HasMore));
     }

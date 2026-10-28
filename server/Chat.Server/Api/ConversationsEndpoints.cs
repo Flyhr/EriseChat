@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Files;
 using Microsoft.AspNetCore.Http;
@@ -72,7 +73,7 @@ public static class ConversationsEndpoints
         ConversationService conversations,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var list = await conversations.ListAsync(userId, cancellationToken);
         return Results.Json(list);
     }
@@ -84,7 +85,7 @@ public static class ConversationsEndpoints
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var type = request.Type?.Trim().ToLowerInvariant();
 
         if (type == "direct")
@@ -129,7 +130,7 @@ public static class ConversationsEndpoints
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var result = await conversations.AddMembersAsync(userId, conversationId, request.UserIds, cancellationToken);
 
         // 有变更才推送：message.new（系统消息）先于 conv.updated（含全体成员的最新会话）。
@@ -154,7 +155,7 @@ public static class ConversationsEndpoints
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
-        var currentUserId = GetUserId(principal);
+        var currentUserId = principal.UserId();
         var result = await conversations.RemoveMemberAsync(currentUserId, conversationId, userId, cancellationToken);
 
         if (result.SystemMessage is not null)
@@ -182,7 +183,7 @@ public static class ConversationsEndpoints
         ConversationService conversations,
         CancellationToken cancellationToken)
     {
-        var currentUserId = GetUserId(principal);
+        var currentUserId = principal.UserId();
         var conversation = await conversations.UpdateMemberSettingsAsync(
             currentUserId,
             conversationId,
@@ -205,7 +206,7 @@ public static class ConversationsEndpoints
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
-        var currentUserId = GetUserId(principal);
+        var currentUserId = principal.UserId();
         var result = await conversations.UpdateGroupProfileAsync(
             currentUserId,
             conversationId,
@@ -235,7 +236,7 @@ public static class ConversationsEndpoints
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
-        var currentUserId = GetUserId(principal);
+        var currentUserId = principal.UserId();
         var result = await conversations.TransferOwnerAsync(
             currentUserId,
             conversationId,
@@ -266,7 +267,7 @@ public static class ConversationsEndpoints
         ConversationFilesService files,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var page = await files.GetSharedFilesAsync(
             userId,
             conversationId,
@@ -283,13 +284,10 @@ public static class ConversationsEndpoints
         ConversationService conversations,
         CancellationToken cancellationToken)
     {
-        var userId = GetUserId(principal);
+        var userId = principal.UserId();
         var conversation = await conversations.GetAsync(userId, conversationId, cancellationToken);
         return Results.Json(conversation);
     }
-
-    private static string GetUserId(ClaimsPrincipal principal) =>
-        principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
 
     /// <summary>
     /// 创建会话请求（与 apps/web/src/api/conversations.ts 的 CreateConversationRequest 对齐）：

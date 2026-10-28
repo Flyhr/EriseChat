@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Security;
 using Chat.Server.Data;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
@@ -45,7 +46,7 @@ public static class UserEndpoints
         AuthService auth,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         var profile = await auth.GetProfileAsync(userId, cancellationToken);
         return Results.Json(new MeResponse(
             profile.UserId,
@@ -65,7 +66,7 @@ public static class UserEndpoints
         AuthService auth,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         await auth.ChangePasswordAsync(userId, request.OldPassword, request.NewPassword ?? string.Empty, cancellationToken);
         return Results.NoContent();
     }
@@ -77,7 +78,7 @@ public static class UserEndpoints
         AuthService auth,
         CancellationToken cancellationToken)
     {
-        var userId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var userId = principal.UserId();
         var profile = await auth.UpdateProfileAsync(userId, request.DisplayName, request.AvatarFileId, cancellationToken);
         return Results.Json(new MeResponse(
             profile.UserId,
@@ -100,7 +101,7 @@ public static class UserEndpoints
         ChatDbContext db,
         CancellationToken cancellationToken)
     {
-        var currentUserId = principal.FindFirst("sub")?.Value ?? throw ApiException.Unauthorized("登录状态已失效");
+        var currentUserId = principal.UserId();
 
         var keyword = (search ?? string.Empty).Trim();
         if (keyword.Length is < 1 or > SearchMaxLength)
