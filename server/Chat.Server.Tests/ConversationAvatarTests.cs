@@ -27,7 +27,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member1@example.com", "乙");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         var service = TestSupport.CreateConversationService(db);
 
         var updated = await service.UpdateGroupProfileAsync(
@@ -47,7 +47,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member2@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         conversation.AvatarFileId = file.Id;
         await db.SaveChangesAsync();
         var service = TestSupport.CreateConversationService(db);
@@ -69,8 +69,8 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member3@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var first = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
-        var second = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var first = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
+        var second = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         conversation.AvatarFileId = first.Id;
         await db.SaveChangesAsync();
         var service = TestSupport.CreateConversationService(db);
@@ -90,7 +90,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member4@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, member.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, member.Id, image: true);
         var service = TestSupport.CreateConversationService(db);
 
         await TestSupport.AssertApiExceptionAsync(
@@ -110,7 +110,7 @@ public sealed class ConversationAvatarTests
         var outsider = await TestSupport.SeedUserAsync(db, "ca-outsider5@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, outsider.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, outsider.Id, image: true);
         var service = TestSupport.CreateConversationService(db);
 
         await TestSupport.AssertApiExceptionAsync(
@@ -129,7 +129,7 @@ public sealed class ConversationAvatarTests
         var other = await TestSupport.SeedUserAsync(db, "ca-other6@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, owner, other);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         var service = TestSupport.CreateConversationService(db);
 
         await TestSupport.AssertApiExceptionAsync(
@@ -182,7 +182,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member9@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var memberFile = await SeedFileAsync(db, storage.Instance, member.Id, image: true);
+        var memberFile = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, member.Id, image: true);
         var service = TestSupport.CreateConversationService(db);
 
         await TestSupport.AssertApiExceptionAsync(
@@ -201,7 +201,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member10@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var pdf = await SeedFileAsync(db, storage.Instance, owner.Id, image: false);
+        var pdf = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: false);
         var service = TestSupport.CreateConversationService(db);
 
         await TestSupport.AssertApiExceptionAsync(
@@ -220,7 +220,7 @@ public sealed class ConversationAvatarTests
         var member = await TestSupport.SeedUserAsync(db, "ca-member11@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         conversation.AvatarFileId = file.Id;
         conversation.Announcement = "旧公告";
         await db.SaveChangesAsync();
@@ -244,11 +244,11 @@ public sealed class ConversationAvatarTests
         var viewer = await TestSupport.SeedUserAsync(db, "ca-viewer12@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         await using var storage = TempFileStorage.Create();
-        var file = await SeedFileAsync(db, storage.Instance, owner.Id, image: true);
+        var file = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true);
         conversation.AvatarFileId = file.Id;
         await db.SaveChangesAsync();
 
-        var fileService = CreateFileService(db, storage.Instance);
+        var fileService = TestSupport.CreateFileService(db, storage.Instance);
         var result = await fileService.DownloadAsync(viewer.Id, file.Id, CancellationToken.None);
 
         Assert.Equal(file.Id, result.File.Id);
@@ -266,8 +266,8 @@ public sealed class ConversationAvatarTests
         await using var storage = TempFileStorage.Create();
 
         var old = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (25L * 60 * 60 * 1000);
-        var avatarFile = await SeedFileAsync(db, storage.Instance, owner.Id, image: true, createdAt: old);
-        var orphanFile = await SeedFileAsync(db, storage.Instance, owner.Id, image: true, createdAt: old);
+        var avatarFile = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true, createdAt: old);
+        var orphanFile = await TestSupport.SeedFileOnDiskAsync(db, storage.Instance, owner.Id, image: true, createdAt: old);
         conversation.AvatarFileId = avatarFile.Id;
         await db.SaveChangesAsync();
 
@@ -294,86 +294,6 @@ public sealed class ConversationAvatarTests
         Assert.Contains(avatarFile.Id, afterClear);
     }
 
-    private static FileService CreateFileService(ChatDbContext db, FileStorage storage)
-    {
-        var options = TestSupport.CreateAppOptions();
-        options.FileDirectory = storage.RootDirectory;
-        return new FileService(db, storage, Options.Create(options), NullLogger<FileService>.Instance);
-    }
 
-    private static async Task<StoredFile> SeedFileAsync(
-        ChatDbContext db,
-        FileStorage storage,
-        string ownerId,
-        bool image,
-        long? createdAt = null)
-    {
-        var id = Guid.NewGuid().ToString("D");
-        var extension = image ? ".png" : ".pdf";
-        var mime = image ? "image/png" : "application/pdf";
-        var storagePath = $"202610/{id}{extension}";
-        var fullPath = Path.Combine(storage.RootDirectory, storagePath)
-            .Replace('\\', Path.DirectorySeparatorChar);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        await File.WriteAllBytesAsync(fullPath, new byte[] { 0x89, 0x50, 0x4E, 0x47 });
 
-        var file = new StoredFile
-        {
-            Id = id,
-            OwnerId = ownerId,
-            OriginalName = image ? "群头像.png" : "文档.pdf",
-            Mime = mime,
-            Size = 4,
-            StoragePath = storagePath,
-            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
-
-    /// <summary>临时文件目录 + FileStorage，用完删除目录。</summary>
-    private sealed class TempFileStorage : IAsyncDisposable
-    {
-        private TempFileStorage(string directory, FileStorage instance)
-        {
-            Directory = directory;
-            Instance = instance;
-        }
-
-        private string Directory { get; }
-
-        public FileStorage Instance { get; }
-
-        public static TempFileStorage Create()
-        {
-            var directory = Path.Combine(
-                Path.GetTempPath(),
-                "eisechat-conversation-avatar-tests",
-                Guid.NewGuid().ToString("N"));
-            System.IO.Directory.CreateDirectory(directory);
-            var options = TestSupport.CreateAppOptions();
-            options.FileDirectory = directory;
-            var storage = new FileStorage(
-                Options.Create(options),
-                NullLogger<FileStorage>.Instance);
-            return new TempFileStorage(directory, storage);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            try
-            {
-                System.IO.Directory.Delete(Directory, recursive: true);
-            }
-            catch (IOException)
-            {
-            }
-            catch (UnauthorizedAccessException)
-            {
-            }
-
-            return ValueTask.CompletedTask;
-        }
-    }
 }

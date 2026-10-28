@@ -52,7 +52,7 @@ public sealed class MessageRecallEditTests
         var sender = await TestSupport.SeedUserAsync(db, "recall-image-a@example.com");
         var other = await TestSupport.SeedUserAsync(db, "recall-image-b@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var file = await SeedStoredFileAsync(db, sender.Id, "图片.png", "image/png", 2048);
+        var file = await TestSupport.SeedFileAsync(db, sender.Id, "图片.png", "image/png", 2048);
         var service = TestSupport.CreateMessageService(db);
 
         var sent = await service.SendAsync(
@@ -259,7 +259,7 @@ public sealed class MessageRecallEditTests
         var sender = await TestSupport.SeedUserAsync(db, "edit-img-a@example.com");
         var other = await TestSupport.SeedUserAsync(db, "edit-img-b@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var file = await SeedStoredFileAsync(db, sender.Id, "图.png", "image/png", 1024);
+        var file = await TestSupport.SeedFileAsync(db, sender.Id, "图.png", "image/png", 1024);
         var service = TestSupport.CreateMessageService(db);
 
         var sent = await service.SendAsync(
@@ -454,31 +454,6 @@ public sealed class MessageRecallEditTests
             msgType,
             MessageContent.FromObject(content));
 
-    private static async Task<MessageEntity> SeedMessageAsync(
-        ChatDbContext db,
-        ConversationEntity conversation,
-        string senderId,
-        MessageType msgType,
-        string contentJson)
-    {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var entity = new MessageEntity
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            ConversationId = conversation.Id,
-            SenderId = senderId,
-            ClientMsgId = Guid.NewGuid().ToString("N"),
-            Seq = conversation.LastSeq + 1,
-            MsgType = msgType,
-            ContentJson = contentJson,
-            CreatedAt = now,
-        };
-        db.Messages.Add(entity);
-        conversation.LastSeq = entity.Seq;
-        conversation.LastMessageId = entity.Id;
-        await db.SaveChangesAsync();
-        return entity;
-    }
 
     private static async Task ShiftCreatedAtAsync(ChatDbContext db, string messageId, int secondsAgo)
     {
@@ -487,25 +462,15 @@ public sealed class MessageRecallEditTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<StoredFile> SeedStoredFileAsync(
+
+    /// <summary>本文件历史签名：seq 取会话当前游标 +1，并同步 last_message_id。</summary>
+    private static Task<MessageEntity> SeedMessageAsync(
         ChatDbContext db,
-        string ownerId,
-        string name,
-        string mime,
-        long size)
-    {
-        var file = new StoredFile
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            OwnerId = ownerId,
-            OriginalName = name,
-            Mime = mime,
-            Size = size,
-            StoragePath = Path.Combine("test", Guid.NewGuid().ToString("N") + ".bin"),
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
+        ConversationEntity conversation,
+        string senderId,
+        Chat.Protocol.MessageType msgType,
+        string contentJson)
+        => TestSupport.SeedMessageAsync(
+            db, conversation, senderId, conversation.LastSeq + 1, msgType, contentJson, updateLastMessage: true);
+
 }

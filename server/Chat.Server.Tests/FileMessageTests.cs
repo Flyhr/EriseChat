@@ -20,7 +20,7 @@ public sealed class FileMessageTests
         var sender = await TestSupport.SeedUserAsync(db, "fm-sender@example.com");
         var other = await TestSupport.SeedUserAsync(db, "fm-other@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var file = await SeedFileAsync(db, sender.Id, "照片.png", "image/png", 2048);
+        var file = await TestSupport.SeedFileAsync(db, sender.Id, "照片.png", "image/png", 2048);
         db.ChangeTracker.Clear();
         var service = TestSupport.CreateMessageService(db);
 
@@ -54,7 +54,7 @@ public sealed class FileMessageTests
         var sender = await TestSupport.SeedUserAsync(db, "fm2-sender@example.com");
         var other = await TestSupport.SeedUserAsync(db, "fm2-other@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var foreignFile = await SeedFileAsync(db, other.Id, "别人的.png", "image/png", 100);
+        var foreignFile = await TestSupport.SeedFileAsync(db, other.Id, "别人的.png", "image/png", 100);
         db.ChangeTracker.Clear();
         var service = TestSupport.CreateMessageService(db);
 
@@ -90,7 +90,7 @@ public sealed class FileMessageTests
         var sender = await TestSupport.SeedUserAsync(db, "fm3-sender@example.com");
         var other = await TestSupport.SeedUserAsync(db, "fm3-other@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var file = await SeedFileAsync(db, sender.Id, "文档.pdf", "application/pdf", 4096);
+        var file = await TestSupport.SeedFileAsync(db, sender.Id, "文档.pdf", "application/pdf", 4096);
         db.ChangeTracker.Clear();
         var service = TestSupport.CreateMessageService(db);
 
@@ -125,27 +125,6 @@ public sealed class FileMessageTests
         Assert.Equal(file.Id, syncFile.Content.As<FileContent>()!.FileId);
     }
 
-    private static async Task<StoredFile> SeedFileAsync(
-        ChatDbContext db,
-        string ownerId,
-        string originalName,
-        string mime,
-        long size)
-    {
-        var file = new StoredFile
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            OwnerId = ownerId,
-            OriginalName = originalName,
-            Mime = mime,
-            Size = size,
-            StoragePath = "202610/" + Guid.NewGuid().ToString("N") + ".bin",
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
 
     private static MessageSendFrame NewFile(string conversationId, MessageType msgType, FileContent content) =>
         new(

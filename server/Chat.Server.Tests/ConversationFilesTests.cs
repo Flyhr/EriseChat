@@ -26,8 +26,8 @@ public sealed class ConversationFilesTests
         await using var db = new ChatDbContext(database.Options);
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var imageFile = await SeedFileAsync(db, owner.Id, "a.png", ImageMime);
-        var textFile = await SeedFileAsync(db, owner.Id, "a.txt", TextMime);
+        var imageFile = await TestSupport.SeedFileAsync(db, owner.Id, "a.png", ImageMime);
+        var textFile = await TestSupport.SeedFileAsync(db, owner.Id, "a.txt", TextMime);
 
         await SeedMessageAsync(db, conversation, owner, 1, MessageType.Text, "\"hello\"");
         await SeedMessageAsync(db, conversation, owner, 2, MessageType.Image, "\"\"", imageFile.Id);
@@ -51,8 +51,8 @@ public sealed class ConversationFilesTests
         await using var db = new ChatDbContext(database.Options);
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var sentFile = await SeedFileAsync(db, owner.Id, "sent.png", ImageMime);
-        await SeedFileAsync(db, owner.Id, "unsent.png", ImageMime);
+        var sentFile = await TestSupport.SeedFileAsync(db, owner.Id, "sent.png", ImageMime);
+        await TestSupport.SeedFileAsync(db, owner.Id, "unsent.png", ImageMime);
         await SeedMessageAsync(db, conversation, owner, 1, MessageType.Image, "\"\"", sentFile.Id);
 
         var page = await CreateService(db).GetSharedFilesAsync(
@@ -69,7 +69,7 @@ public sealed class ConversationFilesTests
         await using var db = new ChatDbContext(database.Options);
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var file = await SeedFileAsync(db, owner.Id, "dup.png", ImageMime);
+        var file = await TestSupport.SeedFileAsync(db, owner.Id, "dup.png", ImageMime);
         await SeedMessageAsync(db, conversation, owner, 2, MessageType.Image, "\"\"", file.Id);
         var latest = await SeedMessageAsync(db, conversation, owner, 5, MessageType.Image, "\"\"", file.Id);
 
@@ -89,8 +89,8 @@ public sealed class ConversationFilesTests
         await using var db = new ChatDbContext(database.Options);
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var first = await SeedFileAsync(db, owner.Id, "first.png", ImageMime);
-        var second = await SeedFileAsync(db, owner.Id, "second.png", ImageMime);
+        var first = await TestSupport.SeedFileAsync(db, owner.Id, "first.png", ImageMime);
+        var second = await TestSupport.SeedFileAsync(db, owner.Id, "second.png", ImageMime);
         await SeedMessageAsync(db, conversation, owner, 2, MessageType.Image, "\"\"", first.Id);
         await SeedMessageAsync(db, conversation, owner, 4, MessageType.Image, "\"\"", second.Id);
 
@@ -113,7 +113,7 @@ public sealed class ConversationFilesTests
         var files = new List<MsgFileSeed>();
         for (var index = 0; index < 3; index += 1)
         {
-            var file = await SeedFileAsync(db, owner.Id, $"p{index}.png", ImageMime);
+            var file = await TestSupport.SeedFileAsync(db, owner.Id, $"p{index}.png", ImageMime);
             var seq = (index + 1) * 2L;
             await SeedMessageAsync(db, conversation, owner, seq, MessageType.Image, "\"\"", file.Id);
             files.Add(new MsgFileSeed(file.Id, seq));
@@ -147,7 +147,7 @@ public sealed class ConversationFilesTests
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
         for (var index = 0; index < 2; index += 1)
         {
-            var file = await SeedFileAsync(db, owner.Id, $"exact{index}.png", ImageMime);
+            var file = await TestSupport.SeedFileAsync(db, owner.Id, $"exact{index}.png", ImageMime);
             await SeedMessageAsync(db, conversation, owner, index + 1, MessageType.Image, "\"\"", file.Id);
         }
 
@@ -166,7 +166,7 @@ public sealed class ConversationFilesTests
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var outsider = await TestSupport.SeedUserAsync(db, "f15-out@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var file = await SeedFileAsync(db, owner.Id, "private.png", ImageMime);
+        var file = await TestSupport.SeedFileAsync(db, owner.Id, "private.png", ImageMime);
         await SeedMessageAsync(db, conversation, owner, 1, MessageType.Image, "\"\"", file.Id);
 
         var ownerPage = await CreateService(db).GetSharedFilesAsync(
@@ -252,7 +252,7 @@ public sealed class ConversationFilesTests
         await using var db = new ChatDbContext(database.Options);
         var owner = await TestSupport.SeedUserAsync(db, "f15-owner@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner);
-        var file = await SeedFileAsync(db, owner.Id, "设计稿.png", ImageMime, size: 2048, createdAt: 1_800_000_000_000);
+        var file = await TestSupport.SeedFileAsync(db, owner.Id, "设计稿.png", ImageMime, size: 2048, createdAt: 1_800_000_000_000);
         var message = await SeedMessageAsync(
             db,
             conversation,
@@ -285,8 +285,8 @@ public sealed class ConversationFilesTests
         var other = await TestSupport.SeedUserAsync(db, "f15-other@example.com");
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, other);
         var otherConversation = await TestSupport.SeedDirectConversationAsync(db, owner, other);
-        var mine = await SeedFileAsync(db, owner.Id, "mine.png", ImageMime);
-        var foreign = await SeedFileAsync(db, other.Id, "other.png", ImageMime);
+        var mine = await TestSupport.SeedFileAsync(db, owner.Id, "mine.png", ImageMime);
+        var foreign = await TestSupport.SeedFileAsync(db, other.Id, "other.png", ImageMime);
         await SeedMessageAsync(db, conversation, owner, 1, MessageType.Image, "\"\"", mine.Id);
         await SeedMessageAsync(db, otherConversation, other, 1, MessageType.Image, "\"\"", foreign.Id);
 
@@ -305,54 +305,19 @@ public sealed class ConversationFilesTests
     private static ConversationFilesService CreateService(ChatDbContext db) =>
         new(db, NullLogger<ConversationFilesService>.Instance);
 
-    private static async Task<StoredFile> SeedFileAsync(
-        ChatDbContext db,
-        string ownerId,
-        string name,
-        string mime,
-        long size = 128,
-        long? createdAt = null)
-    {
-        var file = new StoredFile
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            OwnerId = ownerId,
-            OriginalName = name,
-            Mime = mime,
-            Size = size,
-            StoragePath = $"202610/{Guid.NewGuid():N}",
-            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
 
-    private static async Task<MessageEntity> SeedMessageAsync(
+
+    /// <summary>本文件历史签名：seq 由调用方显式给出，sender 用用户对象。</summary>
+    private static Task<MessageEntity> SeedMessageAsync(
         ChatDbContext db,
         ConversationEntity conversation,
         User sender,
         long seq,
-        MessageType msgType,
+        Chat.Protocol.MessageType msgType,
         string contentJson,
         string? fileId = null,
         long? createdAt = null)
-    {
-        var message = new MessageEntity
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            ConversationId = conversation.Id,
-            SenderId = sender.Id,
-            ClientMsgId = Guid.NewGuid().ToString("D"),
-            Seq = seq,
-            MsgType = msgType,
-            ContentJson = contentJson,
-            FileId = fileId,
-            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Messages.Add(message);
-        conversation.LastSeq = Math.Max(conversation.LastSeq, seq);
-        await db.SaveChangesAsync();
-        return message;
-    }
+        => TestSupport.SeedMessageAsync(
+            db, conversation, sender.Id, seq, msgType, contentJson, fileId, createdAt);
+
 }

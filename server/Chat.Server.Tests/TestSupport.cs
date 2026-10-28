@@ -6,6 +6,7 @@ using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
+using Chat.Server.Modules.Files;
 using Chat.Server.Modules.Friends;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Realtime;
@@ -335,5 +336,146 @@ public static class TestSupport
         {
             Assert.Equal(expectedStatus.Value, exception.StatusCode);
         }
+    }
+
+    /// <summary>M3-02：文件业务（真实 FileStorage，FileDirectory 指向传入的存储根目录）。</summary>
+    public static FileService CreateFileService(ChatDbContext db, FileStorage storage)
+    {
+        var options = CreateAppOptions();
+        options.FileDirectory = storage.RootDirectory;
+        return new FileService(db, storage, Options.Create(options), NullLogger<FileService>.Instance);
+    }
+
+    /// <summary>种子文件记录（只落库，不写磁盘；消息/收藏等不校验文件内容的用例使用）。</summary>
+    public static async Task<StoredFile> SeedFileAsync(
+        ChatDbContext db,
+        string ownerId,
+        string originalName,
+        string mime,
+        long size = 128,
+        long? createdAt = null)
+    {
+        var file = new StoredFile
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            OwnerId = ownerId,
+            OriginalName = originalName,
+            Mime = mime,
+            Size = size,
+            StoragePath = $"202610/{Guid.NewGuid():N}",
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        db.Files.Add(file);
+        await db.SaveChangesAsync();
+        return file;
+    }
+
+    /// <summary>种子文件记录 + 真实磁盘文件（头像、孤儿清理等依赖存储路径的用例使用）。</summary>
+    public static async Task<StoredFile> SeedFileOnDiskAsync(
+        ChatDbContext db,
+        FileStorage storage,
+        string ownerId,
+        bool image = true,
+        long? createdAt = null)
+    {
+        var id = Guid.NewGuid().ToString("D");
+        var extension = image ? ".png" : ".pdf";
+        var storagePath = $"202610/{id}{extension}";
+        var fullPath = Path.Combine(storage.RootDirectory, storagePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllBytesAsync(fullPath, new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+
+        var file = new StoredFile
+        {
+            Id = id,
+            OwnerId = ownerId,
+            OriginalName = image ? "头像.png" : "文档.pdf",
+            Mime = image ? "image/png" : "application/pdf",
+            Size = 4,
+            StoragePath = storagePath,
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        db.Files.Add(file);
+        await db.SaveChangesAsync();
+        return file;
+    }
+
+    /// <summary>种子单条消息（直接落库并推进会话游标；updateLastMessage 时同步 last_message_id）。</summary>
+    public static async Task<MessageEntity> SeedMessageAsync(
+        ChatDbContext db,
+        ConversationEntity conversation,
+        string senderId,
+        long seq,
+        Chat.Protocol.MessageType msgType,
+        string contentJson,
+        string? fileId = null,
+        long? createdAt = null,
+        bool updateLastMessage = false)
+    {
+        var message = new MessageEntity
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            ConversationId = conversation.Id,
+            SenderId = senderId,
+            ClientMsgId = Guid.NewGuid().ToString("N"),
+            Seq = seq,
+            MsgType = msgType,
+            ContentJson = contentJson,
+            FileId = fileId,
+            CreatedAt = createdAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        db.Messages.Add(message);
+        conversation.LastSeq = Math.Max(conversation.LastSeq, seq);
+        if (updateLastMessage)
+        {
+            conversation.LastMessageId = message.Id;
+        }
+
+        await db.SaveChangesAsync();
+        return message;
+    }
+
+}
+
+/// <summary>临时文件目录 + FileStorage，用完删除目录（文件/头像类用例共用）。</summary>
+public sealed class TempFileStorage : IAsyncDisposable
+{
+    private TempFileStorage(string directory, FileStorage instance)
+    {
+        Directory = directory;
+        Instance = instance;
+    }
+
+    private string Directory { get; }
+
+    public FileStorage Instance { get; }
+
+    public static TempFileStorage Create()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "eisechat-file-storage-tests",
+            Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directory);
+        var options = TestSupport.CreateAppOptions();
+        options.FileDirectory = directory;
+        var storage = new FileStorage(Options.Create(options), NullLogger<FileStorage>.Instance);
+        return new TempFileStorage(directory, storage);
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        try
+        {
+            System.IO.Directory.Delete(Directory, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return ValueTask.CompletedTask;
     }
 }

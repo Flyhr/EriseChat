@@ -88,7 +88,7 @@ public sealed class ProfileTests
         await using var database = await TestDatabase.CreateAsync();
         await using var db = database.CreateContext();
         var user = await TestSupport.SeedUserAsync(db, "profile-avatar@example.com");
-        var file = await SeedFileAsync(db, user.Id, "image/png");
+        var file = await TestSupport.SeedFileAsync(db, user.Id, "头像.png", "image/png", 1024);
         var auth = TestSupport.CreateAuthService(db, TestSupport.CreateJwtOptions());
 
         var updated = await auth.UpdateProfileAsync(user.Id, null, file.Id, CancellationToken.None);
@@ -105,7 +105,7 @@ public sealed class ProfileTests
         await using var db = database.CreateContext();
         var user = await TestSupport.SeedUserAsync(db, "profile-owner@example.com");
         var other = await TestSupport.SeedUserAsync(db, "profile-other@example.com");
-        var file = await SeedFileAsync(db, other.Id, "image/png");
+        var file = await TestSupport.SeedFileAsync(db, other.Id, "头像.png", "image/png", 1024);
         var auth = TestSupport.CreateAuthService(db, TestSupport.CreateJwtOptions());
 
         await TestSupport.AssertApiExceptionAsync(
@@ -120,7 +120,7 @@ public sealed class ProfileTests
         await using var database = await TestDatabase.CreateAsync();
         await using var db = database.CreateContext();
         var user = await TestSupport.SeedUserAsync(db, "profile-pdf@example.com");
-        var file = await SeedFileAsync(db, user.Id, "application/pdf");
+        var file = await TestSupport.SeedFileAsync(db, user.Id, "文档.pdf", "application/pdf", 1024);
         var auth = TestSupport.CreateAuthService(db, TestSupport.CreateJwtOptions());
 
         await TestSupport.AssertApiExceptionAsync(
@@ -179,20 +179,4 @@ public sealed class ProfileTests
         Assert.Equal("对方新名", memberEntry.DisplayName);
     }
 
-    private static async Task<StoredFile> SeedFileAsync(ChatDbContext db, string ownerId, string mime)
-    {
-        var file = new StoredFile
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            OwnerId = ownerId,
-            OriginalName = mime.StartsWith("image/", StringComparison.Ordinal) ? "头像.png" : "文档.pdf",
-            Mime = mime,
-            Size = 1024,
-            StoragePath = "202610/" + Guid.NewGuid().ToString("N") + ".bin",
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
 }

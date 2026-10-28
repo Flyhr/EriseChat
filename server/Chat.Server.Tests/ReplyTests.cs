@@ -52,7 +52,7 @@ public sealed class ReplyTests
         var sender = await TestSupport.SeedUserAsync(db, "reply-image-a@example.com");
         var other = await TestSupport.SeedUserAsync(db, "reply-image-b@example.com");
         var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
-        var file = await SeedStoredFileAsync(db, sender.Id, "截图.png", "image/png", 2048);
+        var file = await TestSupport.SeedFileAsync(db, sender.Id, "截图.png", "image/png", 2048);
         var service = TestSupport.CreateMessageService(db);
 
         var image = await service.SendAsync(
@@ -266,25 +266,4 @@ public sealed class ReplyTests
             msgType,
             MessageContent.FromObject(content));
 
-    private static async Task<StoredFile> SeedStoredFileAsync(
-        ChatDbContext db,
-        string ownerId,
-        string name,
-        string mime,
-        long size)
-    {
-        var file = new StoredFile
-        {
-            Id = Guid.NewGuid().ToString("D"),
-            OwnerId = ownerId,
-            OriginalName = name,
-            Mime = mime,
-            Size = size,
-            StoragePath = Path.Combine("test", Guid.NewGuid().ToString("N") + ".bin"),
-            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-        };
-        db.Files.Add(file);
-        await db.SaveChangesAsync();
-        return file;
-    }
 }
