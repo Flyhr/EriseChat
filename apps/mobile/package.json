@@ -1,6 +1,6 @@
 {
   "name": "eisechat-mobile",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "description": "EiseChat Android 壳（Capacitor：容器与打包，Web 资源打进 APK，业务逻辑在 apps/web）",
   "scripts": {

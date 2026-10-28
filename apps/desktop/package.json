@@ -1,6 +1,6 @@
 {
   "name": "eisechat-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "EiseChat Windows 桌面壳（Electron：窗口/托盘/通知/打包，业务逻辑在 apps/web）",
   "author": "EiseChat",

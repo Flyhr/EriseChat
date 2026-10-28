@@ -22,6 +22,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- F-27：统一发布版本；/download 页面与健康检查展示的程序集版本来自此处。 -->
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
 </Project>
