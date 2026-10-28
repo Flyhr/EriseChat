@@ -6,6 +6,7 @@ import AppIcon from '../components/AppIcon.vue'
 import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList from '../components/ConversationList.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
+import ForwardDialog from '../components/ForwardDialog.vue'
 import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import ConversationFilesPanel from '../components/ConversationFilesPanel.vue'
@@ -37,6 +38,7 @@ import { useMessagesStore } from '../stores/messages'
 import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
 import { useDraftsStore } from '../stores/drafts'
+import { useFavoritesStore } from '../stores/favorites'
 import { useSearchStore } from '../stores/search'
 import type { Conversation, Message } from '../types/frames'
 
@@ -50,6 +52,7 @@ const messages = useMessagesStore()
 const typing = useTypingStore()
 const presence = usePresenceStore()
 const drafts = useDraftsStore()
+const favorites = useFavoritesStore()
 /** typing 帧的客户端节流（同一会话 3 秒最多一次，protocol.md §4.7）。 */
 const typingThrottle = new TypingThrottle()
 
@@ -228,6 +231,28 @@ function onOpenActions(messageId: string, position: { x: number; y: number }): v
   actionMenu.value = { messageId, x: position.x, y: position.y }
 }
 
+/** F-26：resolve 消息发送者昵称（收藏快照用；找不到时回退「我 / 未知成员」）。 */
+function senderNameOf(message: Message): string {
+  const member = activeConversation.value?.members.find((item) => item.userId === message.senderId)
+  if (member) return member.displayName
+  return message.senderId === selfUserId.value ? '我' : '未知成员'
+}
+
+/** F-26：转发弹窗目标消息（null = 关闭）。 */
+const forwardTarget = ref<Message | null>(null)
+
+/** F-26：收藏/取消收藏；成功/失败用 toast 反馈。 */
+async function toggleFavorite(message: Message): Promise<void> {
+  try {
+    const result = await favorites.toggle(message, activeConversation.value, senderNameOf(message), selfUserId.value)
+    if (result === 'added') showToast('已收藏')
+    else if (result === 'removed') showToast('已取消收藏')
+    else if (result === 'unsupported') showToast('该消息不支持收藏', 'error')
+  } catch {
+    showToast('收藏操作失败，请稍后重试', 'error')
+  }
+}
+
 function onActionSelect(action: MessageActionId): void {
   const target = actionMenu.value
   const message = actionMenuMessage.value
@@ -244,6 +269,13 @@ function onActionSelect(action: MessageActionId): void {
   if (action === 'edit') {
     openEditDialog(message)
     return
+  }
+  if (action === 'forward') {
+    forwardTarget.value = message
+    return
+  }
+  if (action === 'favorite' || action === 'unfavorite') {
+    void toggleFavorite(message)
   }
 }
 
@@ -1119,6 +1151,7 @@ function onWindowDrop(event: DragEvent): void {
       :self-user-id="selfUserId"
       :is-group="isGroup"
       :sender-name="actionMenuSenderName"
+      :favorited="actionMenuMessage ? favorites.isFavorited(actionMenuMessage.messageId) : false"
       :position="actionMenu ? { x: actionMenu.x, y: actionMenu.y } : { x: 0, y: 0 }"
       @select="onActionSelect"
       @close="actionMenu = null"
@@ -1156,6 +1189,12 @@ function onWindowDrop(event: DragEvent): void {
         <p v-if="editError" class="chat-page__edit-error" role="alert">{{ editError }}</p>
       </div>
     </AppDialog>
+    <ForwardDialog
+      :open="Boolean(forwardTarget)"
+      :message="forwardTarget"
+      :self-user-id="selfUserId"
+      @close="forwardTarget = null"
+    />
   </main>
 </template>
 

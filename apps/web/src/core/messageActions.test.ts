@@ -109,25 +109,49 @@ describe('recallPlaceholderText', () => {
 })
 
 describe('buildMessageActions', () => {
-  it('本人窗口内文本：回复 + 撤回 + 编辑（撤回为 danger）', () => {
+  it('本人窗口内文本：回复 + 转发 + 收藏 + 撤回 + 编辑（撤回为 danger）', () => {
     const message = makeMessage()
     const actions = buildMessageActions(message, { selfUserId: SELF, now: message.createdAt + 1_000 })
-    expect(actions.map((action) => action.id)).toEqual(['reply', 'recall', 'edit'])
+    expect(actions.map((action) => action.id)).toEqual(['reply', 'forward', 'favorite', 'recall', 'edit'])
     expect(actions.find((action) => action.id === 'recall')?.danger).toBe(true)
   })
 
-  it('他人消息超过窗口：只有回复', () => {
+  it('已收藏时显示「取消收藏」', () => {
+    const message = makeMessage()
+    const actions = buildMessageActions(message, {
+      selfUserId: SELF,
+      now: message.createdAt + 1_000,
+      favorited: true,
+    })
+    expect(actions.map((action) => action.id)).toContain('unfavorite')
+    expect(actions.map((action) => action.id)).not.toContain('favorite')
+    expect(actions.find((action) => action.id === 'unfavorite')?.label).toBe('取消收藏')
+  })
+
+  it('他人消息超过窗口：回复 + 转发 + 收藏', () => {
     const message = makeMessage({ senderId: OTHER })
     const actions = buildMessageActions(message, {
       selfUserId: SELF,
       now: message.createdAt + MESSAGE_EDIT_WINDOW_MS + 1,
     })
-    expect(actions.map((action) => action.id)).toEqual(['reply'])
+    expect(actions.map((action) => action.id)).toEqual(['reply', 'forward', 'favorite'])
   })
 
-  it('已撤回消息不提供撤回/编辑', () => {
+  it('图片/文件消息只提供收藏（不转发）', () => {
+    const image = makeMessage({ msgType: 'image', content: { fileId: 'f', name: 'a.png', size: 1, mime: 'image/png' } })
+    expect(buildMessageActions(image, { selfUserId: SELF }).map((action) => action.id)).toEqual(['reply', 'favorite'])
+    const file = makeMessage({ msgType: 'file', content: { fileId: 'f', name: 'b.pdf', size: 1, mime: 'application/pdf' } })
+    expect(buildMessageActions(file, { selfUserId: SELF }).map((action) => action.id)).toEqual(['reply', 'favorite'])
+  })
+
+  it('已撤回消息不提供转发/收藏/撤回/编辑', () => {
     const message = makeMessage({ deletedAt: 2 })
     const actions = buildMessageActions(message, { selfUserId: SELF, now: message.createdAt + 1_000 })
     expect(actions.map((action) => action.id)).toEqual(['reply'])
+  })
+
+  it('系统消息不提供转发/收藏', () => {
+    const message = makeMessage({ msgType: 'system', content: { event: 'e' } })
+    expect(buildMessageActions(message, { selfUserId: SELF }).map((action) => action.id)).toEqual(['reply'])
   })
 })

@@ -17,10 +17,12 @@ const props = withDefaults(
     selfUserId: string
     isGroup?: boolean
     senderName?: string
+    /** F-26：该消息是否已被收藏（决定「收藏」/「取消收藏」）。 */
+    favorited?: boolean
     /** 触发位置（视口坐标；移动端贴底时忽略）。 */
     position: { x: number; y: number }
   }>(),
-  { isGroup: false, senderName: '', position: () => ({ x: 0, y: 0 }) },
+  { isGroup: false, senderName: '', favorited: false, position: () => ({ x: 0, y: 0 }) },
 )
 
 const emit = defineEmits<{
@@ -41,6 +43,7 @@ const actions = computed(() => {
     selfUserId: props.selfUserId,
     isGroup: props.isGroup,
     senderName: props.senderName,
+    favorited: props.favorited,
   }
   return buildMessageActions(props.message, options)
 })
