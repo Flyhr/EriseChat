@@ -180,8 +180,8 @@ public static class ConversationsEndpoints
     }
 
     /// <summary>
-    /// 修改群资料（F-14）：仅群聊群主可改；body 至少包含 title/announcement 之一，
-    /// announcement 传空串表示清空；返回当前用户视角的完整 Conversation。
+    /// 修改群资料（F-14 / F-23）：仅群聊群主可改；body 至少包含 title/announcement/avatarFileId 之一，
+    /// announcement/avatarFileId 传空串表示清空；返回当前用户视角的完整 Conversation。
     /// conv.updated 按每个成员的视角分别构建后逐连接推送（D5：不得全体推同一份）。
     /// </summary>
     private static async Task<IResult> UpdateGroupProfileAsync(
@@ -198,6 +198,7 @@ public static class ConversationsEndpoints
             conversationId,
             request.Title,
             request.Announcement,
+            request.AvatarFileId,
             cancellationToken);
 
         var perRecipient = await conversations.BuildPerRecipientAsync(
@@ -235,6 +236,6 @@ public static class ConversationsEndpoints
     /// <summary>成员设置请求（F-10）：pinned/muted 至少提供一个由 Service 校验。</summary>
     public sealed record MemberSettingsRequest(bool? Pinned = null, bool? Muted = null);
 
-    /// <summary>群资料更新请求（F-14）：title/announcement 至少一个非 null；announcement 传空串表示清空。</summary>
-    public sealed record GroupProfileRequest(string? Title = null, string? Announcement = null);
+    /// <summary>群资料更新请求（F-14 / F-23）：title/announcement/avatarFileId 至少一个非 null；announcement/avatarFileId 传空串表示清空。</summary>
+    public sealed record GroupProfileRequest(string? Title = null, string? Announcement = null, string? AvatarFileId = null);
 }

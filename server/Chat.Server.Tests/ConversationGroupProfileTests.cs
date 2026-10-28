@@ -25,7 +25,7 @@ public sealed class ConversationGroupProfileTests
         var service = TestSupport.CreateConversationService(db);
 
         var updated = await service.UpdateGroupProfileAsync(
-            owner.Id, conversation.Id, title: "  新群名  ", announcement: null, CancellationToken.None);
+            owner.Id, conversation.Id, title: "  新群名  ", announcement: null, avatarFileId: null, CancellationToken.None);
 
         Assert.Equal("新群名", updated.Conversation.Title);
         Assert.Equal("旧公告", updated.Conversation.Announcement);
@@ -43,7 +43,7 @@ public sealed class ConversationGroupProfileTests
         var service = TestSupport.CreateConversationService(db);
 
         var updated = await service.UpdateGroupProfileAsync(
-            owner.Id, conversation.Id, title: null, announcement: "  欢迎加入  ", CancellationToken.None);
+            owner.Id, conversation.Id, title: null, announcement: "  欢迎加入  ", avatarFileId: null, CancellationToken.None);
         Assert.Equal("欢迎加入", updated.Conversation.Announcement);
 
         var fetched = await service.GetAsync(member.Id, conversation.Id, CancellationToken.None);
@@ -60,8 +60,8 @@ public sealed class ConversationGroupProfileTests
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         var service = TestSupport.CreateConversationService(db);
 
-        await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "有公告", CancellationToken.None);
-        var updated = await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "   ", CancellationToken.None);
+        await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "有公告", avatarFileId: null, CancellationToken.None);
+        var updated = await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "   ", avatarFileId: null, CancellationToken.None);
 
         Assert.Null(updated.Conversation.Announcement);
         var row = await db.Conversations.AsNoTracking().SingleAsync(item => item.Id == conversation.Id);
@@ -79,7 +79,7 @@ public sealed class ConversationGroupProfileTests
         var service = TestSupport.CreateConversationService(db);
 
         var updated = await service.UpdateGroupProfileAsync(
-            owner.Id, conversation.Id, null, "第一行\r\n第二行\r第三行", CancellationToken.None);
+            owner.Id, conversation.Id, null, "第一行\r\n第二行\r第三行", avatarFileId: null, CancellationToken.None);
 
         Assert.Equal("第一行\n第二行\n第三行", updated.Conversation.Announcement);
     }
@@ -94,7 +94,7 @@ public sealed class ConversationGroupProfileTests
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         var service = TestSupport.CreateConversationService(db);
 
-        var updated = await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "群名A", "公告A", CancellationToken.None);
+        var updated = await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "群名A", "公告A", avatarFileId: null, CancellationToken.None);
 
         Assert.Equal("群名A", updated.Conversation.Title);
         Assert.Equal("公告A", updated.Conversation.Announcement);
@@ -112,7 +112,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.Forbidden,
-            () => service.UpdateGroupProfileAsync(member.Id, conversation.Id, "非群主改名", null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(member.Id, conversation.Id, "非群主改名", null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status403Forbidden);
     }
 
@@ -129,7 +129,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.NotMember,
-            () => service.UpdateGroupProfileAsync(outsider.Id, conversation.Id, "改名", null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(outsider.Id, conversation.Id, "改名", null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status403Forbidden);
     }
 
@@ -145,7 +145,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "单聊改名", null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "单聊改名", null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status400BadRequest);
     }
 
@@ -159,7 +159,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.NotFound,
-            () => service.UpdateGroupProfileAsync(owner.Id, Guid.NewGuid().ToString("D"), "改名", null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, Guid.NewGuid().ToString("D"), "改名", null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status404NotFound);
     }
 
@@ -175,7 +175,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status400BadRequest);
     }
 
@@ -192,7 +192,7 @@ public sealed class ConversationGroupProfileTests
         var service = TestSupport.CreateConversationService(db);
 
         var exception = await Assert.ThrowsAsync<ApiException>(
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, title, null, CancellationToken.None));
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, title, null, avatarFileId: null, CancellationToken.None));
         Assert.Equal(ErrorCodes.ValidationFailed, exception.Code);
         Assert.Contains(expectedMessage, exception.Message);
     }
@@ -209,7 +209,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, new string('名', 101), null, CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, new string('名', 101), null, avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status400BadRequest);
     }
 
@@ -225,7 +225,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, new string('公', 501), CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, new string('公', 501), avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status400BadRequest);
     }
 
@@ -241,7 +241,7 @@ public sealed class ConversationGroupProfileTests
 
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
-            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "公告\t含制表符", CancellationToken.None),
+            () => service.UpdateGroupProfileAsync(owner.Id, conversation.Id, null, "公告\t含制表符", avatarFileId: null, CancellationToken.None),
             expectedStatus: StatusCodes.Status400BadRequest);
     }
 
@@ -255,7 +255,7 @@ public sealed class ConversationGroupProfileTests
         var conversation = await TestSupport.SeedGroupConversationAsync(db, owner, member);
         var service = TestSupport.CreateConversationService(db);
 
-        await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "群名", "公告", CancellationToken.None);
+        await service.UpdateGroupProfileAsync(owner.Id, conversation.Id, "群名", "公告", avatarFileId: null, CancellationToken.None);
         await service.UpdateMemberSettingsAsync(member.Id, conversation.Id, pinned: true, muted: null, CancellationToken.None);
 
         var perRecipient = await service.BuildPerRecipientAsync(

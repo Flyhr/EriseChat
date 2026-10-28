@@ -187,9 +187,11 @@ public sealed class FileService
                     cancellationToken);
             if (!isReferencedMember)
             {
-                // F-12：头像文件对已登录用户放行（内部版头像可见性，不开放给未登录请求）。
+                // F-12/F-23：头像文件（个人头像或群头像）对已登录用户放行（内部版头像可见性，不开放给未登录请求）。
                 var isAvatarFile = await _db.Users.AsNoTracking()
-                    .AnyAsync(user => user.AvatarFileId == fileId, cancellationToken);
+                        .AnyAsync(user => user.AvatarFileId == fileId, cancellationToken)
+                    || await _db.Conversations.AsNoTracking()
+                        .AnyAsync(conversation => conversation.AvatarFileId == fileId, cancellationToken);
                 if (!isAvatarFile)
                 {
                     throw ApiException.Forbidden("无权访问该文件");

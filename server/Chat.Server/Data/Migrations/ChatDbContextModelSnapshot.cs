@@ -78,6 +78,10 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("announcement");
 
+                    b.Property<string>("AvatarFileId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("avatar_file_id");
+
                     b.Property<long>("CreatedAt")
                         .HasColumnType("INTEGER")
                         .HasColumnName("created_at");

@@ -39,6 +39,9 @@ public sealed class ConversationService
     /// <summary>群公告最大长度（F-14，接口层校验；库表列为 TEXT）。</summary>
     private const int AnnouncementMaxLength = 500;
 
+    /// <summary>群头像 files.id 最大长度（F-23，与 FileService 的 MaxFileIdLength 一致）。</summary>
+    private const int FileIdMaxLength = 64;
+
     private readonly ChatDbContext _db;
     private readonly SystemMessageWriter _systemMessages;
     private readonly AppOptions _appOptions;
@@ -572,14 +575,15 @@ public sealed class ConversationService
     }
 
     /// <summary>
-    /// 更新群资料（F-14）：仅群聊群主可改标题与公告；title/announcement 为 null 表示不修改，
-    /// announcement 传空串表示清空（落库 NULL）。返回最新会话实体与成员列表，供端点按收件人视角推送。
+    /// 更新群资料（F-14 / F-23）：仅群聊群主可改标题、公告与群头像；字段为 null 表示不修改，
+    /// announcement/avatarFileId 传空串表示清空（落库 NULL）。返回最新会话实体与成员列表，供端点按收件人视角推送。
     /// </summary>
     public async Task<GroupProfileUpdateResult> UpdateGroupProfileAsync(
         string currentUserId,
         string conversationId,
         string? title,
         string? announcement,
+        string? avatarFileId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(conversationId))
@@ -612,7 +616,7 @@ public sealed class ConversationService
             throw new ApiException(ErrorCodes.Forbidden, "仅群主可修改群资料", StatusCodes.Status403Forbidden);
         }
 
-        if (title is null && announcement is null)
+        if (title is null && announcement is null && avatarFileId is null)
         {
             throw ApiException.ValidationFailed("至少需要修改一个字段");
         }
@@ -630,6 +634,11 @@ public sealed class ConversationService
             conversation.Announcement = normalizedAnnouncement;
         }
 
+        if (avatarFileId is not null)
+        {
+            conversation.AvatarFileId = await NormalizeAvatarFileIdAsync(currentUserId, avatarFileId, cancellationToken);
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         var memberUserIds = await _db.ConversationMembers.AsNoTracking()
@@ -638,13 +647,61 @@ public sealed class ConversationService
             .ToListAsync(cancellationToken);
 
         _logger.LogInformation(
-            "群资料更新：会话 {ConversationId}，操作者 {UserId}，标题变更 {TitleChanged}，公告变更 {AnnouncementChanged}",
+            "群资料更新：会话 {ConversationId}，操作者 {UserId}，标题变更 {TitleChanged}，公告变更 {AnnouncementChanged}，群头像变更 {AvatarChanged}",
             conversationId,
             currentUserId,
             title is not null,
-            announcement is not null);
+            announcement is not null,
+            avatarFileId is not null);
 
         return new GroupProfileUpdateResult(conversation, memberUserIds);
+    }
+
+    /// <summary>
+    /// 群头像（F-23）：空串=清空（返回 null）；非空时必须是存在、本人上传且 MIME 为图片的文件。
+    /// </summary>
+    private async Task<string?> NormalizeAvatarFileIdAsync(
+        string currentUserId,
+        string avatarFileId,
+        CancellationToken cancellationToken)
+    {
+        var trimmed = avatarFileId.Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        if (trimmed.Length > FileIdMaxLength)
+        {
+            throw ApiException.ValidationFailed("群头像文件不存在");
+        }
+
+        foreach (var character in trimmed)
+        {
+            if (!char.IsLetterOrDigit(character) && character is not ('-' or '_'))
+            {
+                throw ApiException.ValidationFailed("群头像文件不存在");
+            }
+        }
+
+        var file = await _db.Files.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == trimmed, cancellationToken);
+        if (file is null)
+        {
+            throw ApiException.ValidationFailed("群头像文件不存在");
+        }
+
+        if (!string.Equals(file.OwnerId, currentUserId, StringComparison.Ordinal))
+        {
+            throw ApiException.ValidationFailed("只能使用自己上传的图片作为群头像");
+        }
+
+        if (!file.Mime.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw ApiException.ValidationFailed("群头像必须是图片");
+        }
+
+        return trimmed;
     }
 
     /// <summary>
@@ -788,7 +845,8 @@ public sealed class ConversationService
                 lastMessage,
                 myPinned,
                 myMuted,
-                conversation.Announcement));
+                conversation.Announcement,
+                conversation.AvatarFileId));
         }
 
         return result

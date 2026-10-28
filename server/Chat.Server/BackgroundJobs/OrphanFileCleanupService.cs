@@ -76,7 +76,7 @@ public sealed class OrphanFileCleanupService : BackgroundService
     }
 
     /// <summary>
-    /// F-12：清理候选查询（无消息引用且无头像引用、创建时间早于保留期）。
+    /// F-12/F-23：清理候选查询（无消息引用且无个人/群头像引用、创建时间早于保留期）。
     /// 抽成 internal 静态方法便于单测直接断言「头像引用不进候选」。
     /// </summary>
     internal static IQueryable<StoredFile> QueryOrphanCandidates(ChatDbContext db, long cutoff, int limit) =>
@@ -84,16 +84,19 @@ public sealed class OrphanFileCleanupService : BackgroundService
             .Where(file => file.CreatedAt < cutoff)
             .Where(file => !db.Messages.Any(message => message.FileId == file.Id))
             .Where(file => !db.Users.Any(user => user.AvatarFileId == file.Id))
+            .Where(file => !db.Conversations.Any(conversation => conversation.AvatarFileId == file.Id))
             .OrderBy(file => file.CreatedAt)
             .Take(limit);
 
-    /// <summary>F-12：文件是否仍被引用（消息附件或任一用户头像），供单测验证换头像后的引用状态。</summary>
+    /// <summary>F-12/F-23：文件是否仍被引用（消息附件、任一用户头像或任一群头像），供单测验证引用状态。</summary>
     internal static async Task<bool> IsFileReferencedAsync(
         ChatDbContext db,
         string fileId,
         CancellationToken cancellationToken) =>
         await db.Messages.AsNoTracking().AnyAsync(message => message.FileId == fileId, cancellationToken)
-        || await db.Users.AsNoTracking().AnyAsync(user => user.AvatarFileId == fileId, cancellationToken);
+        || await db.Users.AsNoTracking().AnyAsync(user => user.AvatarFileId == fileId, cancellationToken)
+        || await db.Conversations.AsNoTracking()
+            .AnyAsync(conversation => conversation.AvatarFileId == fileId, cancellationToken);
 
     private async Task CleanupOnceAsync(CancellationToken cancellationToken)
     {
