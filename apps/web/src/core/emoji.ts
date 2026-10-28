@@ -39,3 +39,16 @@ export function insertAtCursor(text: string, caret: number, emoji: string): Emoj
   const nextText = text.slice(0, safeCaret) + emoji + text.slice(safeCaret)
   return { text: nextText, caret: safeCaret + emoji.length }
 }
+
+/** F-21：最近使用表情最多保留 24 个（本地 UI 偏好，不落服务端）。 */
+export const EMOJI_RECENT_LIMIT = 24
+
+/**
+ * 把 emoji 放到最近使用列表最前面（纯函数，不修改入参）。
+ * 规则：忽略空串；已存在则先移除再前置（去重）；超过上限截断到 24 个。
+ */
+export function pushRecentEmoji(list: readonly string[], emoji: string): string[] {
+  if (typeof emoji !== 'string' || emoji.length === 0) return [...list]
+  const rest = list.filter((item) => typeof item === 'string' && item.length > 0 && item !== emoji)
+  return [emoji, ...rest].slice(0, EMOJI_RECENT_LIMIT)
+}
