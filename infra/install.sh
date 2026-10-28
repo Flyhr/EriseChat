@@ -9,7 +9,7 @@
 # 用法：
 #   sudo bash infra/install.sh chat-server-1.0.0-linux-x64.zip
 #
-# 本脚本不写死任何凭据：JWT 密钥由服务端首次启动自动生成到 /var/lib/eisechat/secrets.json（权限 600）。
+# 本脚本不写死任何凭据：JWT 密钥由服务端首次启动自动生成到 /opt/eisechat-server/secrets.json（权限 600）。
 set -euo pipefail
 
 APP_DIR=/opt/eisechat-server
@@ -78,6 +78,7 @@ cat <<EOF
 
 [install] 完成。
   应用目录：$APP_DIR（首次启动自动生成 secrets.json，权限 600）
+  密钥文件：$APP_DIR/secrets.json（JWT/SMTP 凭据，仅 root 与 eisechat 用户可读）
   数据目录：$DATA_DIR（chat.db / files / downloads）
   服务管理：systemctl status|restart|stop $SERVICE_NAME
   查看日志：journalctl -u $SERVICE_NAME -n 100 --no-pager
