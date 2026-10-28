@@ -541,6 +541,8 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 6. **引用持久化**：服务端在 `messages.file_id` 保存 image/file 消息引用的文件 ID（可空支撑列，不属于帧字段），用于下载时的会话成员鉴权与孤儿文件清理；帧格式不变。
 7. **发送校验与内容归一（v1）**：服务端校验 image/file 消息的 `content.fileId` 必须存在于 `files` 表，且 `files.owner_id` 为发送者本人；不存在或不属于本人时回 `error`（`VALIDATION_FAILED`，语义为「文件不存在或无权使用该文件」，不区分两种情况，也不单独下发 403）。落库与广播时 `content` 的 `name`/`size`/`mime` 以 `files` 记录（`original_name`/`size`/`mime`）为准，客户端传入值不作为权威值；同时把文件 ID 写入支撑列 `messages.file_id`（仅 image/file 消息非空，不属于帧字段）。
 
+8. **共享文件汇总（REST，v1，F-15）**：`GET /api/conversations/{conversationId}/files?type=image|file&beforeSeq={seq}&limit={n}`，需登录且为会话成员；`type` 必填（`image` / `file`，其他 400），`limit` 1~100 默认 50，`beforeSeq` 可选正整数（排他，只取 seq 小于它的引用）。只统计 `messages.file_id` 非空的 image/file 消息，因此头像、未发送的上传文件天然排除；同一 `fileId` 被多次发送只返回一次，取**最新一条引用消息**（max seq），游标即该 seq；响应 `{ "items": [{ "fileId", "name", "size", "mime", "messageId", "messageSeq", "senderId", "createdAt" }], "hasMore": bool }`，items 按 `messageSeq` 降序。非成员 403、会话不存在 404、非法 type/limit/beforeSeq 400。不新增帧、不改 `protocolVersion`。
+
 示例（图片消息）：
 
 ```json
@@ -613,3 +615,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-10 置顶与免打扰） | 2026-10-27 | Conversation 新增可选字段 `pinned` / `muted`（当前用户成员级设置，默认 false，按收件人填充、不广播）；新增 REST `PATCH /api/conversations/{conversationId}/member-settings`（body `{pinned?, muted?}`，至少一项）；`conversation_members` 新增 `pinned` / `muted` 两列（`protocol/schema.sql` 同步）；置顶排序属客户端展示层，`conv.list` 顺序不变；帧 type 与 `protocolVersion` 仍为 1 |
 | v1（F-14 群资料） | 2026-10-28 | Conversation 新增可选字段 `announcement`（群公告，≤500 字符、支持换行，`null` = 无公告，单聊恒为 null）；`conv.updated` 触发场景补充「标题/公告变更」并明确按收件人视角逐连接下发；`conversations` 新增 `announcement TEXT` 列（`protocol/schema.sql` 同步）；新增 REST `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?}`，仅群主）；无新帧、`protocolVersion` 仍为 1 |
 | v1（群头像） | 2026-10-28 | Conversation 新增可选字段 `avatarFileId`（群头像 `files.id`，仅 group、单聊恒 null、null=未设置）；`conv.updated` 触发场景补充「群头像变更」；`conversations` 新增 `avatar_file_id TEXT` 列（`protocol/schema.sql` 同步）；`PATCH /api/conversations/{conversationId}` body 增加 `avatarFileId`（空串清空、缺省不修改，仅群主）；头像文件对已登录用户可见；无新帧、`protocolVersion` 仍为 1 |
+| v1（F-15 共享文件） | 2026-10-28 | 新增 `GET /api/conversations/{conversationId}/files`（type=image 或 file、beforeSeq、limit）共享文件汇总接口：只统计 `messages.file_id` 非空的 image/file 消息、按文件去重取最新引用 seq、按 seq 降序分页（beforeSeq 排他）；无新帧、不改库表、`protocolVersion` 仍为 1 |
