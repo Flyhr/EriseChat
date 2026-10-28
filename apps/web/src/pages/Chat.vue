@@ -22,6 +22,7 @@ import { compressImageFile } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
 import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
+import { showToast } from '../core/toast'
 import { TypingThrottle } from '../core/typingThrottle'
 import type { ReplyPreviewLike } from '../core/replyPreview'
 import { chatWs, type WsState } from '../core/ws'
@@ -559,9 +560,11 @@ function toggleEmojiDrawer(): void {
   activeDrawer.value = activeDrawer.value === 'emoji' ? null : 'emoji'
 }
 
-/** 点击表情面板内部或触发按钮不算「点击外部」（触发按钮自身负责开合切换）。 */
+/** 点击表情面板内部或触发按钮不算「点击外部」（触发按钮自身负责开合切换）。
+ * F-21：面板内的删除/清空确认弹窗由 AppDialog Teleport 到 body（`.ec-dialog`），同样视为面板内部，
+ * 否则点击确认框会先关掉面板导致弹窗随之卸载。 */
 function isEmojiLayerTarget(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('.ec-emoji-panel, [data-emoji-trigger]'))
+  return target instanceof Element && Boolean(target.closest('.ec-emoji-panel, [data-emoji-trigger], .ec-dialog'))
 }
 
 function onEmojiOutsidePointer(event: MouseEvent): void {
@@ -569,7 +572,10 @@ function onEmojiOutsidePointer(event: MouseEvent): void {
 }
 
 function onEmojiEscape(event: KeyboardEvent): void {
-  if (event.key === 'Escape') activeDrawer.value = null
+  if (event.key !== 'Escape') return
+  // F-21：面板内弹窗打开时，Esc 应先交给 AppDialog 关闭确认框，不连带收起面板。
+  if (document.querySelector('.ec-dialog')) return
+  activeDrawer.value = null
 }
 
 watch(activeDrawer, (drawer) => {
@@ -619,6 +625,45 @@ function switchAsideTab(tab: 'members' | 'files'): void {
 // Emoji 面板选择：插入到发送框光标处，不发送、不关闭面板（可连续选多个）。
 function onEmojiPick(emoji: string): void {
   sendBoxRef.value?.insertEmoji(emoji)
+}
+
+/**
+ * F-21：自定义表情以 image 消息发送（复用现有上传/发送链路，不改协议）。
+ * 面板已把图片准备成 128px PNG 或原样 GIF，这里不再二次压缩（避免透明通道丢失）。
+ */
+async function onPickCustomEmoji(file: File): Promise<void> {
+  const conversationId = activeId.value
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId) return
+  if (uploadBusy.value) return
+
+  const validation = validateAttachment(file)
+  if (!validation.ok) {
+    uploadError.value = validation.reason
+    return
+  }
+
+  uploadBusy.value = true
+  uploadError.value = null
+  try {
+    const uploaded = await filesApi.upload(file)
+    const sent = messages.sendFileMessage(
+      conversationId,
+      'image',
+      {
+        fileId: uploaded.fileId,
+        name: uploaded.name,
+        size: uploaded.size,
+        mime: uploaded.mime,
+      },
+      senderId,
+    )
+    if (!sent) showToast('表情发送失败', 'error')
+  } catch {
+    showToast('表情发送失败', 'error')
+  } finally {
+    uploadBusy.value = false
+  }
 }
 
 // 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
@@ -838,6 +883,7 @@ function onWindowDrop(event: DragEvent): void {
                 v-if="activeDrawer === 'emoji'"
                 class="chat-page__emoji"
                 @pick="onEmojiPick"
+                @pick-custom="onPickCustomEmoji"
               />
               <SendBox
                 ref="sendBoxRef"
