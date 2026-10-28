@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount } from 'vue'
 import type { Message } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
-import { splitLinks } from '../core/links'
+import { hasSelfMention, splitRichText } from '../core/mentions'
 import { replyCardText } from '../core/replyPreview'
 import Avatar from './Avatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
@@ -27,8 +27,20 @@ const props = withDefaults(
     isGroup?: boolean
     /** F-09：被引用消息发送者昵称（群聊展示「昵称：摘要」；单聊可留空）。 */
     replySenderName?: string
+    /** F-25：会话成员昵称（用于把文本中的「@昵称」识别为提及并高亮）。 */
+    mentionNames?: readonly string[]
+    /** F-25：当前用户昵称（用于「提到你」标记；空串不标记）。 */
+    selfDisplayName?: string
   }>(),
-  { self: false, showSender: false, senderName: '', replySenderName: '', isGroup: false },
+  {
+    self: false,
+    showSender: false,
+    senderName: '',
+    replySenderName: '',
+    isGroup: false,
+    mentionNames: () => [],
+    selfDisplayName: '',
+  },
 )
 
 const emit = defineEmits<{
@@ -50,9 +62,22 @@ const contentText = computed(() => {
   return content.text ?? '[系统消息]'
 })
 
-/** 文本消息按安全链接分段（仅字符串内容；附件名与 system 消息不参与，链接以文本节点渲染，禁止 v-html）。 */
-const linkSegments = computed(() =>
-  typeof props.message.content === 'string' ? splitLinks(props.message.content) : [],
+/**
+ * 文本消息富文本分段（F-07 链接 + F-25 提及；仅字符串内容参与，附件名与 system 消息不参与）。
+ * 链接与提及均以文本节点渲染，禁止 v-html（protocol.md §4.3）。
+ */
+const richSegments = computed(() =>
+  typeof props.message.content === 'string'
+    ? splitRichText(props.message.content, props.mentionNames, props.selfDisplayName)
+    : [],
+)
+
+/** F-25：当前消息是否提到了自己（仅文本消息，用于气泡角标「提到你」）。 */
+const selfMentioned = computed(
+  () =>
+    props.selfDisplayName !== '' &&
+    typeof props.message.content === 'string' &&
+    hasSelfMention(props.message.content, props.selfDisplayName),
 )
 
 /** system 消息：居中灰字、无气泡/头像，不参与附件/时间/状态渲染。 */
@@ -210,8 +235,8 @@ const timeText = computed(() =>
           @loaded="emit('imageLoaded')"
         />
         <p v-else class="message-bubble__text">
-          <template v-if="linkSegments.length > 0">
-            <template v-for="(segment, index) in linkSegments" :key="index">
+          <template v-if="richSegments.length > 0">
+            <template v-for="(segment, index) in richSegments" :key="index">
               <a
                 v-if="segment.kind === 'link'"
                 class="message-bubble__link"
@@ -220,6 +245,12 @@ const timeText = computed(() =>
                 rel="noopener noreferrer"
                 >{{ segment.value }}</a
               >
+              <span
+                v-else-if="segment.kind === 'mention'"
+                class="message-bubble__mention"
+                :class="{ 'message-bubble__mention--self': segment.self }"
+                >{{ segment.value }}</span
+              >
               <template v-else>{{ segment.value }}</template>
             </template>
           </template>
@@ -227,6 +258,7 @@ const timeText = computed(() =>
         </p>
       </div>
       <div class="message-row__meta">
+        <span v-if="selfMentioned" class="message-row__mention-badge">提到你</span>
         <span v-if="edited" class="message-row__edited">已编辑</span>
         <time class="message-row__time">{{ timeText }}</time>
         <span
@@ -341,6 +373,40 @@ const timeText = computed(() =>
 
 .message-bubble--self .message-bubble__link {
   color: inherit;
+}
+
+/* F-25 提及：普通 @ 用品牌色轻底；提到自己时用品牌主色加重高亮。 */
+.message-bubble__mention {
+  padding: 0 2px;
+  border-radius: 4px;
+  color: var(--ec-brand-600);
+  background: var(--ec-brand-050);
+}
+
+.message-bubble__mention--self {
+  color: var(--ec-text-inverse);
+  background: var(--ec-brand-600);
+  font-weight: 600;
+}
+
+.message-bubble--self .message-bubble__mention {
+  color: inherit;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.message-bubble--self .message-bubble__mention--self {
+  color: var(--ec-brand-600);
+  background: var(--ec-surface);
+}
+
+/* 「提到你」角标：与「已编辑」同处 meta 行，仅文本消息且确实提到自己时出现。 */
+.message-row__mention-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ec-brand-600);
+  background: var(--ec-brand-050);
 }
 
 .message-row__meta {

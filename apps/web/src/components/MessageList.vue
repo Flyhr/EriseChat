@@ -34,6 +34,10 @@ const props = defineProps<{
   showReadReceipt?: boolean
   hasMore?: boolean
   loading?: boolean
+  /** F-25：会话成员昵称（用于把消息文本中的「@昵称」识别为提及）。 */
+  mentionNames?: readonly string[]
+  /** F-25：当前用户昵称（用于气泡「提到你」标记）。 */
+  selfDisplayName?: string
 }>()
 
 const emit = defineEmits<{
@@ -450,6 +454,8 @@ onMounted(() => {
           :reply-sender-name="replySenderNameOf(item.message)"
           :is-group="isGroup"
           :receipt="receiptOf(item.message)"
+          :mention-names="mentionNames ?? []"
+          :self-display-name="selfDisplayName ?? ''"
           @image-loaded="onImageLoaded"
           @preview-image="emit('preview-image', $event)"
           @open-actions="forwardOpenActions"
@@ -463,6 +469,8 @@ onMounted(() => {
         :message="item"
         :self="true"
         :status="item.status"
+        :mention-names="mentionNames ?? []"
+        :self-display-name="selfDisplayName ?? ''"
         @retry="emit('retry', item.clientMsgId)"
         @image-loaded="onImageLoaded"
         @preview-image="emit('preview-image', $event)"

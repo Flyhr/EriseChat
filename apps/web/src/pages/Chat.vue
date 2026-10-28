@@ -79,6 +79,10 @@ const mentionCandidates = computed<MentionCandidateMember[]>(() => {
     .filter((member) => member.userId !== selfUserId.value)
     .map((member) => ({ userId: member.userId, displayName: member.displayName, role: member.role }))
 })
+/** F-25：气泡内 @ 昵称高亮用的成员昵称表（单聊只有双方，但单聊不触发 @ 选择）。 */
+const mentionNames = computed(() => activeConversation.value?.members.map((member) => member.displayName) ?? [])
+/** F-25：当前用户昵称，用于「提到你」标记（与消息里书写时的昵称一致）。 */
+const selfDisplayName = computed(() => auth.user?.displayName ?? '')
 const memberCount = computed(() => activeConversation.value?.members.length ?? 0)
 const activeTitle = computed(() => {
   const conversation = activeConversation.value
@@ -983,6 +987,8 @@ function onWindowDrop(event: DragEvent): void {
               :show-read-receipt="!isGroup"
               :has-more="activeHasMore"
               :loading="activeLoadingHistory"
+              :mention-names="mentionNames"
+              :self-display-name="selfDisplayName"
               @load-more="loadMoreMessages"
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
