@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { conversationLabel } from '../core/groupChat'
+import NoticeBar from './NoticeBar.vue'
 import SearchResultItem from './SearchResultItem.vue'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -32,10 +33,38 @@ const title = computed(() =>
     : `搜索：${conversationName(search.scopeConversationId)}`,
 )
 
+/** F-19：当前展示的列表——服务端结果优先；会话内尚未返回时展示本地即时结果。 */
+const displayList = computed<Message[]>(() => {
+  if (search.results.length > 0) return search.results
+  if (!search.isGlobal) return search.localResults
+  return []
+})
+
+/** 当前是否为「本地已加载」列表（服务端结果未到/为空且本地有命中）。 */
+const isLocalList = computed(
+  () => !search.isGlobal && search.results.length === 0 && search.localResults.length > 0,
+)
+
+/** 高亮关键词：本地列表用本地已提交关键词，服务端列表用服务端检索关键词。 */
+const displayQuery = computed(() =>
+  isLocalList.value ? search.localQuery : search.searchedQuery,
+)
+
+const hasKeyword = computed(() => Boolean(search.query.trim()))
+
+/** F-19：会话内命中数提示（本地 N 条 / 服务端 M 条）。 */
+const countsText = computed(() => {
+  if (search.isGlobal || !hasKeyword.value || search.localTotal === 0) return ''
+  if (isLocalList.value) return `本地 ${search.localTotal} 条，正在搜索更早历史…`
+  return `本地 ${search.localTotal} 条 / 服务端 ${search.results.length}${search.hasMore ? '+' : ''} 条`
+})
+
 const emptyText = computed(() => {
-  if (search.loading) return '搜索中…'
   if (search.error) return search.error
-  if (!search.query.trim()) return '输入关键词搜索历史消息'
+  if (search.loading && displayList.value.length === 0) return '搜索中…'
+  if (!hasKeyword.value) return '输入关键词搜索历史消息'
+  if (search.offlineFallback) return '网络不可用，本地已加载的消息中也没有匹配'
+  if (!search.isGlobal) return '没有找到匹配的消息（本地已加载 + 服务端历史）'
   return '没有找到匹配的消息'
 })
 
@@ -63,8 +92,9 @@ async function selectResult(message: Message): Promise<void> {
 }
 
 function moveSelection(delta: number): void {
-  if (search.results.length === 0) return
-  const next = (activeIndex.value + delta + search.results.length) % search.results.length
+  const length = displayList.value.length
+  if (length === 0) return
+  const next = (activeIndex.value + delta + length) % length
   activeIndex.value = next
   void scrollActiveIntoView()
 }
@@ -85,7 +115,7 @@ function onInputKeydown(event: KeyboardEvent): void {
     moveSelection(-1)
   } else if (event.key === 'Enter') {
     event.preventDefault()
-    const message = search.results[activeIndex.value]
+    const message = displayList.value[activeIndex.value]
     if (message) void selectResult(message)
   }
 }
@@ -110,7 +140,7 @@ watch(
 )
 
 watch(
-  () => search.results.length,
+  () => displayList.value.length,
   () => {
     activeIndex.value = 0
   },
@@ -176,21 +206,36 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ec-search__body">
-          <p v-if="emptyText && !search.loading && search.results.length === 0" class="ec-search__hint">
+          <NoticeBar
+            v-if="search.offlineFallback"
+            class="ec-search__notice"
+            tone="warning"
+            text="网络不可用，仅显示本地已加载的消息"
+          />
+
+          <p v-if="countsText" class="ec-search__counts">{{ countsText }}</p>
+
+          <p v-if="emptyText && displayList.length === 0 && !search.loading" class="ec-search__hint">
             {{ emptyText }}
           </p>
 
-          <ul v-else-if="search.results.length > 0" class="ec-search__results" role="listbox" :aria-label="'搜索结果'">
-            <li v-for="(message, index) in search.results" :key="`${message.conversationId}-${message.messageId}`">
-              <SearchResultItem
-                :message="message"
-                :query="search.searchedQuery"
-                :active="index === activeIndex"
-                @select="selectResult"
-                @mouseenter="activeIndex = index"
-              />
-            </li>
-          </ul>
+          <template v-else-if="displayList.length > 0">
+            <p v-if="isLocalList" class="ec-search__source">本地已加载</p>
+            <ul class="ec-search__results" role="listbox" aria-label="搜索结果">
+              <li
+                v-for="(message, index) in displayList"
+                :key="`${message.conversationId}-${message.messageId}`"
+              >
+                <SearchResultItem
+                  :message="message"
+                  :query="displayQuery"
+                  :active="index === activeIndex"
+                  @select="selectResult"
+                  @mouseenter="activeIndex = index"
+                />
+              </li>
+            </ul>
+          </template>
 
           <button
             v-if="search.hasMore && search.results.length > 0"
@@ -310,6 +355,28 @@ onBeforeUnmount(() => {
   color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-secondary);
   text-align: center;
+}
+
+/* F-19：离线降级提示、命中数、本地已加载角标。 */
+.ec-search__notice {
+  margin: 0 var(--ec-space-2) var(--ec-space-2);
+}
+
+.ec-search__counts {
+  margin: 0 var(--ec-space-3) var(--ec-space-1);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.ec-search__source {
+  display: inline-flex;
+  margin: var(--ec-space-1) var(--ec-space-3);
+  padding: 1px var(--ec-space-2);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  font-weight: var(--ec-font-weight-medium);
 }
 
 .ec-search__results {
