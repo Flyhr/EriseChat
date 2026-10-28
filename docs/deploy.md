@@ -1,6 +1,6 @@
 # EiseChat 服务端部署说明（Ubuntu + Caddy）
 
-> 适用版本：M4（安装包 1.0.0）。目标环境：**Ubuntu 22.04 / 24.04**（云服务器 2C4G 轻量即可），
+> 适用版本：M4（安装包 1.1.0，F-27 统一发布；1.0.0 为历史基线）。目标环境：**Ubuntu 22.04 / 24.04**（云服务器 2C4G 轻量即可），
 > 服务端为**单进程**（ASP.NET Core，Kestrel 只监听 `127.0.0.1:8080`），数据落本地 SQLite + 文件目录。
 > **明确不使用 Docker / K8s / Nginx**，也不引入 Redis/MongoDB 等外部组件（AGENTS.md §2.4）。
 
@@ -50,14 +50,14 @@ sudo apt-get update && sudo apt-get install -y caddy
 ### 3.1 在开发机打包（Windows 亦可用）
 
 ```bash
-bash infra/publish-linux.sh 1.0.0
-# 产出：docs/test/publish-linux/chat-server-1.0.0-linux-x64.zip（docs/test/ 不入库）
+bash infra/publish-linux.sh 1.1.0
+# 产出：docs/test/publish-linux/chat-server-1.1.0-linux-x64.zip（docs/test/ 不入库）
 ```
 
 把 zip 上传到服务器（如 `/tmp`）：
 
 ```bash
-scp docs/test/publish-linux/chat-server-1.0.0-linux-x64.zip root@<服务器IP>:/tmp/
+scp docs/test/publish-linux/chat-server-1.1.0-linux-x64.zip root@<服务器IP>:/tmp/
 ```
 
 ### 3.2 在服务器安装
@@ -65,7 +65,7 @@ scp docs/test/publish-linux/chat-server-1.0.0-linux-x64.zip root@<服务器IP>:/
 把仓库中的 `infra/` 目录一并上传/解压；`install.sh` 需要同目录的 `eisechat.service` 与 `caddy/Caddyfile`。
 
 ```bash
-sudo bash infra/install.sh /tmp/chat-server-1.0.0-linux-x64.zip
+sudo bash infra/install.sh /tmp/chat-server-1.1.0-linux-x64.zip
 ```
 
 脚本会：创建 `eisechat` 系统用户与 `/var/lib/eisechat` 数据目录 → 解压应用到 `/opt/eisechat-server` →
@@ -75,7 +75,7 @@ sudo bash infra/install.sh /tmp/chat-server-1.0.0-linux-x64.zip
 
 ```bash
 curl http://127.0.0.1:8080/api/health
-# {"status":"ok","serverTime":...,"version":"1.0.0","protocolVersion":1,"db":"ok"}
+# {"status":"ok","serverTime":...,"version":"1.1.0","protocolVersion":1,"db":"ok"}
 sudo systemctl status eisechat --no-pager
 ```
 
@@ -205,7 +205,7 @@ Windows 客户端卸载：设置 → 应用 → EiseChat → 卸载（或 `Unins
 
 ## 9. Windows 安装包与 SmartScreen
 
-- 安装包名：`EiseChat-Setup-1.0.0.exe`（NSIS 每用户安装、免签名，见 M4-03）。
+- 安装包名：`EiseChat-Setup-1.1.0.exe`（NSIS 每用户安装、免签名，见 M4-03；F-27 统一发布当前版本）。
 - 首次双击若出现 SmartScreen「Windows 已保护你的电脑」：点击「更多信息 → 仍要运行」。
   这是未购买代码签名证书的正常提示（AGENTS §2.2 不产生授权费用）。
 - 安装完成后启动客户端，在登录页「服务器地址」填 `https://<你的域名>`（或本机调试用

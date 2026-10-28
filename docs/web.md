@@ -91,8 +91,8 @@ npm run test:unit   # vitest run（271 个纯逻辑用例，约 2 秒，不依�
 3. 发布后端并安装（详见 `docs/deploy.md` §3）：
 
    ```bash
-   bash infra/publish-linux.sh 1.0.0          # 产出 chat-server-1.0.0-linux-x64.zip（含 wwwroot）
-   sudo bash infra/install.sh /tmp/chat-server-1.0.0-linux-x64.zip   # 服务器上执行
+   bash infra/publish-linux.sh 1.1.0          # 产出 chat-server-1.1.0-linux-x64.zip（含 wwwroot）
+   sudo bash infra/install.sh /tmp/chat-server-1.1.0-linux-x64.zip   # 服务器上执行
    ```
 
 4. 浏览器打开 `https://<域名>/`，`/api/health` 自检，`/download` 检查安装包页。

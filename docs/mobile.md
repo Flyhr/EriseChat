@@ -2,25 +2,26 @@
 
 > 本文是 Android 客户端（Capacitor 壳 + `apps/web` 构建产物）的安装、配置、构建、签名与真机联调说明。
 > 协议与表结构见 `protocol/protocol.md`、`protocol/schema.sql`；服务器部署见 `docs/deploy.md`；项目介绍以 `README.md` 为准。
-> 本文最近更新：2026-10-26（补充 Windows 下 Git Bash 打包、USB/局域网安装、本机联调与真机验收全流程）。
+> 本文最近更新：2026-10-28（F-27：统一发布 1.1.0，同步产物、版本基线、打包与覆盖安装说明）。
 
 ## 1. 交付物
 
 | 文件 | 说明 |
 |---|---|
-| `EiseChat-1.0.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
+| `EiseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
 | 下载地址 | 服务端 `GET /download` 下载页（`data/downloads/` 放安装包） |
 
-- 当前本机产物（2026-10-26 UI-05 重新打包，含 UI-00~UI-04 改造）：`data/downloads/EiseChat-1.0.0.apk`（3,299,805 B，SHA256 `e4412ec1cd4d9a371b86437f5565706b625ff416bda632591abdbb49737367da`），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**；正式发版以 UI-06 的 1.1.0 产物为准
+- 当前产物（F-27 统一发布，2026-10-28）：`data/downloads/EiseChat-1.1.0.apk`（3,351,022 B，SHA256 `703656cecd29c43c483546c706f5f3d277a20592858a36db33356c7e18180d5b`，versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
+- 历史基线（已保留，用于回滚）：`data/downloads/EiseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EiseChat-1.0.0.apk` 下载
 - 包名：`com.eisechat.mobile`（与 Windows 壳 `com.eisechat.desktop` 区分）
-- 版本：`versionName` 为 `1.0.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000）
+- 版本：`versionName` 为 `1.1.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.1.0 → 10100）
 - 最低系统：Android 8.0（API 26）；目标/编译 API 36
 - 自签名安装包在部分手机上会提示「未知来源/风险应用」，需用户确认后安装
 
 ## 2. 安装与首次登录
 
 1. 手机允许浏览器/文件管理器「安装未知应用」（设置 → 安全 → 安装未知应用）。
-2. 把 `EiseChat-1.0.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
+2. 把 `EiseChat-1.1.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
 3. 打开 EiseChat，在登录页点「服务器地址」填写服务端地址：
    - 手机与开发机同一局域网：`http://<开发机局域网 IP>:8080`（不能用 `127.0.0.1`，那指向手机自身）
    - 互联网部署：`https://<域名>`（Caddy 自动 HTTPS，见 `docs/deploy.md`）
@@ -82,21 +83,21 @@ keyPassword=<与上面一致>
 
 ```bash
 cd /d/Code/EriseChat
-bash infra/build-apk.sh 1.0.0
+bash infra/build-apk.sh 1.1.0
 ```
 
 方式二：在 cmd 中显式调用 Git Bash：
 
 ```bat
 cd /d D:\Code\EriseChat
-"D:\Git\bin\bash.exe" infra/build-apk.sh 1.0.0
+"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0
 ```
 
 脚本流程：`apps/web` 构建（含 UI 最新代码）→ `npx cap sync android` → `./gradlew assembleRelease` → 复制为
-`data/downloads/EiseChat-1.0.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
+`data/downloads/EiseChat-1.1.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
 
 - 首次构建需下载 Gradle/AGP 依赖（数分钟到十几分钟，缓存于 `~/.gradle`）；之后增量打包约 **1~2 分钟**。
-- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EiseChat-1.0.0.apk`、文件大小与 SHA256。
+- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EiseChat-1.1.0.apk`、文件大小与 SHA256。
 - 脚本默认 `JAVA_HOME=D:/softWare/jdk21`（可用环境变量覆盖），SDK 路径读 `apps/mobile/android/local.properties`。
 - 改完 `apps/web` 后**必须重新打包**（`cap sync` 只是把 `apps/web/dist` 拷进 Android 工程，APK 内是打包时的 Web 产物）。
 
@@ -111,12 +112,12 @@ cd /d D:\Code\EriseChat
 ```bash
 export JAVA_HOME=D:/softWare/jdk21
 SDK=D:/softWare/android-sdk
-"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EiseChat-1.0.0.apk | head
-"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EiseChat-1.0.0.apk
-unzip -l data/downloads/EiseChat-1.0.0.apk | grep assets/public/index.html
+"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EiseChat-1.1.0.apk | head
+"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EiseChat-1.1.0.apk
+unzip -l data/downloads/EiseChat-1.1.0.apk | grep assets/public/index.html
 ```
 
-校验基线（1.0.0）：`package=com.eisechat.mobile`、`versionCode=10000`、`versionName=1.0.0`、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EiseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要）。
+校验基线（1.1.0，历史 1.0.0 见括号）：`package=com.eisechat.mobile`、`versionCode=10100`（1.0.0 为 10000）、`versionName=1.1.0`（1.0.0）、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EiseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要），证书 SHA-256 `2a5eef2be5a636ecfb021d1ad384a28d1ff48c365b678fd1435085a5adedbe3a`（与 1.0.0 一致，是覆盖安装的前提）。
 
 ### 5.5 安装到手机（三种方式）
 
@@ -126,21 +127,21 @@ unzip -l data/downloads/EiseChat-1.0.0.apk | grep assets/public/index.html
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EiseChat-1.0.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EiseChat-1.1.0.apk
 D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.eisechat.mobile | findstr "versionName versionCode"
 ```
 
 `devices` 应显示一行 `device`（显示 `unauthorized` 时在手机上点「允许 USB 调试」）。
 
-看到 `Success` 即安装完成；`versionName=1.0.0`、`versionCode=10000` 为当前包。覆盖安装不会清 `IndexedDB` 缓存，聊天数据始终以服务端为准。
+看到 `Success` 即安装完成；`versionName=1.1.0`、`versionCode=10100` 为当前包（1.0.0 为 10000）。`adb install -r` 为覆盖安装：应用数据目录与 IndexedDB 缓存保留（真机已验证 `firstInstallTime` 不变、`lastUpdateTime` 更新），聊天数据始终以服务端为准；**卸载会清应用数据**（服务端数据不受影响，不建议为升级而卸载）。
 
 **B. adb push 到手机，手动点安装（适合把 APK 留在手机上）**
 
 ```bat
-D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EiseChat-1.0.0.apk /sdcard/Download/
+D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EiseChat-1.1.0.apk /sdcard/Download/
 ```
 
-然后在手机「文件管理 → Download」中点开 `EiseChat-1.0.0.apk` 安装。
+然后在手机「文件管理 → Download」中点开 `EiseChat-1.1.0.apk` 安装。
 
 **C. 局域网下载页（手机与电脑同一 Wi-Fi）**
 
@@ -165,7 +166,7 @@ ipconfig
 
 **D. 其他传输方式**：微信/QQ「文件传输助手」传 APK 后点开安装亦可；只需保证 APK 完整（对比 SHA256）。
 
-安装后核对：桌面出现 EiseChat 图标；`设置 → 应用 → EiseChat → 版本 1.0.0`。如需覆盖升级但提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
+安装后核对：桌面出现 EiseChat 图标；`设置 → 应用 → EiseChat → 版本 1.1.0`。如需覆盖升级但提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
 
 ### 5.6 本机联调（服务端 + 手机，USB 或局域网）
 
@@ -225,18 +226,18 @@ ipconfig
 
 ### 5.8 一键流程速查（复制即用）
 
-**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EiseChat-1.0.0.apk`）
+**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EiseChat-1.1.0.apk`）
 
 ```bat
 cd /d/Code/EriseChat
-"D:\Git\bin\bash.exe" infra/build-apk.sh 1.0.0
+"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0
 ```
 
 **② cmd：USB 安装到已连接的手机**（adb 在 `D:\softWare\android-sdk\platform-tools\`）
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EiseChat-1.0.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EiseChat-1.1.0.apk
 ```
 
 **③ 另开终端：启动服务端**（开发模式，验证码固定 `123456`）
@@ -260,7 +261,7 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
 
 | 现象 | 排查 |
 |---|---|
-| 在 cmd 执行 `bash infra/build-apk.sh` 报 `WSL (10 - Relay) ERROR ... execvpe(/bin/bash) failed` | cmd 的 `bash` 指向 WSL，不是 Git Bash。改用 `"D:\Git\bin\bash.exe" infra/build-apk.sh 1.0.0`，或开始菜单打开 Git Bash 执行（见 §5.3） |
+| 在 cmd 执行 `bash infra/build-apk.sh` 报 `WSL (10 - Relay) ERROR ... execvpe(/bin/bash) failed` | cmd 的 `bash` 指向 WSL，不是 Git Bash。改用 `"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0`，或开始菜单打开 Git Bash 执行（见 §5.3） |
 | 打包报 `ERROR: 找不到 JDK` / `缺少 local.properties` | 按 §5.1 设置 `JAVA_HOME`（默认 `D:/softWare/jdk21`）与 `apps/mobile/android/local.properties` 的 `sdk.dir` |
 | Gradle 下载依赖很慢/失败 | 首次构建需下载 Gradle/AGP；`gradle-wrapper.properties` 已配腾讯镜像，网络受限时检查代理 |
 | `adb devices` 为空 / `unauthorized` | 打开手机开发者选项与 USB 调试；换数据线（需支持数据传输）；手机上点「允许 USB 调试」；`adb kill-server && adb start-server` 后重试 |

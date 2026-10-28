@@ -2,15 +2,15 @@
 
 > 本文是 Windows 客户端（Electron 壳 `apps/desktop` + `apps/web` 构建产物）的安装、运行、开发联调、打包与验收说明。
 > 协议见 `protocol/protocol.md`；服务端部署见 `docs/deploy.md`；Web 端见 `docs/web.md`；Android 见 `docs/mobile.md`；项目介绍以 `README.md` 为准。
-> 最近更新：2026-10-27。
+> 最近更新：2026-10-28（F-27：统一发布 1.1.0）。
 
 ## 1. 交付物与定位
 
 | 项 | 值 |
 |---|---|
-| 安装包 | `EiseChat-Setup-1.0.0.exe`（NSIS，当前用户安装、免代码签名） |
+| 安装包 | `EiseChat-Setup-1.1.0.exe`（NSIS，当前用户安装、免代码签名） |
 | 产物位置 | `apps/desktop/dist/`（不入库）；分发时复制到服务端 `data/downloads/`，经 `GET /download` 提供下载 |
-| 本机当前文件 | `data/downloads/EiseChat-Setup-1.0.0.exe`，121,290,773 B，SHA256 `2ea45f7b55a22e31ee474f7124a6a7e338396b41146a067cc279399edcf02f9e`（重新打包后会变，以文件/打包输出为准） |
+| 本机当前文件 | `data/downloads/EiseChat-Setup-1.1.0.exe`，121,359,488 B，SHA256 `82fbd17c3861830d4e3686928f1c410530bd3a1fad7d938ff3a43e1e0813deec`；FileVersion/ProductVersion 均为 1.1.0（重新打包后会变，以文件/打包输出为准）。历史基线：`EiseChat-Setup-1.0.0.exe`（121,290,773 B）保留在 `data/downloads/` 供回滚 |
 | 应用标识 | `appId=com.eisechat.desktop`，产品名 `EiseChat` |
 | 包内容 | Electron 主进程/预加载脚本 + `apps/web` 构建产物（以 `resources/web-dist/` 随安装包分发） |
 | 最低系统 | Windows 10/11 x64（Electron 45 运行时自带，无需安装 .NET/Node） |
@@ -19,7 +19,7 @@
 
 ## 2. 安装与首次登录
 
-1. 双击 `EiseChat-Setup-1.0.0.exe`。
+1. 双击 `EiseChat-Setup-1.1.0.exe`。
    - 若出现 SmartScreen「Windows 已保护你的电脑」：点「更多信息 → 仍要运行」。这是**未购买代码签名证书**的正常提示（AGENTS §2.2 不产生授权费用），不是安装包损坏。
    - 向导默认「当前用户」安装，无需管理员权限；可改安装目录；自动创建桌面与开始菜单快捷方式。
 2. 安装完成启动 EiseChat；首次打开进入登录页，点「服务器地址」填写服务端地址后保存：
@@ -86,7 +86,7 @@ cd apps/web && npm run build && cd ../..
 cd apps/desktop
 npm install          # 首次
 npm run build        # tsc 编译 electron/ → dist-electron/
-npm run dist         # electron-builder --win nsis → apps/desktop/dist/EiseChat-Setup-1.0.0.exe
+npm run dist         # electron-builder --win nsis → apps/desktop/dist/EiseChat-Setup-1.1.0.exe
 ```
 
 - 打包配置 `apps/desktop/electron-builder.yml`：`appId`、产品名、NSIS 每用户安装（`oneClick: false`、`perMachine: false`、可改目录、桌面/开始菜单快捷方式）、`artifactName` 固定为 `EiseChat-Setup-${version}.${ext}`、`extraResources` 把 `apps/web/dist` 复制为安装包内 `resources/web-dist/`、`build/icon.ico` 作为 exe 图标与托盘图标。
@@ -99,20 +99,20 @@ npm run dist         # electron-builder --win nsis → apps/desktop/dist/EiseCha
 
 ### 版本号规则
 
-三端与服务端版本保持一致：`apps/web/package.json`、`apps/desktop/package.json`、`apps/mobile/android/app/build.gradle`、服务端发布版本号（`publish-linux.sh <版本>`）统一修改；安装包文件名随之变成 `EiseChat-Setup-<版本>.exe`。当前为 `1.0.0`。
+三端与服务端版本保持一致：`apps/web/package.json`、`apps/desktop/package.json`、`apps/mobile/android/app/build.gradle`、服务端发布版本号（`publish-linux.sh <版本>`）统一修改；安装包文件名随之变成 `EiseChat-Setup-<版本>.exe`。当前为 `1.1.0`。
 
 ## 6. 静态校验（可选）
 
 ```bash
 # Git Bash
-sha256sum data/downloads/EiseChat-Setup-1.0.0.exe
-ls -l data/downloads/EiseChat-Setup-1.0.0.exe
+sha256sum data/downloads/EiseChat-Setup-1.1.0.exe
+ls -l data/downloads/EiseChat-Setup-1.1.0.exe
 
 # Windows PowerShell
-Get-FileHash .\data\downloads\EiseChat-Setup-1.0.0.exe -Algorithm SHA256
+Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 ```
 
-对照基线（1.0.0）：大小 121,290,773 B、SHA256 `2ea45f7b…6f02f9e`；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.0.0。
+对照基线（1.1.0）：大小 121,359,488 B、SHA256 `82fbd17c…13deec`、FileVersion/ProductVersion 1.1.0；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.1.0。历史基线（1.0.0）：121,290,773 B、SHA256 `2ea45f7b…6f02f9e`。
 
 ## 7. 验收清单（每次打包后建议过一遍）
 
