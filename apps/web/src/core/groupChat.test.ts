@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canTransferOwner,
   conversationLabel,
   memberCountLabel,
   sortMembers,
@@ -47,6 +48,10 @@ describe('systemMessageText', () => {
 
   it('缺 text 时按 member.removed 兜底', () => {
     expect(systemMessageText({ event: 'member.removed' })).toBe('有成员被移出群聊')
+  })
+
+  it('缺 text 时按 owner.transferred 兜底（F-24）', () => {
+    expect(systemMessageText({ event: 'owner.transferred' })).toBe('群主已转让')
   })
 
   it('未知事件回退「系统消息」', () => {
@@ -132,5 +137,34 @@ describe('conversationLabel', () => {
     expect(conversationLabel({ type: 'direct', title: '', members: groupMembers })).toBe(
       '单聊会话',
     )
+  })
+})
+
+describe('canTransferOwner', () => {
+  const groupMembers = [member('u1', '甲', 'owner'), member('u2', '乙', 'member')]
+  const group = { type: 'group' as const, members: groupMembers }
+
+  it('群主可转让给本群其他成员', () => {
+    expect(canTransferOwner(group, 'u1', 'u2')).toBe(true)
+  })
+
+  it('非群主不可转让', () => {
+    expect(canTransferOwner(group, 'u2', 'u1')).toBe(false)
+  })
+
+  it('目标是自己不可转让', () => {
+    expect(canTransferOwner(group, 'u1', 'u1')).toBe(false)
+  })
+
+  it('目标不在本群不可转让', () => {
+    expect(canTransferOwner(group, 'u1', 'u3')).toBe(false)
+  })
+
+  it('单聊不可转让', () => {
+    expect(canTransferOwner({ type: 'direct', members: groupMembers }, 'u1', 'u2')).toBe(false)
+  })
+
+  it('自身 ID 为空不可转让', () => {
+    expect(canTransferOwner(group, '', 'u2')).toBe(false)
   })
 })

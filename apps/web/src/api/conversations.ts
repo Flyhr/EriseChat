@@ -22,6 +22,11 @@ export interface MemberSettingsRequest {
   muted?: boolean
 }
 
+/** 群主转让请求（F-24）：目标成员用户 ID。 */
+export interface TransferOwnerRequest {
+  userId: string
+}
+
 /**
  * 群资料更新请求（F-14 / F-23）：字段缺省 = 不修改；`announcement: ''` = 清空公告；
  * `avatarFileId: ''` = 清空群头像；title 必须为非空字符串（不传表示不改）。仅群聊群主可用。
@@ -99,6 +104,17 @@ export const conversationsApi = {
     http.patch<Conversation>(
       `/conversations/${conversationId}`,
       body satisfies GroupProfileUpdate,
+    ),
+
+  /**
+   * 转让群主（F-24）：仅当前群主可用，目标须为本群成员且非自己。
+   * 成功后服务端互换两条成员行的角色、写 owner.transferred 系统消息并广播 conv.updated；
+   * 返回当前用户视角的完整 Conversation（群主身份已转出）。
+   */
+  transferOwner: (conversationId: string, userId: string) =>
+    http.post<Conversation>(
+      `/conversations/${conversationId}/owner`,
+      { userId } satisfies TransferOwnerRequest,
     ),
 
   /**

@@ -468,7 +468,7 @@ public sealed class ConversationService
         {
             if (currentMembership.Role == MemberRole.Owner)
             {
-                throw ApiException.ValidationFailed("群主不能退出群聊（v1 不支持转让群主）");
+                throw ApiException.ValidationFailed("群主不能退出群聊，请先把群主转让给其他成员");
             }
 
             systemContent = new SystemContent(

@@ -3,12 +3,13 @@ import type { Conversation, ConversationMember, MessageContent } from '../types/
 // 群聊展示工具（M3-08，纯函数，便于单测）：系统消息文案兜底、成员排序、成员数与会话标签。
 // 文案与排序规则对齐 protocol/protocol.md §4.3/§4.5 与 docs/internal-plan.md §4.6。
 
-/** 系统事件兜底文案（服务端 content.text 缺失时使用；protocol.md §4.3 的四个事件）。 */
+/** 系统事件兜底文案（服务端 content.text 缺失时使用；protocol.md §4.3 的五个事件）。 */
 export const SYSTEM_EVENT_FALLBACK: Readonly<Record<string, string>> = {
   'group.created': '群聊已创建',
   'member.joined': '有新成员加入群聊',
   'member.left': '有成员退出群聊',
   'member.removed': '有成员被移出群聊',
+  'owner.transferred': '群主已转让',
 }
 
 /**
@@ -47,4 +48,20 @@ export function conversationLabel(
     return `${name}（${conversation.members.length}）`
   }
   return conversation.title.trim() || '单聊会话'
+}
+
+/**
+ * 是否可把群主转让给目标成员（F-24）：群聊、自己是群主、目标在本群且不是自己。
+ * 仅用于 UI 是否展示「转让」入口；最终权限以服务端校验为准（非群主/非成员返回 FORBIDDEN）。
+ */
+export function canTransferOwner(
+  conversation: Pick<Conversation, 'type' | 'members'>,
+  selfUserId: string,
+  targetUserId: string,
+): boolean {
+  if (conversation.type !== 'group') return false
+  if (!selfUserId || selfUserId === targetUserId) return false
+  const self = conversation.members.find((member) => member.userId === selfUserId)
+  if (!self || self.role !== 'owner') return false
+  return conversation.members.some((member) => member.userId === targetUserId)
 }

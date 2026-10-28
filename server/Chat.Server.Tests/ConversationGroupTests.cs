@@ -266,7 +266,7 @@ public sealed class ConversationGroupTests
             () => service.RemoveMemberAsync(memberB.Id, conversationId, memberC.Id, CancellationToken.None),
             403);
 
-        // 群主移除自己（退出）→ VALIDATION_FAILED（v1 不支持转让群主）。
+        // 群主移除自己（退出）→ VALIDATION_FAILED（F-24 起群主需先转让群主）。
         await TestSupport.AssertApiExceptionAsync(
             ErrorCodes.ValidationFailed,
             () => service.RemoveMemberAsync(owner.Id, conversationId, owner.Id, CancellationToken.None),

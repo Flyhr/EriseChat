@@ -20,7 +20,7 @@ import {
   normalizeAnnouncementInput,
   validateGroupTitle,
 } from '../core/groupProfile'
-import { sortMembers } from '../core/groupChat'
+import { canTransferOwner, sortMembers } from '../core/groupChat'
 import { showToast } from '../core/toast'
 import { usePresenceStore } from '../stores/presence'
 import type { Conversation, ConversationMember } from '../types/frames'
@@ -44,8 +44,11 @@ const presence = usePresenceStore()
 
 const busy = ref(false)
 const errorMessage = ref('')
-/** 待确认的危险操作（移除成员 / 退出群聊），由自绘 AppDialog 二次确认。 */
+/** 待确认的危险操作（移除成员 / 退出群聊 / 转让群主），由自绘 AppDialog 二次确认。 */
 const confirmState = ref<{ kind: 'remove'; member: ConversationMember } | { kind: 'leave' } | null>(null)
+/** 待确认的群主转让目标（F-24）。 */
+const transferState = ref<ConversationMember | null>(null)
+const transferSubmitting = ref(false)
 const inviteOpen = ref(false)
 const inviteKeyword = ref('')
 const inviteResults = ref<UserProfile[]>([])
@@ -173,6 +176,37 @@ function askRemoveMember(member: ConversationMember): void {
 function askLeaveGroup(): void {
   if (busy.value || isOwner.value) return
   confirmState.value = { kind: 'leave' }
+}
+
+/** 群主转让（F-24）：成员行「转让」入口是否可用；最终权限以服务端校验为准。 */
+function canTransferTo(member: ConversationMember): boolean {
+  return !busy.value && canTransferOwner(props.conversation, props.selfUserId, member.userId)
+}
+
+function askTransferOwner(member: ConversationMember): void {
+  if (!canTransferTo(member)) return
+  transferState.value = member
+}
+
+async function confirmTransferOwner(): Promise<void> {
+  const target = transferState.value
+  if (!target || transferSubmitting.value) return
+  transferSubmitting.value = true
+  try {
+    const updated = await conversationsApi.transferOwner(
+      props.conversation.conversationId,
+      target.userId,
+    )
+    emit('updated', updated)
+    // 角色以服务端广播的 conv.updated 为准；若推送稍晚，再 GET 一次兜底，保证徽标与操作按钮及时刷新。
+    await refreshConversation()
+    showToast('已转让群主', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    transferState.value = null
+    transferSubmitting.value = false
+  }
 }
 
 async function confirmDialog(): Promise<void> {
@@ -425,6 +459,15 @@ async function removeAvatar(): Promise<void> {
         </span>
         <span class="group-panel__role">{{ roleLabel(member) }}</span>
         <button
+          v-if="canTransferTo(member)"
+          type="button"
+          class="group-panel__transfer"
+          :disabled="busy || transferSubmitting"
+          @click="askTransferOwner(member)"
+        >
+          转让
+        </button>
+        <button
           v-if="isOwner && member.userId !== selfUserId"
           type="button"
           class="group-panel__remove"
@@ -487,7 +530,7 @@ async function removeAvatar(): Promise<void> {
       <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="askLeaveGroup">
         退出群聊
       </button>
-      <p v-else class="group-panel__hint">群主不能退出群聊（v1 不支持转让群主或解散群）。</p>
+      <p v-else class="group-panel__hint">群主不能退出群聊；如需退出，请先在成员列表把群主转让给其他成员。</p>
     </section>
 
     <AppDialog
@@ -499,6 +542,16 @@ async function removeAvatar(): Promise<void> {
       :busy="busy"
       @confirm="confirmDialog"
       @cancel="confirmState = null"
+    />
+    <AppDialog
+      :open="transferState !== null"
+      title="转让群主"
+      :message="`转让后你将变为普通成员，无法再管理群资料与成员。确定转让给「${transferState?.displayName ?? ''}」吗？`"
+      confirm-text="转让"
+      tone="danger"
+      :busy="transferSubmitting"
+      @confirm="confirmTransferOwner"
+      @cancel="transferState = null"
     />
     <AppDialog
       :open="titleDialogOpen"
@@ -580,6 +633,7 @@ async function removeAvatar(): Promise<void> {
 
 .group-panel__toggle,
 .group-panel__remove,
+.group-panel__transfer,
 .group-panel__secondary {
   padding: var(--ec-space-1) var(--ec-space-2);
   border: 1px solid var(--ec-border);
