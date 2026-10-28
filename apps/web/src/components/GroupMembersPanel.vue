@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { conversationsApi } from '../api/conversations'
+import { filesApi } from '../api/files'
 import { usersApi, type UserProfile } from '../api/users'
 import AppDialog from './AppDialog.vue'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
 import PresenceDot from './PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
+import { compressImageFile } from '../core/imageCompress'
+import { groupAvatarFileIdOf, isAcceptableAvatarFile } from '../core/groupAvatar'
 import {
   ANNOUNCEMENT_MAX_LENGTH,
   GROUP_TITLE_MAX_LENGTH,
@@ -58,7 +61,13 @@ const announcementDraft = ref('')
 const announcementExpanded = ref(false)
 const clearAnnouncementOpen = ref(false)
 const profileSaving = ref(false)
+// 群头像（F-23）：群主可更换/移除，客户端先压到 512 长边、约 200KB 再上传。
+const avatarUploading = ref(false)
+const avatarFileInput = ref<HTMLInputElement | null>(null)
+const removeAvatarOpen = ref(false)
 const announcementText = computed(() => props.conversation.announcement ?? '')
+const groupAvatarFileId = computed(() => groupAvatarFileIdOf(props.conversation))
+const hasGroupAvatarImage = computed(() => groupAvatarFileId.value !== null)
 const announcementPreviewText = computed(() => announcementPreview(announcementText.value))
 const hasAnnouncement = computed(() => !announcementIsEmpty(announcementText.value))
 const titleDraftLength = computed(() => Array.from(titleDraft.value).length)
@@ -266,6 +275,63 @@ async function clearAnnouncement(): Promise<void> {
     profileSaving.value = false
   }
 }
+
+function triggerAvatarPick(): void {
+  if (!canEditProfile.value || profileSaving.value || avatarUploading.value) return
+  avatarFileInput.value?.click()
+}
+
+async function onAvatarPicked(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || !canEditProfile.value) return
+  if (!isAcceptableAvatarFile(file)) {
+    showToast('群头像需为 5MB 以内的图片文件', 'error')
+    return
+  }
+
+  avatarUploading.value = true
+  try {
+    const compressed = await compressImageFile(file, {
+      maxEdge: 512,
+      targetBytes: 200 * 1024,
+    })
+    const uploaded = await filesApi.upload(compressed)
+    const updated = await conversationsApi.updateGroupProfile(props.conversation.conversationId, {
+      avatarFileId: uploaded.fileId,
+    })
+    emit('updated', updated)
+    showToast('群头像已更新', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    avatarUploading.value = false
+  }
+}
+
+function askRemoveAvatar(): void {
+  if (!canEditProfile.value) return
+  removeAvatarOpen.value = true
+}
+
+async function removeAvatar(): Promise<void> {
+  if (!canEditProfile.value || profileSaving.value) return
+  profileSaving.value = true
+  try {
+    const updated = await conversationsApi.updateGroupProfile(props.conversation.conversationId, {
+      avatarFileId: '',
+    })
+    emit('updated', updated)
+    removeAvatarOpen.value = false
+    showToast('群头像已移除', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+    removeAvatarOpen.value = false
+  } finally {
+    profileSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -275,6 +341,35 @@ async function clearAnnouncement(): Promise<void> {
     <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
 
     <section v-if="conversation.type === 'group'" class="group-panel__section group-panel__profile">
+      <div class="group-panel__profile-avatar">
+        <Avatar :display-name="conversation.title" :avatar-file-id="groupAvatarFileId ?? undefined" :size="56" />
+        <div v-if="canEditProfile" class="group-panel__profile-avatar-actions">
+          <input
+            ref="avatarFileInput"
+            type="file"
+            class="group-panel__file-input"
+            accept="image/*"
+            @change="onAvatarPicked"
+          />
+          <button
+            type="button"
+            class="group-panel__link"
+            :disabled="profileSaving || avatarUploading"
+            @click="triggerAvatarPick"
+          >
+            <AppIcon name="edit" :size="14" /> {{ avatarUploading ? '上传中…' : '更换头像' }}
+          </button>
+          <button
+            v-if="hasGroupAvatarImage"
+            type="button"
+            class="group-panel__link"
+            :disabled="profileSaving || avatarUploading"
+            @click="askRemoveAvatar"
+          >
+            移除头像
+          </button>
+        </div>
+      </div>
       <div class="group-panel__profile-head">
         <h3 class="group-panel__profile-title">群资料</h3>
         <button
@@ -445,6 +540,17 @@ async function clearAnnouncement(): Promise<void> {
         清空公告
       </button>
     </AppDialog>
+
+    <AppDialog
+      :open="removeAvatarOpen"
+      title="移除群头像"
+      message="移除后所有成员将看不到当前群头像，确定移除吗？"
+      confirm-text="移除"
+      tone="danger"
+      :busy="profileSaving"
+      @confirm="removeAvatar"
+      @cancel="removeAvatarOpen = false"
+    />
 
     <AppDialog
       :open="clearAnnouncementOpen"
@@ -634,6 +740,25 @@ async function clearAnnouncement(): Promise<void> {
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-md);
   background: var(--ec-bg-canvas);
+}
+
+/* F-23：群头像行（头像 + 群主更换/移除操作）。 */
+.group-panel__profile-avatar {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  margin-bottom: var(--ec-space-2);
+}
+
+.group-panel__profile-avatar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  align-items: flex-start;
+}
+
+.group-panel__file-input {
+  display: none;
 }
 
 .group-panel__profile-head {

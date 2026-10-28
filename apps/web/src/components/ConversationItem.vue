@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Conversation } from '../types/frames'
+import { groupAvatarFileIdOf } from '../core/groupAvatar'
 import { conversationLabel, systemMessageText } from '../core/groupChat'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
@@ -37,7 +38,10 @@ const title = computed(() => {
   return otherMember.value?.displayName ?? conversation.title ?? '单聊会话'
 })
 
-const avatarFileId = computed(() => otherMember.value?.avatarFileId)
+// F-23：群聊优先展示群头像；单聊仍展示对方个人头像。
+const avatarFileId = computed(
+  () => otherMember.value?.avatarFileId ?? groupAvatarFileIdOf(props.conversation),
+)
 
 const preview = computed(() => {
   const message = props.conversation.lastMessage
@@ -174,7 +178,7 @@ function formatTime(timestamp: number): string {
       :aria-current="active ? 'true' : undefined"
       @click="emit('select', conversation.conversationId)"
     >
-      <Avatar :display-name="title" :avatar-file-id="avatarFileId" :size="44" />
+      <Avatar :display-name="title" :avatar-file-id="avatarFileId ?? undefined" :size="44" />
       <span class="conversation-item__body">
         <span class="conversation-item__title">{{ title }}</span>
         <span class="conversation-item__preview">{{ preview }}</span>

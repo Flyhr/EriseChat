@@ -781,6 +781,7 @@ function onWindowDrop(event: DragEvent): void {
           :is-group="isGroup"
           :member-count="memberCount"
           :peer-presence="peerPresence"
+          :avatar-file-id="activeConversation.avatarFileId ?? null"
           :show-back="true"
           @open-group="toggleGroupDrawer"
           @back="backToList"

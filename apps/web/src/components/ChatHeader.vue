@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { presenceLabelOf } from '../core/presence'
 import AppIcon from './AppIcon.vue'
+import Avatar from './Avatar.vue'
 import ComingSoonHint from './ComingSoonHint.vue'
 import PresenceDot from './PresenceDot.vue'
 
@@ -16,8 +17,10 @@ const props = withDefaults(
     peerPresence?: boolean
     /** 窄屏（≤800）显示返回按钮（批次4 启用）。 */
     showBack?: boolean
+    /** 群头像 files.id（F-23）：仅群聊可能有值；null 表示未设置。 */
+    avatarFileId?: string | null
   }>(),
-  { showBack: false },
+  { showBack: false, avatarFileId: null },
 )
 
 const emit = defineEmits<{
@@ -42,6 +45,14 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
       >
         <AppIcon name="back" />
       </button>
+
+      <Avatar
+        v-if="isGroup && avatarFileId"
+        :display-name="title"
+        :avatar-file-id="avatarFileId"
+        :size="32"
+        class="ec-chat-header__avatar"
+      />
 
       <h2 class="ec-chat-header__title" :title="title">{{ title }}</h2>
 
@@ -102,6 +113,11 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
 
 .ec-chat-header__back {
   display: none;
+}
+
+/* F-23：群聊标题前的群头像。 */
+.ec-chat-header__avatar {
+  flex: none;
 }
 
 .ec-chat-header__title {
