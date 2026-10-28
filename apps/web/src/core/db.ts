@@ -8,24 +8,24 @@ import type { FavoriteRecord } from './favorites'
 
 export const STORE_MESSAGES = 'messages'
 export const STORE_CONVERSATIONS = 'conversations'
-export const STORE_META = 'meta'
+const STORE_META = 'meta'
 /** F-03：待发消息持久化（只缓存未收到 ack 的乐观消息，刷新后可恢复并重发）。 */
-export const STORE_PENDING = 'pending'
+const STORE_PENDING = 'pending'
 /** F-21：自定义表情（仅本设备；存 blob 不存 objectURL）。 */
-export const STORE_CUSTOM_EMOJIS = 'customEmojis'
+const STORE_CUSTOM_EMOJIS = 'customEmojis'
 /** F-26：本地收藏（快照，按账号隔离；换账号只做内存过滤，不删除数据）。 */
-export const STORE_FAVORITES = 'favorites'
+const STORE_FAVORITES = 'favorites'
 
 /** 本地缓存库版本（升级时递增并只在 onupgradeneeded 中做增量变更）。 */
-export const DB_VERSION = 4
+const DB_VERSION = 4
 
-export interface MetaRecord {
+interface MetaRecord {
   key: string
   value: unknown
 }
 
 /** 待发消息状态：与 messages store 的 PendingStatus 保持一致（此处独立声明避免反向依赖）。 */
-export type PendingRecordStatus = 'sending' | 'failed'
+type PendingRecordStatus = 'sending' | 'failed'
 
 /** 待发消息的 IndexedDB 记录（与 stores/messages.ts 的 PendingMessage 同构）。 */
 export interface PendingRecord {
@@ -46,7 +46,7 @@ export interface PendingRecord {
 let dbPromise: Promise<IDBDatabase> | null = null
 
 /** 打开（首次创建）本地缓存库；schema 变更时递增版本号并写 onupgradeneeded。 */
-export function openDb(): Promise<IDBDatabase> {
+function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(config.dbName, DB_VERSION)
@@ -102,11 +102,11 @@ function runRequest<T>(
   )
 }
 
-export function putRecord<T>(storeName: string, value: T): Promise<void> {
+function putRecord<T>(storeName: string, value: T): Promise<void> {
   return runRequest<void>(storeName, 'readwrite', (store) => store.put(value))
 }
 
-export function getRecord<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
+function getRecord<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
   return runRequest<T | undefined>(storeName, 'readonly', (store) => store.get(key))
 }
 
@@ -114,13 +114,13 @@ export function deleteRecord(storeName: string, key: IDBValidKey): Promise<void>
   return runRequest<void>(storeName, 'readwrite', (store) => store.delete(key))
 }
 
-export function getAllRecords<T>(storeName: string): Promise<T[]> {
+function getAllRecords<T>(storeName: string): Promise<T[]> {
   return runRequest<T[]>(storeName, 'readonly', (store) => store.getAll())
 }
 
 // ===== 业务封装（缓存层，M2 起由 messages store 接入） =====
 
-export function saveMessage(message: Message): Promise<void> {
+function saveMessage(message: Message): Promise<void> {
   return putRecord(STORE_MESSAGES, message)
 }
 

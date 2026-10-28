@@ -12,6 +12,7 @@ import ComingSoonHint from '../components/ComingSoonHint.vue'
 import SettingsGroup from '../components/settings/SettingsGroup.vue'
 import SettingsRow from '../components/settings/SettingsRow.vue'
 import SettingsSwitch from '../components/settings/SettingsSwitch.vue'
+import { isDesktopShell } from '../core/desktop'
 import type { AppIconName } from '../core/icons'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
@@ -312,14 +313,6 @@ watch(activeSectionId, (next) => {
   void loadPasswordState()
   void loadSessions()
 })
-
-/** 是否运行在桌面壳：Electron preload 提供原生通知，不依赖浏览器通知授权。 */
-function isDesktopShell(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    Boolean((window as Window & { eisechatDesktop?: unknown }).eisechatDesktop)
-  )
-}
 
 /** 切换桌面通知：Web 版先申请浏览器通知权限；被拒绝/不支持时提示且保持关闭。 */
 async function toggleDesktopNotifications(): Promise<void> {

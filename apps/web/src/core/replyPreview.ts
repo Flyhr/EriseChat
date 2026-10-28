@@ -2,6 +2,7 @@
 // 服务端 Reply 摘要把 text 截断到 120 字符；这里再做前端 60 字符折叠，避免引用条撑高气泡。
 // 详见 protocol/protocol.md §4.3「Reply 对象」。
 
+import { truncateText } from './text'
 import type { MessageReply, MessageSendType, MessageType } from '../types/frames'
 
 /** 引用条/回复条展示文本的前端上限（与 protocol 服务端 120 字符上限独立）。 */
@@ -14,12 +15,9 @@ export interface ReplyPreviewLike {
   name?: string
 }
 
-/** 按 Unicode 码点安全截断（不拆代理对），超长追加省略号。 */
+/** 引用条文本截断：复用统一的码点安全截断，非法上限回退到引用条默认上限。 */
 export function truncateReplyPreview(text: string, max = REPLY_PREVIEW_MAX_LENGTH): string {
-  const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : REPLY_PREVIEW_MAX_LENGTH
-  const chars = Array.from(text)
-  if (chars.length <= limit) return text
-  return chars.slice(0, limit).join('') + '…'
+  return truncateText(text, Number.isFinite(max) && max > 0 ? Math.floor(max) : REPLY_PREVIEW_MAX_LENGTH)
 }
 
 function summaryOf(msgType: MessageType, text: string | undefined, name: string | undefined): string {

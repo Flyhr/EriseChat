@@ -6,6 +6,7 @@ import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatSessionTime } from '../core/sessionFormat'
+import { truncateText } from '../core/text'
 import { showToast } from '../core/toast'
 import type { FavoriteRecord } from '../core/favorites'
 import { useFavoritesStore } from '../stores/favorites'
@@ -33,7 +34,7 @@ function summaryOf(record: FavoriteRecord): string {
   }
   const text = (record.text ?? '').replace(/\s+/g, ' ').trim()
   if (text.length === 0) return '[空文本]'
-  return text.length > 90 ? `${text.slice(0, 90)}…` : text
+  return truncateText(text, 90)
 }
 
 /** 打开原会话并定位到收藏时的消息序号（原消息已撤回时仍可跳到会话历史）。 */

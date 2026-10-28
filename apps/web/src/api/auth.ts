@@ -110,10 +110,6 @@ export const authApi = {
   /** F-13：修改/设置密码（已有密码须传 oldPassword；返回 204） */
   changePassword: (body: ChangePasswordRequest) => http.post<void>('/me/password', body),
 
-  /** F-13：请求密码重置验证码（purpose=reset；未注册邮箱同样返回冷却，不泄漏） */
-  requestPasswordReset: (email: string) =>
-    http.post<SendEmailCodeResponse>('/auth/password/reset/request', { email }),
-
   /** F-13：用邮箱验证码重置密码（返回 204） */
   resetPassword: (body: ResetPasswordRequest) =>
     http.post<void>('/auth/password/reset', body),

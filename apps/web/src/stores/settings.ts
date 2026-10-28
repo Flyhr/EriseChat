@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
+import { isDesktopShell } from '../core/desktop'
 
 /** 纯客户端偏好（提示音、桌面通知）的 localStorage key；服务端不感知，也不跨设备同步。 */
 export const SETTINGS_STORAGE_KEY = 'eisechat.settings'
@@ -16,12 +17,6 @@ export interface ClientSettings {
 export const DEFAULT_SETTINGS: ClientSettings = {
   soundEnabled: true,
   desktopNotificationsEnabled: false,
-}
-
-/** 是否运行在 Electron 桌面壳内（preload 暴露 window.eisechatDesktop）。 */
-function isDesktopShell(): boolean {
-  if (typeof window === 'undefined') return false
-  return Boolean((window as Window & { eisechatDesktop?: unknown }).eisechatDesktop)
 }
 
 /** 未保存过偏好时的默认设置：桌面壳的系统通知是原生能力、无需浏览器授权，默认开启。 */

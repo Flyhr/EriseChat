@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Conversation } from '../types/frames'
 import { groupAvatarFileIdOf } from '../core/groupAvatar'
 import { conversationLabel, systemMessageText } from '../core/groupChat'
+import { truncateText } from '../core/text'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
@@ -145,8 +146,7 @@ onBeforeUnmount(() => {
 })
 
 function truncate(text: string, max = 80): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized
+  return truncateText(text.replace(/\s+/g, ' ').trim(), max)
 }
 
 function formatTime(timestamp: number): string {

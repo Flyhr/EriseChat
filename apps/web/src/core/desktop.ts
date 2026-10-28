@@ -18,6 +18,11 @@ function getBridge(): DesktopBridge | null {
   return bridge ?? null
 }
 
+/** 是否运行在 Electron 桌面壳内（preload 暴露 window.eisechatDesktop）。 */
+export function isDesktopShell(): boolean {
+  return getBridge() !== null
+}
+
 /** 会话 ID 形态校验：服务端统一小写 UUID；通知 IPC 只接受该格式，避免越层注入任意路由参数。 */
 export function isConversationIdLike(value: unknown): value is string {
   return (

@@ -2,29 +2,13 @@
 // gif 动图原样返回（压缩会丢帧）；压缩失败回退原图并 console.warn，不阻塞发送。
 
 import { PICK_QUALITY, computeScaledSize, extensionOf } from './attachments'
+import { loadImage } from './imageLoader'
 
 export interface CompressOptions {
   /** 最长边（默认 1280px，计划 §4.5）。 */
   maxEdge?: number
   /** 目标体积（默认 300KB，计划 §4.5）。 */
   targetBytes?: number
-}
-
-/** 加载本地图片为 HTMLImageElement（结束后释放 object URL）。 */
-function loadImage(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl)
-      resolve(image)
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
-      reject(new Error('图片加载失败'))
-    }
-    image.src = objectUrl
-  })
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {

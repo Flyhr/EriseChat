@@ -2,6 +2,7 @@
 // 依赖 canvas/Image，属于浏览器侧辅助函数（不参与纯函数单测，纯校验见 customEmoji.ts）。
 
 import { CUSTOM_EMOJI_EDGE, CUSTOM_EMOJI_TARGET_BYTES, customEmojiFileName } from './customEmoji'
+import { loadImage } from './imageLoader'
 
 export interface PreparedCustomEmoji {
   /** 实际保存/发送的二进制。 */
@@ -10,23 +11,6 @@ export interface PreparedCustomEmoji {
   mime: string
   /** 发送时使用的文件名。 */
   fileName: string
-}
-
-/** 加载本地图片（结束后释放 object URL）。 */
-function loadImage(file: Blob): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file)
-    const image = new Image()
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl)
-      resolve(image)
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
-      reject(new Error('图片加载失败'))
-    }
-    image.src = objectUrl
-  })
 }
 
 /** 等比缩放到最长边 edge 并输出 PNG（保留透明通道）。 */
