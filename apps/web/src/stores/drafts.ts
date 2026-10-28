@@ -3,6 +3,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { MAX_TEXT_LENGTH } from '../core/config'
+import { removeStorage } from '../core/safeStorage'
 import {
   DRAFTS_STORAGE_KEY,
   pruneDrafts,
@@ -101,11 +102,7 @@ export const useDraftsStore = defineStore('drafts', () => {
     for (const timer of timers.values()) clearTimeout(timer)
     timers.clear()
     drafts.value = {}
-    try {
-      localStorage.removeItem(DRAFTS_STORAGE_KEY)
-    } catch {
-      // 隐私模式/存储禁用：忽略。
-    }
+    removeStorage(DRAFTS_STORAGE_KEY)
   }
 
   /** 页面隐藏或即将卸载时立即落盘（浏览器可能直接丢弃未完成的防抖 timer）。 */

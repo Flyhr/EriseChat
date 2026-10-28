@@ -10,29 +10,8 @@ import {
   serializeDrafts,
   writeDrafts,
   type DraftMap,
-  type DraftStorage,
 } from './drafts'
-
-/** 内存版 storage：可模拟读写抛错（隐私模式/配额满）。 */
-function fakeStorage(options: { failRead?: boolean; failWrite?: boolean } = {}): DraftStorage & {
-  data: Map<string, string>
-} {
-  const data = new Map<string, string>()
-  return {
-    data,
-    getItem(key: string): string | null {
-      if (options.failRead) throw new Error('storage unavailable')
-      return data.get(key) ?? null
-    },
-    setItem(key: string, value: string): void {
-      if (options.failWrite) throw new Error('quota exceeded')
-      data.set(key, value)
-    },
-    removeItem(key: string): void {
-      data.delete(key)
-    },
-  }
-}
+import { createFakeStorage } from '../test/fixtures'
 
 function entry(text: string, updatedAt: number): { text: string; updatedAt: number } {
   return { text, updatedAt }
@@ -82,7 +61,7 @@ describe('parseDrafts / serializeDrafts', () => {
 
 describe('readDrafts / writeDrafts', () => {
   it('写入后可读回，且使用约定的 key', () => {
-    const storage = fakeStorage()
+    const storage = createFakeStorage()
     const map: DraftMap = { 'conv-1': entry('草稿', 100) }
     writeDrafts(map, storage)
     expect(storage.data.has(DRAFTS_STORAGE_KEY)).toBe(true)
@@ -90,15 +69,15 @@ describe('readDrafts / writeDrafts', () => {
   })
 
   it('读取损坏内容返回空对象', () => {
-    const storage = fakeStorage()
+    const storage = createFakeStorage()
     storage.data.set(DRAFTS_STORAGE_KEY, '{not json')
     expect(readDrafts(storage)).toEqual({})
   })
 
   it('写入失败静默（不抛错），读取失败也静默', () => {
-    const writeFail = fakeStorage({ failWrite: true })
+    const writeFail = createFakeStorage({}, { failWrite: true })
     expect(() => writeDrafts({ 'conv-1': entry('草稿', 1) }, writeFail)).not.toThrow()
-    const readFail = fakeStorage({ failRead: true })
+    const readFail = createFakeStorage({}, { failRead: true })
     expect(readDrafts(readFail)).toEqual({})
   })
 
@@ -108,7 +87,7 @@ describe('readDrafts / writeDrafts', () => {
   })
 
   it('removeItem 清理 key 后读取为空', () => {
-    const storage = fakeStorage()
+    const storage = createFakeStorage()
     writeDrafts({ 'conv-1': entry('草稿', 1) }, storage)
     storage.removeItem(DRAFTS_STORAGE_KEY)
     expect(readDrafts(storage)).toEqual({})

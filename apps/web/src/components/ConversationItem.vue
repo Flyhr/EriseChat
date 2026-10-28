@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Conversation } from '../types/frames'
 import { groupAvatarFileIdOf } from '../core/groupAvatar'
-import { conversationLabel, systemMessageText } from '../core/groupChat'
+import { systemMessageText } from '../core/groupChat'
+import { conversationTitle } from '../core/conversationTitle'
 import { truncateText } from '../core/text'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
@@ -33,11 +34,9 @@ const otherMember = computed(() => {
   return props.conversation.members.find((member) => member.userId !== props.selfUserId)
 })
 
-const title = computed(() => {
-  const conversation = props.conversation
-  if (conversation.type === 'group') return conversationLabel(conversation)
-  return otherMember.value?.displayName ?? conversation.title ?? '单聊会话'
-})
+const title = computed(() =>
+  conversationTitle(props.conversation, props.selfUserId, { fallback: '单聊会话' }),
+)
 
 // F-23：群聊优先展示群头像；单聊仍展示对方个人头像。
 const avatarFileId = computed(

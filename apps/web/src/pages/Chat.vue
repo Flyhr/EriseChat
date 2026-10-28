@@ -19,6 +19,7 @@ import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import type { ConversationFilter } from '../core/chatLayout'
 import { getOrLoadBlobUrl } from '../core/blobCache'
+import { conversationTitle, otherMemberOf } from '../core/conversationTitle'
 import { MAX_TEXT_LENGTH } from '../core/config'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { ApiError } from '../core/http'
@@ -87,13 +88,14 @@ const mentionNames = computed(() => activeConversation.value?.members.map((membe
 /** F-25：当前用户昵称，用于「提到你」标记（与消息里书写时的昵称一致）。 */
 const selfDisplayName = computed(() => auth.user?.displayName ?? '')
 const memberCount = computed(() => activeConversation.value?.members.length ?? 0)
-const activeTitle = computed(() => {
-  const conversation = activeConversation.value
-  if (!conversation) return ''
-  if (conversation.type === 'group') return conversation.title || '群聊'
-  const other = conversation.members.find((member) => member.userId !== selfUserId.value)
-  return other?.displayName ?? conversation.title ?? '单聊会话'
-})
+const activeTitle = computed(() =>
+  activeConversation.value
+    ? conversationTitle(activeConversation.value, selfUserId.value, {
+        groupStyle: 'plain',
+        fallback: '单聊会话',
+      })
+    : '',
+)
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
@@ -520,11 +522,9 @@ watch(activeId, () => {
 /** 消息列表是否停留在底部（由 MessageList 的 near-bottom-change 驱动）。 */
 const atBottom = ref(true)
 /** 单聊对端用户 ID（群聊为空，不展示已读回执）。 */
-const peerUserId = computed(() => {
-  const conversation = activeConversation.value
-  if (!conversation || conversation.type !== 'direct') return undefined
-  return conversation.members.find((member) => member.userId !== selfUserId.value)?.userId
-})
+const peerUserId = computed(
+  () => otherMemberOf(activeConversation.value, selfUserId.value)?.userId,
+)
 /** 单聊对端已上报的已读 seq（来自 read.updated；无记录时 undefined，展示「未读」）。 */
 const peerReadSeqForDisplay = computed(() =>
   activeId.value && peerUserId.value

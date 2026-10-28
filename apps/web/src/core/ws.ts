@@ -3,6 +3,7 @@
 // 全项目唯一连接入口：业务代码不得直接 new WebSocket（docs/project-overview.md §10）。
 
 import { config, reconnectDelayMs, resolveWsUrl } from './config'
+import { readStorage, writeStorage } from './safeStorage'
 import type { ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types/frames'
 
 /** 连接状态：idle 未连接 / connecting 首次连接中 / authed 认证完成 / reconnecting 退避重连中 / closed 已关闭 */
@@ -354,23 +355,17 @@ export class ChatWsClient {
 
   private getOrCreateDeviceId(): string {
     if (this.deviceId) return this.deviceId
-    try {
-      const storageKey = 'eisechat.deviceId'
-      const existing = window.localStorage.getItem(storageKey)
-      if (existing) {
-        this.deviceId = existing
-        return existing
-      }
-      // 同一设备重连复用同一 deviceId（protocol.md §4.1）。
-      const created = `web-${crypto.randomUUID()}`
-      window.localStorage.setItem(storageKey, created)
-      this.deviceId = created
-      return created
-    } catch {
-      // 隐私模式等场景 localStorage 不可用时退化为固定值，后续按需评估。
-      this.deviceId = 'web-unknown'
-      return this.deviceId
+    const storageKey = 'eisechat.deviceId'
+    const existing = readStorage(storageKey)
+    if (existing) {
+      this.deviceId = existing
+      return existing
     }
+    // 同一设备重连复用同一 deviceId（protocol.md §4.1）；本地存储不可用时退化为固定值。
+    const created = `web-${crypto.randomUUID()}`
+    writeStorage(storageKey, created)
+    this.deviceId = created
+    return created
   }
 
   /** 通知一次致命关闭（kicked 帧与随后的关闭事件只触发一次）。 */

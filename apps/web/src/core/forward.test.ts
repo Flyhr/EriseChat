@@ -1,32 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canForward, filterForwardTargets, forwardTextOf } from './forward'
-import type { Conversation, Message } from '../types/frames'
-
-function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
-    messageId: 'm1',
-    conversationId: 'c1',
-    senderId: 'u1',
-    seq: 1,
-    msgType: 'text',
-    content: 'hello',
-    createdAt: 1_000,
-    ...overrides,
-  }
-}
-
-function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
-  return {
-    conversationId: 'c1',
-    type: 'direct',
-    title: '张三',
-    createdAt: 1_000,
-    lastSeq: 1,
-    lastReadSeq: 0,
-    members: [],
-    ...overrides,
-  }
-}
+import { makeConversation, makeMessage } from '../test/fixtures'
 
 describe('canForward', () => {
   it('未撤回的文本消息可转发', () => {

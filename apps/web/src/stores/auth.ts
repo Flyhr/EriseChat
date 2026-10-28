@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { setAccessTokenProvider } from '../core/http'
 import { clearBlobCache } from '../core/blobCache'
+import { readStorage, removeStorage, writeStorage } from '../core/safeStorage'
 import type { AuthUser } from '../api/auth'
 
 /** deviceId localStorage key（与 core/ws.ts 共用同一 key，保证 REST 会话与 WS auth 设备标识一致）。 */
@@ -18,31 +19,25 @@ interface StoredSession {
 
 /** 读取或生成稳定的设备标识（同一设备重连复用，protocol.md §4.1）。 */
 function readOrCreateDeviceId(): string {
-  try {
-    const existing = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY)
-    if (existing) return existing
-    const created = `web-${crypto.randomUUID()}`
-    window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, created)
-    return created
-  } catch {
+  const existing = readStorage(DEVICE_ID_STORAGE_KEY)
+  if (existing) return existing
+  const created = `web-${crypto.randomUUID()}`
+  if (!writeStorage(DEVICE_ID_STORAGE_KEY, created)) {
     // 隐私模式等场景 localStorage 不可用：退化为固定值，不阻塞使用。
     return 'web-unknown'
   }
+  return created
 }
 
 /** 清空持久化登录态（不抛异常）。 */
 function clearStoredSession(): void {
-  try {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY)
-  } catch {
-    // 忽略清理失败（localStorage 不可用时本来也没有持久化）。
-  }
+  removeStorage(SESSION_STORAGE_KEY)
 }
 
 /** 从 localStorage 恢复登录态；结构非法或已过期时清空并返回 null。 */
 function readStoredSession(): StoredSession | null {
   try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY)
+    const raw = readStorage(SESSION_STORAGE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Record<string, unknown> | null
     if (typeof parsed !== 'object' || parsed === null) {
@@ -92,28 +87,21 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = token
     user.value = nextUser
     expiresAt.value = expiresAtMs
-    try {
-      window.localStorage.setItem(
-        SESSION_STORAGE_KEY,
-        JSON.stringify({ accessToken: token, expiresAt: expiresAtMs, user: nextUser }),
-      )
-    } catch {
-      // localStorage 不可用时仅保留内存态；刷新后需重新登录。
-    }
+    // 写入失败（localStorage 不可用）时仅保留内存态；刷新后需重新登录。
+    writeStorage(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ accessToken: token, expiresAt: expiresAtMs, user: nextUser }),
+    )
   }
 
   /** F-12：资料更新后写回内存与持久化登录态（token/过期时间不变）。 */
   function applyProfile(nextUser: AuthUser): void {
     user.value = { ...nextUser }
     if (accessToken.value === null || expiresAt.value <= 0) return
-    try {
-      window.localStorage.setItem(
-        SESSION_STORAGE_KEY,
-        JSON.stringify({ accessToken: accessToken.value, expiresAt: expiresAt.value, user: user.value }),
-      )
-    } catch {
-      // localStorage 不可用时仅保留内存态。
-    }
+    writeStorage(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({ accessToken: accessToken.value, expiresAt: expiresAt.value, user: user.value }),
+    )
   }
 
   function clearSession(): void {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryStorage } from '../test/fixtures'
 import {
   config,
   getServerUrl,
@@ -9,25 +10,6 @@ import {
   SERVER_URL_STORAGE_KEY,
   setServerUrl,
 } from './config'
-
-/** 内存版 localStorage（默认 node 环境没有 DOM，M4-01 单测不引入 jsdom）。 */
-function createMemoryStorage(): Storage {
-  const data = new Map<string, string>()
-  return {
-    get length() {
-      return data.size
-    },
-    clear: () => data.clear(),
-    getItem: (key: string) => data.get(key) ?? null,
-    key: (index: number) => Array.from(data.keys())[index] ?? null,
-    removeItem: (key: string) => {
-      data.delete(key)
-    },
-    setItem: (key: string, value: string) => {
-      data.set(key, value)
-    },
-  }
-}
 
 let storage: Storage
 

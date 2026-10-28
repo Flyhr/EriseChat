@@ -6,6 +6,7 @@ import { sortConversations } from '../core/conversationSort'
 import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
+import { readStorage, removeStorage, writeStorage } from '../core/safeStorage'
 import { useAuthStore } from './auth'
 
 /** 本地已读游标持久化 key：用于页面内即时展示与服务端上报兜底；服务端 last_read_seq 是事实源（read.update）。 */
@@ -16,7 +17,7 @@ type ConversationRemovedHandler = (conversationId: string) => void
 
 function readStoredReadSeq(): Record<string, number> {
   try {
-    const raw = window.localStorage.getItem(READ_SEQ_STORAGE_KEY)
+    const raw = readStorage(READ_SEQ_STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw) as Record<string, unknown> | null
     if (typeof parsed !== 'object' || parsed === null) return {}
@@ -31,11 +32,8 @@ function readStoredReadSeq(): Record<string, number> {
 }
 
 function persistReadSeq(map: Record<string, number>): void {
-  try {
-    window.localStorage.setItem(READ_SEQ_STORAGE_KEY, JSON.stringify(map))
-  } catch {
-    // localStorage 不可用（隐私模式等）：仅内存记录，不影响使用。
-  }
+  // 存储不可用（隐私模式等）时仅内存记录，不影响使用。
+  writeStorage(READ_SEQ_STORAGE_KEY, JSON.stringify(map))
 }
 
 /** 把会话快照写入 IndexedDB（只做缓存，不改变服务端事实源）。 */
@@ -369,11 +367,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     lastRemovedConversationId.value = null
     removedConversationIds.value = []
     activeConversationId.value = null
-    try {
-      window.localStorage.removeItem(READ_SEQ_STORAGE_KEY)
-    } catch {
-      // localStorage 不可用时本来也没有持久化。
-    }
+    removeStorage(READ_SEQ_STORAGE_KEY)
     if (unsubscribeFrame) {
       unsubscribeFrame()
       unsubscribeFrame = null

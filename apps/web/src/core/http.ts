@@ -77,8 +77,18 @@ function assertReachableUrl(url: string): void {
   })
 }
 
-/** 发送 REST 请求并解析 JSON；非 2xx 抛 ApiError（204 返回 undefined）。 */
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+/** 读取非 2xx 错误体（空体/非 JSON 回退空对象，ApiError 使用默认文案）。 */
+async function readErrorBody(response: Response): Promise<ApiErrorBody> {
+  try {
+    const text = await response.text()
+    return text ? (JSON.parse(text) as ApiErrorBody) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 统一发送 REST 请求：鉴权头、超时、JSON/FormData 编码、401 回调与错误体解析；成功返回原始 Response。 */
+async function send(path: string, options: RequestOptions, acceptJson: boolean): Promise<Response> {
   const {
     method = 'GET',
     body,
@@ -93,7 +103,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const onExternalAbort = (): void => controller.abort()
   signal?.addEventListener('abort', onExternalAbort, { once: true })
 
-  const finalHeaders: Record<string, string> = { Accept: 'application/json', ...headers }
+  const finalHeaders: Record<string, string> = acceptJson
+    ? { Accept: 'application/json', ...headers }
+    : { ...headers }
   const token = accessTokenProvider()
   if (token) finalHeaders.Authorization = `Bearer ${token}`
 
@@ -119,19 +131,14 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       signal: controller.signal,
     })
 
-    if (response.status === 204) return undefined as T
-
-    const text = await response.text()
-    const data: unknown = text ? JSON.parse(text) : undefined
-
     if (!response.ok) {
       // 401：token 失效/被撤销 → 清登录态并回登录页（认证接口自身 401 只抛错给页面提示）。
       if (response.status === 401 && unauthorizedHandler !== null && !isAuthEndpoint(path)) {
         unauthorizedHandler()
       }
-      throw new ApiError(response.status, (data ?? {}) as ApiErrorBody)
+      throw new ApiError(response.status, await readErrorBody(response))
     }
-    return data as T
+    return response
   } catch (error) {
     if (error instanceof ApiError) throw error
     if (error instanceof DOMException && error.name === 'AbortError') {
@@ -144,76 +151,18 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 }
 
-/**
- * 下载二进制内容（M3-07 文件/图片）：复用鉴权头、超时与 401 回调；
- * 非 2xx 时按 text 解析 JSON 错误体（{code,message,traceId}）并抛 ApiError。
- * 与 request 的区别：成功响应返回 Blob 而不是解析 JSON。
- */
+/** 发送 REST 请求并解析 JSON；非 2xx 抛 ApiError（204 返回 undefined）。 */
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const response = await send(path, options, true)
+  if (response.status === 204) return undefined as T
+  const text = await response.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+/** 下载二进制内容（文件/图片）：成功返回 Blob；非 2xx 抛 ApiError（错误体解析与 request 一致）。 */
 export async function requestBlob(path: string, options: RequestOptions = {}): Promise<Blob> {
-  const {
-    method = 'GET',
-    body,
-    query,
-    headers = {},
-    timeoutMs = config.requestTimeoutMs,
-    signal,
-  } = options
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const onExternalAbort = (): void => controller.abort()
-  signal?.addEventListener('abort', onExternalAbort, { once: true })
-
-  const finalHeaders: Record<string, string> = { ...headers }
-  const token = accessTokenProvider()
-  if (token) finalHeaders.Authorization = `Bearer ${token}`
-
-  let payload: BodyInit | undefined
-  if (body !== undefined) {
-    if (body instanceof FormData) {
-      payload = body
-    } else {
-      finalHeaders['Content-Type'] = 'application/json'
-      payload = JSON.stringify(body)
-    }
-  }
-
-  const url = buildUrl(path, query)
-  assertReachableUrl(url)
-
-  try {
-    const response = await fetch(url, {
-      method,
-      headers: finalHeaders,
-      body: payload,
-      signal: controller.signal,
-    })
-
-    if (!response.ok) {
-      if (response.status === 401 && unauthorizedHandler !== null && !isAuthEndpoint(path)) {
-        unauthorizedHandler()
-      }
-      let errorBody: ApiErrorBody = {}
-      try {
-        const text = await response.text()
-        if (text) errorBody = JSON.parse(text) as ApiErrorBody
-      } catch {
-        // 非 JSON 错误体（如网关页）：保留空错误体，ApiError 使用默认文案。
-      }
-      throw new ApiError(response.status, errorBody)
-    }
-
-    return await response.blob()
-  } catch (error) {
-    if (error instanceof ApiError) throw error
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new Error('请求超时或已取消')
-    }
-    throw error instanceof Error ? error : new Error(String(error))
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', onExternalAbort)
-  }
+  const response = await send(path, options, false)
+  return await response.blob()
 }
 
 export const http = {

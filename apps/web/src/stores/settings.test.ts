@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryStorage } from '../test/fixtures'
 import { createPinia, setActivePinia } from 'pinia'
 import {
   DEFAULT_SETTINGS,
@@ -6,25 +7,6 @@ import {
   parseStoredSettings,
   useSettingsStore,
 } from './settings'
-
-/** 内存版 localStorage（node 测试环境无 DOM，不引入 jsdom）。 */
-function createMemoryStorage(): Storage {
-  const data = new Map<string, string>()
-  return {
-    get length() {
-      return data.size
-    },
-    clear: () => data.clear(),
-    getItem: (key: string) => data.get(key) ?? null,
-    key: (index: number) => Array.from(data.keys())[index] ?? null,
-    removeItem: (key: string) => {
-      data.delete(key)
-    },
-    setItem: (key: string, value: string) => {
-      data.set(key, value)
-    },
-  }
-}
 
 let storage: Storage
 

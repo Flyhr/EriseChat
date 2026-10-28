@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import { isDesktopShell } from '../core/desktop'
+import { readStorage, writeStorage } from '../core/safeStorage'
 
 /** 纯客户端偏好（提示音、桌面通知）的 localStorage key；服务端不感知，也不跨设备同步。 */
 export const SETTINGS_STORAGE_KEY = 'eisechat.settings'
@@ -44,21 +45,14 @@ export function parseStoredSettings(raw: string | null | undefined): ClientSetti
 }
 
 function readStoredSettings(): ClientSettings {
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-    // 没有保存过偏好时用默认值（桌面壳默认开启系统通知）；之后以用户保存的值为准。
-    return raw ? parseStoredSettings(raw) : defaultSettings()
-  } catch {
-    return defaultSettings()
-  }
+  const raw = readStorage(SETTINGS_STORAGE_KEY)
+  // 没有保存过偏好时用默认值（桌面壳默认开启系统通知）；之后以用户保存的值为准。
+  return raw ? parseStoredSettings(raw) : defaultSettings()
 }
 
 function writeStoredSettings(settings: ClientSettings): void {
-  try {
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
-  } catch {
-    // localStorage 不可用（隐私模式/配额满）：仅本次会话生效，不阻断设置操作。
-  }
+  // 存储不可用（隐私模式/配额满）时仅本次会话生效，不阻断设置操作。
+  writeStorage(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
 }
 
 // 客户端本地设置（提示音/桌面通知）：持久化到 localStorage，只保存本机偏好，

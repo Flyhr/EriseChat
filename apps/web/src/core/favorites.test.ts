@@ -8,36 +8,10 @@ import {
   sortFavorites,
   type FavoriteRecord,
 } from './favorites'
-import type { Conversation, Message } from '../types/frames'
+import { makeConversation, makeMessage } from '../test/fixtures'
 
 const SELF = 'u-self'
 const OTHER = 'u-other'
-
-function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
-    messageId: 'm1',
-    conversationId: 'c1',
-    senderId: SELF,
-    seq: 7,
-    msgType: 'text',
-    content: 'hello world',
-    createdAt: 1_000_000,
-    ...overrides,
-  }
-}
-
-function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
-  return {
-    conversationId: 'c1',
-    type: 'group',
-    title: '产品群',
-    createdAt: 900_000,
-    lastSeq: 10,
-    lastReadSeq: 0,
-    members: [],
-    ...overrides,
-  }
-}
 
 function makeRecord(overrides: Partial<FavoriteRecord> = {}): FavoriteRecord {
   return {
@@ -96,8 +70,14 @@ describe('isFavoritable', () => {
 
 describe('favoriteSnapshotOf', () => {
   it('文本消息生成快照（含会话名、发送者、seq、时间）', () => {
-    const message = makeMessage()
-    const snapshot = favoriteSnapshotOf(message, makeConversation(), '张三', SELF, 5_000_000)
+    const message = makeMessage({ seq: 7, content: 'hello world', createdAt: 1_000_000 })
+    const snapshot = favoriteSnapshotOf(
+      message,
+      makeConversation({ type: 'group', title: '产品群' }),
+      '张三',
+      SELF,
+      5_000_000,
+    )
     expect(snapshot).toMatchObject({
       favoriteId: `${SELF}:m1`,
       ownerId: SELF,

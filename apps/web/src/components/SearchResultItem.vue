@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { conversationLabel } from '../core/groupChat'
+import { conversationTitle } from '../core/conversationTitle'
 import { highlightSegments, snippetOf } from '../core/searchHighlight'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -23,14 +23,12 @@ const auth = useAuthStore()
 const conversations = useConversationsStore()
 const friends = useFriendsStore()
 
-/** 会话名：群聊用 conversationLabel，单聊取对方昵称，兜底会话 ID 前 8 位。 */
-const conversationName = computed(() => {
-  const conversation = conversations.getById(props.message.conversationId)
-  if (!conversation) return props.message.conversationId.slice(0, 8)
-  if (conversation.type === 'group') return conversationLabel(conversation)
-  const other = conversation.members.find((member) => member.userId !== auth.user?.userId)
-  return other?.displayName || conversation.title || props.message.conversationId.slice(0, 8)
-})
+/** 会话名：群聊用「群名（人数）」，单聊取对方昵称，兜底会话 ID 前 8 位。 */
+const conversationName = computed(() =>
+  conversationTitle(conversations.getById(props.message.conversationId), auth.user?.userId, {
+    fallback: props.message.conversationId.slice(0, 8),
+  }),
+)
 
 /** 发送人：优先会话成员昵称，其次好友列表，最后兜底文案。 */
 const senderName = computed(() => {

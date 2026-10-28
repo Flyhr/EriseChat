@@ -2,6 +2,7 @@
 // 存储格式为 JSON 字符串数组；读取失败/损坏一律按空列表处理（隐私模式、配额异常不阻塞输入）。
 
 import { EMOJI_RECENT_LIMIT, pushRecentEmoji } from './emoji'
+import { getStorage } from './safeStorage'
 
 export const EMOJI_RECENT_STORAGE_KEY = 'eisechat.emojiRecent.v1'
 
@@ -11,15 +12,16 @@ export interface EmojiRecentStorage {
   setItem(key: string, value: string): void
 }
 
-function defaultStorage(): EmojiRecentStorage {
-  return localStorage
+function defaultStorage(): EmojiRecentStorage | null {
+  return getStorage()
 }
 
 /**
  * 读取最近使用表情：非法 JSON、非数组、非字符串项、空串项都过滤掉；
  * 最多返回 24 个（与写入上限一致），读取异常返回空数组。
  */
-export function readRecentEmojis(storage: EmojiRecentStorage = defaultStorage()): string[] {
+export function readRecentEmojis(storage: EmojiRecentStorage | null = defaultStorage()): string[] {
+  if (!storage) return []
   try {
     const raw = storage.getItem(EMOJI_RECENT_STORAGE_KEY)
     if (!raw) return []
@@ -34,8 +36,11 @@ export function readRecentEmojis(storage: EmojiRecentStorage = defaultStorage())
 }
 
 /** 记录一次使用：读取 → 去重前置 → 写回；写入异常静默忽略（隐私模式下不可写）。 */
-export function recordRecentEmoji(emoji: string, storage: EmojiRecentStorage = defaultStorage()): void {
-  if (typeof emoji !== 'string' || emoji.length === 0) return
+export function recordRecentEmoji(
+  emoji: string,
+  storage: EmojiRecentStorage | null = defaultStorage(),
+): void {
+  if (typeof emoji !== 'string' || emoji.length === 0 || !storage) return
   try {
     const next = pushRecentEmoji(readRecentEmojis(storage), emoji)
     storage.setItem(EMOJI_RECENT_STORAGE_KEY, JSON.stringify(next))

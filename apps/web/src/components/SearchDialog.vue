@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { conversationLabel } from '../core/groupChat'
+import { conversationTitle } from '../core/conversationTitle'
 import { mergeLocalSearchResults } from '../core/localSearch'
 import NoticeBar from './NoticeBar.vue'
 import SearchResultItem from './SearchResultItem.vue'
@@ -81,13 +81,11 @@ const emptyText = computed(() => {
   return '没有找到匹配的消息'
 })
 
-/** 会话名：群聊用 conversationLabel，单聊取对方昵称，兜底会话 ID 前 8 位。 */
+/** 会话名：群聊用「群名（人数）」，单聊取对方昵称，兜底会话 ID 前 8 位。 */
 function conversationName(conversationId: string): string {
-  const conversation = conversations.getById(conversationId)
-  if (!conversation) return conversationId.slice(0, 8)
-  if (conversation.type === 'group') return conversationLabel(conversation)
-  const other = conversation.members.find((member) => member.userId !== auth.user?.userId)
-  return other?.displayName || conversation.title || conversationId.slice(0, 8)
+  return conversationTitle(conversations.getById(conversationId), auth.user?.userId, {
+    fallback: conversationId.slice(0, 8),
+  })
 }
 
 function close(): void {

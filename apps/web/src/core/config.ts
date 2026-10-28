@@ -2,6 +2,8 @@
 // 环境变量说明见 apps/web/.env.example；这里是唯一默认值来源，业务代码不要直接读 import.meta.env。
 // M4-01：服务器地址支持运行时配置（localStorage，桌面/APK 首次使用需填写）；Web 同源访问留空即用默认值。
 
+import { readStorage, removeStorage, writeStorage } from './safeStorage'
+
 export interface AppConfig {
   /** REST 基础路径（默认 /api，开发期由 vite 代理到 127.0.0.1:8080） */
   apiBase: string
@@ -71,20 +73,8 @@ export function normalizeServerUrl(raw: string | null | undefined): string | nul
   return parsed.origin
 }
 
-function storage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage
-  } catch {
-    return null
-  }
-}
-
 function readStoredServerUrl(): string | null {
-  try {
-    return normalizeServerUrl(storage()?.getItem(SERVER_URL_STORAGE_KEY))
-  } catch {
-    return null
-  }
+  return normalizeServerUrl(readStorage(SERVER_URL_STORAGE_KEY))
 }
 
 /** 桌面壳 preload 注入的只读服务器地址（M4-02 提供 window.eisechatDesktop.serverUrl），Web 版不存在。 */
@@ -125,21 +115,14 @@ export function setServerUrl(raw: string): boolean {
   }
   const normalized = normalizeServerUrl(raw)
   if (!normalized) return false
-  try {
-    storage()?.setItem(SERVER_URL_STORAGE_KEY, normalized)
-  } catch {
-    // 隐私模式/存储被禁用：忽略持久化失败，本次会话内仍会通过返回值提示已保存。
-  }
+  // 隐私模式/存储被禁用：持久化失败不报错，本次会话内仍会通过返回值提示已保存。
+  writeStorage(SERVER_URL_STORAGE_KEY, normalized)
   return true
 }
 
 /** 清除运行时服务器地址，回退构建期/同源默认值。 */
 export function resetServerUrl(): void {
-  try {
-    storage()?.removeItem(SERVER_URL_STORAGE_KEY)
-  } catch {
-    // ignore
-  }
+  removeStorage(SERVER_URL_STORAGE_KEY)
 }
 
 /**

@@ -8,23 +8,10 @@ import {
   isRecalled,
   recallPlaceholderText,
 } from './messageActions'
-import type { Message } from '../types/frames'
+import { makeMessage } from '../test/fixtures'
 
 const SELF = 'u-self'
 const OTHER = 'u-other'
-
-function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
-    messageId: 'm1',
-    conversationId: 'c1',
-    senderId: SELF,
-    seq: 1,
-    msgType: 'text',
-    content: 'hello',
-    createdAt: 1_000_000,
-    ...overrides,
-  }
-}
 
 describe('canRecall', () => {
   it('本人窗口内的文本消息可撤回', () => {

@@ -2,19 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { EMOJI_RECENT_LIMIT, insertAtCursor, pushRecentEmoji } from './emoji'
 import { EMOJI_RECENT_STORAGE_KEY, readRecentEmojis, recordRecentEmoji } from './emojiRecent'
 import type { EmojiRecentStorage } from './emojiRecent'
+import { createFakeStorage } from '../test/fixtures'
 
 // F-21-01：最近使用表情纯函数与 localStorage 封装的最小回归（不测 DOM/组件）。
-function fakeStorage(initial: Record<string, string> = {}): EmojiRecentStorage & { data: Map<string, string> } {
-  const data = new Map<string, string>(Object.entries(initial))
-  return {
-    data,
-    getItem: (key) => data.get(key) ?? null,
-    setItem: (key, value) => {
-      data.set(key, value)
-    },
-  }
-}
-
 describe('pushRecentEmoji', () => {
   it('新表情放到首位', () => {
     expect(pushRecentEmoji(['😀', '😂'], '👍')).toEqual(['👍', '😀', '😂'])
@@ -47,31 +37,31 @@ describe('pushRecentEmoji', () => {
 
 describe('readRecentEmojis', () => {
   it('正常数组原样读取（最多 24 个）', () => {
-    const storage = fakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify(['😀', '👍']) })
+    const storage = createFakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify(['😀', '👍']) })
     expect(readRecentEmojis(storage)).toEqual(['😀', '👍'])
   })
 
   it('非法 JSON 返回空数组', () => {
-    expect(readRecentEmojis(fakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: '{oops' }))).toEqual([])
+    expect(readRecentEmojis(createFakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: '{oops' }))).toEqual([])
   })
 
   it('非数组返回空数组', () => {
-    expect(readRecentEmojis(fakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify({ a: 1 }) }))).toEqual([])
+    expect(readRecentEmojis(createFakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify({ a: 1 }) }))).toEqual([])
   })
 
   it('过滤非字符串与空串项', () => {
-    const storage = fakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify(['😀', 1, null, '', '👍']) })
+    const storage = createFakeStorage({ [EMOJI_RECENT_STORAGE_KEY]: JSON.stringify(['😀', 1, null, '', '👍']) })
     expect(readRecentEmojis(storage)).toEqual(['😀', '👍'])
   })
 
   it('没有记录时返回空数组', () => {
-    expect(readRecentEmojis(fakeStorage())).toEqual([])
+    expect(readRecentEmojis(createFakeStorage())).toEqual([])
   })
 })
 
 describe('recordRecentEmoji', () => {
   it('写入后可按最近使用读取', () => {
-    const storage = fakeStorage()
+    const storage = createFakeStorage()
     recordRecentEmoji('😀', storage)
     recordRecentEmoji('👍', storage)
     expect(readRecentEmojis(storage)).toEqual(['👍', '😀'])

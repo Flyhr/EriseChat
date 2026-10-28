@@ -3,6 +3,7 @@
 // localStorage 在 Firefox 隐私模式、禁用存储或配额满时可能抛异常：所有读写内部 try/catch，
 // 失败静默降级（本次会话内输入与发送不受影响，仅失去持久化能力）。
 import { MAX_TEXT_LENGTH } from './config'
+import { getStorage } from './safeStorage'
 
 /** localStorage 键：结构为 `Record<conversationId, { text, updatedAt }>`。 */
 export const DRAFTS_STORAGE_KEY = 'eisechat.drafts.v1'
@@ -27,11 +28,7 @@ export interface DraftStorage {
 }
 
 function defaultStorage(): DraftStorage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage
-  } catch {
-    return null
-  }
+  return getStorage()
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
