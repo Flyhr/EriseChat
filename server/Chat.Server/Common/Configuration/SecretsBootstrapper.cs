@@ -52,6 +52,12 @@ public static class SecretsBootstrapper
             .Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
         File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
+        // 密钥文件仅属主可读写（Linux/macOS）：同机其他账号不可读取。
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
         // 同进程内后续读取（options 绑定）使用内存值，避免依赖文件重新加载。
         configuration[JwtKeyPath] = key;
         return true;

@@ -18,6 +18,12 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.13" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 密钥纪律（AGENTS §6）：本地 secrets.json（JWT 密钥/SMTP 凭据）只留在开发机，绝不能随发布包上线。 -->
+    <Content Remove="secrets.json" />
+    <None Remove="secrets.json" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>

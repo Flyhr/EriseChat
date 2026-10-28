@@ -77,8 +77,8 @@ fi
 cat <<EOF
 
 [install] 完成。
-  应用目录：$APP_DIR
-  数据目录：$DATA_DIR（chat.db / files / downloads / secrets.json）
+  应用目录：$APP_DIR（首次启动自动生成 secrets.json，权限 600）
+  数据目录：$DATA_DIR（chat.db / files / downloads）
   服务管理：systemctl status|restart|stop $SERVICE_NAME
   查看日志：journalctl -u $SERVICE_NAME -n 100 --no-pager
   健康检查：curl http://127.0.0.1:8080/api/health

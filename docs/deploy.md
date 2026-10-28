@@ -10,11 +10,12 @@
 
 ```
 Internet ──(443/80, HTTPS)──> Caddy ──(127.0.0.1:8080)──> EiseChat 服务端（systemd 单进程）
+   或 Tailscale Serve ──(https://chat-server.<tailnet>.ts.net)──┘
                                                              ├─ /var/lib/eisechat/chat.db      SQLite（WAL）
                                                              ├─ /var/lib/eisechat/files/       聊天图片/文件
-                                                             ├─ /var/lib/eisechat/downloads/   安装包（GET /download 分发）
-                                                             └─ /var/lib/eisechat/secrets.json JWT 密钥（首次启动自动生成，权限 600）
+                                                             └─ /var/lib/eisechat/downloads/   安装包（GET /download 分发）
 /opt/eisechat-server/   应用二进制（publish-linux.sh 产出的 self-contained 包）
+/opt/eisechat-server/secrets.json  JWT 密钥 / SMTP 凭据（首次启动自动生成，权限 600）
 ```
 
 - 公网只开放 22（SSH，限来源 IP 更佳）、80、443；**8080 不对公网开放**。
@@ -51,8 +52,11 @@ sudo apt-get update && sudo apt-get install -y caddy
 
 ```bash
 bash infra/publish-linux.sh 1.1.0
+# 脚本会先构建 apps/web 并复制到 server/Chat.Server/wwwroot，再 publish（前端随包分发）
 # 产出：docs/test/publish-linux/chat-server-1.1.0-linux-x64.zip（docs/test/ 不入库）
 ```
+
+> 已有 wwwroot 时可 `EISECHAT_SKIP_WEB=1 bash infra/publish-linux.sh 1.1.0` 跳过前端构建。
 
 把 zip 上传到服务器（如 `/tmp`）：
 
@@ -93,7 +97,24 @@ curl -I https://<你的域名>/           # 200/30x，证书自动签发
 
 浏览器打开 `https://<你的域名>/`，在登录页切换「注册」，用邮箱验证码注册首个账号。
 
-### 3.4 管理员提权（v1 手工操作）
+### 3.4 无公网域名的替代方案：Tailscale Serve（内测推荐）
+
+服务器已加入 Tailscale 时，可以不开公网 80/443、不需要域名，直接用它提供 HTTPS：
+
+```bash
+# 一次性：允许当前用户免 sudo 管理 serve（之后 tailscale serve 不用 sudo）
+sudo tailscale set --operator=ggbond
+# 把 tailnet 的 https://chat-server.<tailnet>.ts.net/ 反代到本机 8080（后台常驻）
+tailscale serve --bg --https=443 http://127.0.0.1:8080
+tailscale serve status
+```
+
+- 访问地址形如 `https://chat-server.tail8c07f5.ts.net/`（以本机 `tailscale status --json` 的 `Self.DNSName` 为准）。
+- 客户端（Windows exe / Android APK）需加入**同一个 tailnet**（手机/电脑装 Tailscale 并登录同一账号）才能访问。
+- 首次使用需在 Tailscale 管理台开启 **HTTPS Certificates**（DNS 页），否则 `serve` 无法签发证书。
+- 该方案的 Caddy 可完全不装；若以后换公网域名，再按 3.3 切到 Caddy 即可。
+
+### 3.5 管理员提权（v1 手工操作）
 
 计划中管理员用于 Web 端 `/admin` 查看用户与审计日志；v1 无后台提权界面，注册后手工执行一次：
 
@@ -125,7 +146,8 @@ sqlite3 /var/lib/eisechat/chat.db "UPDATE users SET role='admin' WHERE email='<�
 
 修改后 `sudo systemctl restart eisechat` 生效。
 
-**密钥纪律**：`secrets.json`（JWT 密钥）由服务端首次启动自动生成（32 字节随机、权限 600），
+**密钥纪律**：`secrets.json`（位于 `/opt/eisechat-server/secrets.json`，JWT 密钥与 SMTP 凭据）由服务端首次启动自动生成
+（32 字节随机、权限 600），
 **不要** 提交、复制到聊天工具或写入日志；丢失后所有旧 token 失效（用户需重新登录）。
 
 ---
@@ -134,11 +156,12 @@ sqlite3 /var/lib/eisechat/chat.db "UPDATE users SET role='admin' WHERE email='<�
 
 - `Development` 环境使用 Mock 邮件：验证码打印到服务端控制台 stdout + 固定测试码 `123456`，
   便于本地开发；**生产环境不可用**。
-- 当前 `SmtpEmailSender` 为占位实现（M1-04 明确）：`Production` 下发送验证码会返回 500
-  `INTERNAL_ERROR`。**因此正式上线前必须完成 SMTP / 免费邮件 API 实现**（M5 计划项），
-  并在 `appsettings.Production.json` 或 systemd 环境中配置：
+- 服务端已实现真实 `SmtpEmailSender`（`System.Net.Mail`，无第三方依赖）：`Production` 下用 `Email:Smtp*` 配置发信，
+  未配置（`Email:SmtpHost` 为空）时接口返回 500 `INTERNAL_ERROR` 并写明「SMTP 邮件通道未配置」。
+- 在 `/etc/systemd/system/eisechat.service.d/email.conf`（drop-in）或 `appsettings.Production.json` 配置：
   - `Email__SmtpHost`、`Email__SmtpPort`（587/465）、`Email__SmtpUseSsl`、`Email__SmtpUser`、
-    `Email__SmtpPassword`（用环境变量，勿写仓库）、`Email__FromAddress`、`Email__FromName`。
+    `Email__SmtpPassword`（**只放 secrets.json 或环境变量**，勿写仓库）、`Email__FromAddress`、`Email__FromName`。
+  - 例：QQ 邮箱 `smtp.qq.com:465`、授权码作密码、`Email__FromAddress` 与登录邮箱一致；企业邮箱按服务商文档。
 - 邮件通道要求：发件量小（内部 10~100 人），企业邮箱 SMTP 授权码或 Brevo/Resend 免费额度均可。
 - 上线前用真实邮箱走一遍「注册 → 收码 → 登录」，并观察是否进垃圾箱。
 
@@ -217,7 +240,8 @@ Windows 客户端卸载：设置 → 应用 → EiseChat → 卸载（或 `Unins
 
 | 现象 | 排查 |
 |---|---|
-| 打不开页面 | `curl -I https://<域名>/`、`systemctl status caddy`、`curl http://127.0.0.1:8080/api/health`；确认安全组 80/443、DNS 解析 |
+| 打不开页面 | `curl -I https://<域名>/`、`systemctl status caddy`、`tailscale serve status`、`curl http://127.0.0.1:8080/api/health`；确认安全组 80/443、DNS 解析或 Tailscale 证书 |
+| 深链接刷新 404 | 确认 `server/Chat.Server/wwwroot/index.html` 已随包发布；服务端 `MapFallback` 负责返回页面 |
 | 服务起不来 | `journalctl -u eisechat -n 100 --no-pager`；检查 `/var/lib/eisechat` 权限（须 eisechat 可写）与端口占用 |
 | 验证码收不到 | 检查第 5 节邮件配置；`journalctl -u eisechat -f`（Production 下若 SMTP 未实现会返回 500） |
 | 登录后频繁掉线 | 检查系统时间（JWT 依赖 UTC）；看 Caddy 日志与客户端网络；重连会走 `sync` 补拉 |
@@ -239,7 +263,8 @@ sqlite3 /var/lib/eisechat/chat.db '.tables'
 
 ## 11. 上线检查清单
 
-- [ ] 域名解析、安全组 22/80/443、Caddy 证书正常（`https` 可用）
+- [ ] 域名解析、安全组 22/80/443、Caddy 证书正常（`https` 可用）；**或** Tailscale Serve 已启用且 tailnet 内可访问
+  （`tailscale serve status`）
 - [ ] `/api/health` 返回 `db:"ok"`，`version` 与安装包一致
 - [ ] 邮件通道可用（注册/登录收到验证码），或明确暂用备用方案
 - [ ] 注册开关/邮箱白名单按需配置；首个管理员已提权

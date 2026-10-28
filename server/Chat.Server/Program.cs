@@ -308,6 +308,28 @@ app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options)
     });
 });
 
+// SPA 兜底（M6 部署准备）：前端用 history 路由，刷新 /favorites 等深层路径时返回 index.html；
+// /api 与 /ws 的未知路径仍返回 404，避免把接口错误伪装成页面。
+app.MapFallback(async context =>
+{
+    if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/ws"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    var webRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+    var indexPath = Path.Combine(webRoot, "index.html");
+    if (!File.Exists(indexPath))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.SendFileAsync(indexPath);
+});
+
 app.Run();
 
 // 把配置中的相对路径解析为绝对路径（相对内容根目录；默认值按仓库根 data/ 约定）。
