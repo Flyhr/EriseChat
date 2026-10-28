@@ -29,6 +29,8 @@ export type AppIconName =
   | 'palette'
   | 'link'
   | 'shield'
+  // F-26：收藏入口。
+  | 'star'
 
 export interface AppIconShape {
   paths?: string[]
@@ -117,4 +119,5 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
       'M9.2 12l2.1 2.1 3.7-3.9',
     ],
   },
+  star: { paths: ['M12 3.9l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 3.9Z'] },
 }

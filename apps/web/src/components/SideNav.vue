@@ -22,6 +22,7 @@ const items: NavItem[] = [
   { key: 'chat', label: '消息', icon: 'chat', to: '/chat' },
   { key: 'contacts', label: '联系人', icon: 'contacts', to: '/contacts' },
   { key: 'groups', label: '群聊', icon: 'groups', to: '/chat?group=all' },
+  { key: 'favorites', label: '收藏', icon: 'star', to: '/favorites' },
   { key: 'settings', label: '设置', icon: 'settings', to: '/settings' },
 ]
 
@@ -57,6 +58,7 @@ function ariaLabelOf(item: NavItem): string {
 /** 当前一级导航高亮：按路由前缀 + 聊天页群聊筛选（?group=all）判断。 */
 const activeKey = computed(() => {
   if (route.path.startsWith('/contacts')) return 'contacts'
+  if (route.path.startsWith('/favorites')) return 'favorites'
   if (route.path.startsWith('/settings')) return 'settings'
   if (route.path.startsWith('/chat')) {
     return route.query.group === 'all' ? 'groups' : 'chat'

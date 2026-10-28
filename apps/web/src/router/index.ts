@@ -14,6 +14,7 @@ const router = createRouter({
     { path: '/login', name: 'login', component: () => import('../pages/Login.vue'), meta: { layout: 'blank' } },
     { path: '/chat/:conversationId?', name: 'chat', component: () => import('../pages/Chat.vue') },
     { path: '/contacts', name: 'contacts', component: () => import('../pages/Contacts.vue') },
+    { path: '/favorites', name: 'favorites', component: () => import('../pages/Favorites.vue') },
     { path: '/settings', name: 'settings', component: () => import('../pages/Settings.vue') },
     { path: '/admin', name: 'admin', component: () => import('../pages/Admin.vue') },
     { path: '/download', name: 'download', component: () => import('../pages/Download.vue') },

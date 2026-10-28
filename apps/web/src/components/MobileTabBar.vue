@@ -18,6 +18,7 @@ const items: TabItem[] = [
   { key: 'chat', label: '消息', icon: 'chat', to: '/chat' },
   { key: 'contacts', label: '联系人', icon: 'contacts', to: '/contacts' },
   { key: 'groups', label: '群聊', icon: 'groups', to: '/chat?group=all' },
+  { key: 'favorites', label: '收藏', icon: 'star', to: '/favorites' },
   { key: 'settings', label: '设置', icon: 'settings', to: '/settings' },
 ]
 
@@ -26,6 +27,7 @@ const route = useRoute()
 /** 与 SideNav 相同的高亮规则：群聊筛选优先于消息。 */
 const activeKey = computed(() => {
   if (route.path.startsWith('/contacts')) return 'contacts'
+  if (route.path.startsWith('/favorites')) return 'favorites'
   if (route.path.startsWith('/settings')) return 'settings'
   if (route.path.startsWith('/chat')) {
     return route.query.group === 'all' ? 'groups' : 'chat'
