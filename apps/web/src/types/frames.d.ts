@@ -145,6 +145,11 @@ export interface Conversation {
   lastReadSeq: number
   /** 当前用户是否置顶（F-10：成员级设置，按收件人填充，不广播） */
   pinned?: boolean
+  /**
+   * 当前用户未读数（F-26）：只统计他人发送且 seq 大于 lastReadSeq 的消息，自己发送的不计入；
+   * 旧服务端不返回该字段时，客户端回退到 lastSeq − lastReadSeq 估算。
+   */
+  unread?: number
   /** 当前用户是否免打扰（F-10：成员级设置，按收件人填充，不广播） */
   muted?: boolean
   /** 群公告（F-14）：≤500 字符、支持换行；null/缺省 = 无公告；单聊恒为 null */

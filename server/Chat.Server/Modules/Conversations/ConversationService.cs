@@ -906,6 +906,26 @@ public sealed class ConversationService
             }
         }
 
+        // F-26：未读数只统计他人发送且 seq 大于我的 lastReadSeq 的消息（自己发送的消息不计入，
+        // 例如把消息转发到未打开的会话后，自己的未读徽标不会被自己的消息撑起来）。
+        var unreadRows = await (
+                from message in _db.Messages.AsNoTracking()
+                join member in _db.ConversationMembers.AsNoTracking()
+                    on message.ConversationId equals member.ConversationId
+                where conversationIds.Contains(message.ConversationId)
+                      && member.UserId == currentUserId
+                      && message.SenderId != currentUserId
+                      && message.Seq > member.LastReadSeq
+                group message by message.ConversationId
+                into grouped
+                select new { ConversationId = grouped.Key, Count = grouped.Count() })
+            .ToListAsync(cancellationToken);
+
+        var unreadByConversation = unreadRows.ToDictionary(
+            row => row.ConversationId,
+            row => (long)row.Count,
+            StringComparer.Ordinal);
+
         var result = new List<Conversation>(conversations.Count);
         foreach (var conversation in conversations)
         {
@@ -947,7 +967,8 @@ public sealed class ConversationService
                 myPinned,
                 myMuted,
                 conversation.Announcement,
-                conversation.AvatarFileId));
+                conversation.AvatarFileId,
+                unreadByConversation.GetValueOrDefault(conversation.Id)));
         }
 
         return result

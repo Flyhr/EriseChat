@@ -114,11 +114,21 @@ export const useConversationsStore = defineStore('conversations', () => {
     if (anyChanged) items.value = nextItems
   }
 
+  /**
+   * 会话未读数：优先用服务端下发的 unread（F-26，只统计他人发送的消息），
+   * 并扣掉本地已读游标领先服务端 lastReadSeq 的部分（打开会话后的即时清零）。
+   * 旧服务端没有 unread 字段时回退到 lastSeq − max(本地已读, lastReadSeq)。
+   */
   function unreadOf(conversationId: string): number {
     const conversation = getById(conversationId)
     if (!conversation) return 0
     const localRead = lastReadSeqByConversation.value[conversationId] ?? 0
-    const readSeq = Math.max(localRead, conversation.lastReadSeq ?? 0)
+    const serverRead = conversation.lastReadSeq ?? 0
+    if (typeof conversation.unread === 'number') {
+      const optimisticRead = Math.max(0, localRead - serverRead)
+      return Math.max(0, conversation.unread - optimisticRead)
+    }
+    const readSeq = Math.max(localRead, serverRead)
     return unreadCount(conversation.lastSeq, readSeq)
   }
 

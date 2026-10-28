@@ -16,8 +16,8 @@ public sealed record ConversationMember(
     string? AvatarFileId = null);
 
 /// <summary>
-/// 会话对象（protocol/protocol.md §4.5）。未读数由客户端按
-/// <c>未读 = lastSeq − lastReadSeq</c> 计算，协议不单独下发 unread。
+/// 会话对象（protocol/protocol.md §4.5）。未读数由服务端按收件人实时计算并下发：
+/// 只统计他人发送的、seq 大于我的 lastReadSeq 的消息，自己发送的消息不计入。
 /// </summary>
 /// <param name="ConversationId">会话 ID。</param>
 /// <param name="Type">direct（单聊）/ group（群聊）。</param>
@@ -31,6 +31,7 @@ public sealed record ConversationMember(
 /// <param name="Muted">当前用户是否对该会话免打扰（F-10，成员级设置，默认 false；按收件人填充，不广播）。</param>
 /// <param name="Announcement">群公告（F-14，≤500 字符，支持换行）；null 表示无公告；单聊恒为 null。</param>
 /// <param name="AvatarFileId">群头像 files.id（F-23）；null 表示未设置；单聊恒为 null。</param>
+/// <param name="Unread">当前用户的未读数（F-26）：只统计他人发送且 seq 大于 lastReadSeq 的消息，自己发送的消息不计入；按收件人计算。</param>
 public sealed record Conversation(
     string ConversationId,
     ConversationType Type,
@@ -43,4 +44,5 @@ public sealed record Conversation(
     bool Pinned = false,
     bool Muted = false,
     string? Announcement = null,
-    string? AvatarFileId = null);
+    string? AvatarFileId = null,
+    long Unread = 0);
