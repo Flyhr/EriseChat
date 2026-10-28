@@ -41,8 +41,8 @@ const emit = defineEmits<{
   retry: [clientMsgId: string]
   'near-bottom-change': [atBottom: boolean]
   'preview-image': [messageId: string]
-  /** F-09：请求回复某条消息（由会话页记录回复目标）。 */
-  reply: [messageId: string]
+  /** F-18：右键/长按打开消息操作菜单（回复/撤回/编辑由会话页处理）。 */
+  'open-actions': [messageId: string, position: { x: number; y: number }]
   /** F-09：请求定位到被引用的消息（由会话页处理未加载时的补拉）。 */
   'jump-to-message': [messageId: string]
 }>()
@@ -285,6 +285,11 @@ function onImageLoaded(): void {
   void nextTick(scrollToBottom)
 }
 
+/** F-18：把气泡的操作菜单请求原样转发给会话页。 */
+function forwardOpenActions(messageId: string, position: { x: number; y: number }): void {
+  emit('open-actions', messageId, position)
+}
+
 /**
  * F-09：定位到指定消息（被引用消息跳转）。目标不在当前渲染窗口时先扩窗，
  * 滚动到视口中央并短暂高亮；消息不在本地缓存时返回 false，由父组件尝试补拉历史。
@@ -443,10 +448,11 @@ onMounted(() => {
           :show-sender="showSenderOf(item.message)"
           :sender-name="senderNameOf(item.message)"
           :reply-sender-name="replySenderNameOf(item.message)"
+          :is-group="isGroup"
           :receipt="receiptOf(item.message)"
           @image-loaded="onImageLoaded"
           @preview-image="emit('preview-image', $event)"
-          @reply="emit('reply', $event)"
+          @open-actions="forwardOpenActions"
           @jump-to-message="emit('jump-to-message', $event)"
         />
       </template>

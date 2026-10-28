@@ -11,7 +11,8 @@ import MessageAttachment from './MessageAttachment.vue'
 // 消息气泡（纯展示，UI-02 批次2 按 D-05 调整）：自己蓝底白字、对方白底描边；时间与状态移到气泡下方；
 // 群聊他人消息左侧 32px 字母头像 + 昵称。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3）。
 // pending 消息显示「发送中/失败重发」；system 消息居中灰字，不带气泡。
-// F-09：桌面右键 / 移动端长按触发回复；气泡内展示引用摘要，点击引用条定位到被引用消息。
+// F-09/F-18：桌面右键 / 移动端长按打开消息操作菜单（回复/撤回/编辑）；气泡内展示引用摘要，点击引用条定位。
+// F-18：已撤回消息只显示灰色占位文案，不渲染内容/附件；编辑过的消息在时间旁标「已编辑」。
 const props = withDefaults(
   defineProps<{
     message: Message | PendingMessage
@@ -22,10 +23,12 @@ const props = withDefaults(
     /** 群聊中展示发送者头像与昵称（非自己消息）。 */
     showSender?: boolean
     senderName?: string
+    /** 是否群聊（F-18：撤回占位文案区分「对方」/「{昵称}」）。 */
+    isGroup?: boolean
     /** F-09：被引用消息发送者昵称（群聊展示「昵称：摘要」；单聊可留空）。 */
     replySenderName?: string
   }>(),
-  { self: false, showSender: false, senderName: '', replySenderName: '' },
+  { self: false, showSender: false, senderName: '', replySenderName: '', isGroup: false },
 )
 
 const emit = defineEmits<{
@@ -34,8 +37,8 @@ const emit = defineEmits<{
   imageLoaded: []
   /** F-08：请求打开图片预览（由会话页统一管理多图切换与 blob 加载）。 */
   'preview-image': [messageId: string]
-  /** F-09：请求回复该消息（桌面右键 / 移动端长按 500ms）。 */
-  reply: [messageId: string]
+  /** F-18：请求打开消息操作菜单（桌面右键 / 移动端长按 500ms），position 为视口坐标。 */
+  'open-actions': [messageId: string, position: { x: number; y: number }]
   /** F-09：点击引用条，请求定位到被引用的消息。 */
   'jump-to-message': [messageId: string]
 }>()
@@ -57,6 +60,23 @@ const isSystem = computed(() => props.message.msgType === 'system')
 
 const systemText = computed(() => systemMessageText(props.message.content))
 
+/** F-18：已撤回（deletedAt 非空）只渲染占位文案。 */
+const recalled = computed(
+  () => 'deletedAt' in props.message && typeof props.message.deletedAt === 'number',
+)
+
+const recalledText = computed(() => {
+  if (!recalled.value) return ''
+  if (props.self) return '你撤回了一条消息'
+  if (props.showSender && props.senderName) return `${props.senderName} 撤回了一条消息`
+  return '对方撤回了一条消息'
+})
+
+/** F-18：编辑过的消息在时间旁标「已编辑」。 */
+const edited = computed(
+  () => 'editedAt' in props.message && typeof props.message.editedAt === 'number',
+)
+
 /** 仅 image/file 且 content 为 FileContent 时用附件组件渲染；异常数据回退文本。 */
 const showAttachment = computed(() => {
   if (props.message.msgType !== 'image' && props.message.msgType !== 'file') return false
@@ -71,6 +91,8 @@ function messageKeyOf(message: Message | PendingMessage): string {
 
 /** F-08 批次3：预览状态提升到 Chat.vue，气泡只上报「需要预览哪条消息」；blob URL 由会话页加载/缓存。 */
 function onPreview(): void {
+  // F-18：已撤回的图片不再提供预览。
+  if (recalled.value) return
   emit('preview-image', messageKeyOf(props.message))
 }
 
@@ -103,26 +125,29 @@ function clearLongPress(): void {
   }
 }
 
-function requestReply(): void {
+/** F-18：打开操作菜单（回复/撤回/编辑由父级按窗口与身份过滤）。 */
+function openActions(position: { x: number; y: number }): void {
   const messageId = repliableMessageId()
-  if (!messageId) return
-  emit('reply', messageId)
+  if (!messageId || recalled.value) return
+  emit('open-actions', messageId, position)
 }
 
-/** 桌面：右键气泡触发回复（system 消息不提供）。 */
+/** 桌面：右键气泡打开操作菜单（system 消息不提供）。 */
 function onContextMenu(event: MouseEvent): void {
   if (isSystem.value || !repliableMessageId()) return
   event.preventDefault()
-  requestReply()
+  openActions({ x: event.clientX, y: event.clientY })
 }
 
-/** 移动端：长按 500ms 触发回复；滚动/抬起/取消时清除计时器。 */
+/** 移动端：长按 500ms 打开操作菜单；滚动/抬起/取消时清除计时器。 */
 function onPointerDown(event: PointerEvent): void {
   if (event.button !== 0 || isSystem.value || !repliableMessageId()) return
   clearLongPress()
+  const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   longPressTimer = window.setTimeout(() => {
     longPressTimer = null
-    requestReply()
+    const rect = target?.getBoundingClientRect()
+    openActions(rect ? { x: rect.left + rect.width / 2, y: rect.top } : { x: 0, y: 0 })
   }, LONG_PRESS_MS)
 }
 
@@ -158,6 +183,7 @@ const timeText = computed(() =>
           'message-bubble--self': self,
           'message-bubble--sending': status === 'sending',
           'message-bubble--failed': status === 'failed',
+          'message-bubble--recalled': recalled,
         }"
         @contextmenu="onContextMenu"
         @pointerdown="onPointerDown"
@@ -165,7 +191,7 @@ const timeText = computed(() =>
         @pointerleave="onPointerEnd"
         @pointercancel="onPointerEnd"
       >
-        <div v-if="replyInfo" class="message-bubble__reply">
+        <div v-if="replyInfo && !recalled" class="message-bubble__reply">
           <button
             v-if="replyInfo.messageId"
             class="message-bubble__reply-button"
@@ -176,8 +202,9 @@ const timeText = computed(() =>
           </button>
           <span v-else class="message-bubble__reply-text">{{ replyInfo.text }}</span>
         </div>
+        <p v-if="recalled" class="message-bubble__recalled">{{ recalledText }}</p>
         <MessageAttachment
-          v-if="showAttachment"
+          v-else-if="showAttachment"
           :message="message"
           @preview="onPreview"
           @loaded="emit('imageLoaded')"
@@ -200,6 +227,7 @@ const timeText = computed(() =>
         </p>
       </div>
       <div class="message-row__meta">
+        <span v-if="edited" class="message-row__edited">已编辑</span>
         <time class="message-row__time">{{ timeText }}</time>
         <span
           v-if="receipt"
@@ -384,6 +412,29 @@ const timeText = computed(() =>
 .message-row--highlight .message-bubble {
   outline: 2px solid var(--ec-brand-500);
   outline-offset: 2px;
+}
+
+/* F-18：已撤回消息占位（灰色虚线，不渲染原文/附件）。 */
+.message-bubble--recalled {
+  border-style: dashed;
+  border-color: var(--ec-border);
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-secondary);
+  box-shadow: none;
+}
+
+.message-bubble--self.message-bubble--recalled {
+  background: var(--ec-surface-hover);
+  color: var(--ec-text-secondary);
+}
+
+.message-bubble__recalled {
+  margin: 0;
+  font-style: italic;
+}
+
+.message-row__edited {
+  color: var(--ec-text-tertiary);
 }
 
 /* ≤800：窄屏下气泡最大宽放宽，圆角同步收一档。 */

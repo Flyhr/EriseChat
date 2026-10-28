@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
 import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList from '../components/ConversationList.vue'
@@ -9,6 +10,7 @@ import EmptyState from '../components/EmptyState.vue'
 import GroupMembersPanel from '../components/GroupMembersPanel.vue'
 import ConversationFilesPanel from '../components/ConversationFilesPanel.vue'
 import ImagePreview from '../components/ImagePreview.vue'
+import MessageActionMenu from '../components/MessageActionMenu.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
@@ -16,10 +18,12 @@ import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import type { ConversationFilter } from '../core/chatLayout'
 import { getOrLoadBlobUrl } from '../core/blobCache'
+import { MAX_TEXT_LENGTH } from '../core/config'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
+import type { MessageActionId } from '../core/messageActions'
 import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { showToast } from '../core/toast'
@@ -193,6 +197,104 @@ function cancelReply(): void {
   replyTarget.value = null
 }
 
+// F-18：消息操作菜单（回复/撤回/编辑）。撤回需二次确认；编辑用 wide AppDialog 表单。
+const actionMenu = ref<{ messageId: string; x: number; y: number } | null>(null)
+const actionMenuMessage = computed<Message | null>(() => {
+  const target = actionMenu.value
+  if (!target) return null
+  return activeMessages.value.find((message) => message.messageId === target.messageId) ?? null
+})
+const actionMenuSenderName = computed(() => {
+  const message = actionMenuMessage.value
+  if (!message) return ''
+  return activeConversation.value?.members.find((member) => member.userId === message.senderId)?.displayName ?? ''
+})
+
+function onOpenActions(messageId: string, position: { x: number; y: number }): void {
+  if (!activeId.value) return
+  actionMenu.value = { messageId, x: position.x, y: position.y }
+}
+
+function onActionSelect(action: MessageActionId): void {
+  const target = actionMenu.value
+  const message = actionMenuMessage.value
+  actionMenu.value = null
+  if (!target || !message) return
+  if (action === 'reply') {
+    onReplyMessage(target.messageId)
+    return
+  }
+  if (action === 'recall') {
+    recallTarget.value = message
+    return
+  }
+  if (action === 'edit') {
+    openEditDialog(message)
+    return
+  }
+}
+
+const recallTarget = ref<Message | null>(null)
+const recallSubmitting = ref(false)
+
+async function confirmRecall(): Promise<void> {
+  const conversationId = activeId.value
+  const target = recallTarget.value
+  if (!conversationId || !target) return
+  recallSubmitting.value = true
+  const sent = messages.sendRecall(conversationId, target.messageId)
+  recallSubmitting.value = false
+  recallTarget.value = null
+  if (!sent) showToast('撤回请求发送失败，请检查网络后重试', 'error')
+}
+
+const editTarget = ref<Message | null>(null)
+const editContent = ref('')
+const editError = ref('')
+const editSubmitting = ref(false)
+
+function openEditDialog(message: Message): void {
+  editTarget.value = message
+  editContent.value = typeof message.content === 'string' ? message.content : ''
+  editError.value = ''
+}
+
+function closeEditDialog(): void {
+  if (editSubmitting.value) return
+  editTarget.value = null
+  editError.value = ''
+}
+
+function confirmEdit(): void {
+  const conversationId = activeId.value
+  const target = editTarget.value
+  if (!conversationId || !target) return
+  const content = editContent.value.trim()
+  if (content.length === 0) {
+    editError.value = '编辑内容不能为空'
+    return
+  }
+  if (content.length > MAX_TEXT_LENGTH) {
+    editError.value = `文本内容不能超过 ${MAX_TEXT_LENGTH} 字符`
+    return
+  }
+  editSubmitting.value = true
+  const sent = messages.sendEdit(conversationId, target.messageId, content)
+  editSubmitting.value = false
+  if (!sent) {
+    editError.value = '编辑请求发送失败，请检查网络后重试'
+    return
+  }
+  editTarget.value = null
+}
+
+// 切换会话/退出登录时关闭残留菜单与弹窗，避免操作到旧会话的消息。
+watch(activeId, () => {
+  actionMenu.value = null
+  recallTarget.value = null
+  editTarget.value = null
+})
+
 /** 在已加载消息中定位；不在当前窗口时循环补拉历史（≤8 页），返回是否成功定位。 */
 async function ensureMessageVisible(messageId: string): Promise<boolean> {
   const conversationId = activeId.value
@@ -292,6 +394,8 @@ const previewSources = computed<PreviewSource[]>(() => {
   if (!activeId.value) return []
   const fileIds = new Map<string, string>()
   for (const message of activeMessages.value) {
+    // F-18：已撤回的图片不再出现在预览序列里。
+    if (typeof message.deletedAt === 'number') continue
     const content = message.content
     if (message.msgType !== 'image' || typeof content !== 'object' || content === null) continue
     const fileId = 'fileId' in content ? content.fileId : null
@@ -874,7 +978,7 @@ function onWindowDrop(event: DragEvent): void {
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
               @preview-image="onPreviewImage"
-              @reply="onReplyMessage"
+              @open-actions="onOpenActions"
               @jump-to-message="onJumpToMessage"
             />
             <div class="chat-page__composer">
@@ -993,6 +1097,49 @@ function onWindowDrop(event: DragEvent): void {
       @close="closePreview"
       @update:index="onPreviewIndex"
     />
+    <MessageActionMenu
+      :open="Boolean(actionMenu)"
+      :message="actionMenuMessage"
+      :self-user-id="selfUserId"
+      :is-group="isGroup"
+      :sender-name="actionMenuSenderName"
+      :position="actionMenu ? { x: actionMenu.x, y: actionMenu.y } : { x: 0, y: 0 }"
+      @select="onActionSelect"
+      @close="actionMenu = null"
+    />
+    <AppDialog
+      :open="Boolean(recallTarget)"
+      title="撤回消息"
+      message="撤回后双方都会看到「已撤回」且不可恢复，确定撤回吗？"
+      tone="danger"
+      confirm-text="撤回"
+      :busy="recallSubmitting"
+      @confirm="confirmRecall"
+      @cancel="recallTarget = null"
+    />
+    <AppDialog
+      :open="Boolean(editTarget)"
+      title="编辑消息"
+      confirm-text="保存"
+      :busy="editSubmitting"
+      wide
+      @confirm="confirmEdit"
+      @cancel="closeEditDialog"
+    >
+      <div class="chat-page__edit-form">
+        <textarea
+          v-model="editContent"
+          class="chat-page__edit-input"
+          :maxlength="MAX_TEXT_LENGTH"
+          rows="4"
+          aria-label="编辑消息内容"
+        />
+        <div class="chat-page__edit-meta">
+          <span>{{ editContent.length }}/{{ MAX_TEXT_LENGTH }}</span>
+        </div>
+        <p v-if="editError" class="chat-page__edit-error" role="alert">{{ editError }}</p>
+      </div>
+    </AppDialog>
   </main>
 </template>
 
@@ -1292,5 +1439,44 @@ function onWindowDrop(event: DragEvent): void {
   .chat-page__members-tab {
     min-height: 44px;
   }
+}
+
+/* F-18：编辑消息弹窗内的多行输入与计数。 */
+.chat-page__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+}
+
+.chat-page__edit-input {
+  width: 100%;
+  min-height: 120px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface);
+  color: var(--ec-text-primary);
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.chat-page__edit-input:focus-visible {
+  border-color: var(--ec-brand-500);
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: 1px;
+}
+
+.chat-page__edit-meta {
+  display: flex;
+  justify-content: flex-end;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.chat-page__edit-error {
+  margin: 0;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-secondary);
 }
 </style>
