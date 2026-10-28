@@ -43,3 +43,58 @@ public sealed record MessageNewFrame(Message Message) : FrameEnvelope
     /// <inheritdoc />
     public override string Type => FrameTypes.MessageNew;
 }
+
+/// <summary>message.recall（C→S，撤回消息，F-18）：protocol/protocol.md §4.3。</summary>
+/// <param name="ConversationId">目标会话 ID。</param>
+/// <param name="MessageId">待撤回消息 ID。</param>
+public sealed record MessageRecallFrame(string ConversationId, string MessageId) : FrameEnvelope
+{
+    /// <inheritdoc />
+    public override string Type => FrameTypes.MessageRecall;
+}
+
+/// <summary>message.recalled（S→C，撤回广播/回执，F-18）。</summary>
+/// <param name="ConversationId">会话 ID。</param>
+/// <param name="MessageId">被撤回消息 ID。</param>
+/// <param name="Seq">被撤回消息的会话内序号。</param>
+/// <param name="DeletedAt">撤回时间（UTC 毫秒）。</param>
+/// <param name="OperatorId">操作者用户 ID（当前仅发送者本人）。</param>
+public sealed record MessageRecalledFrame(
+    string ConversationId,
+    string MessageId,
+    long Seq,
+    long DeletedAt,
+    string OperatorId) : FrameEnvelope
+{
+    /// <inheritdoc />
+    public override string Type => FrameTypes.MessageRecalled;
+}
+
+/// <summary>message.edit（C→S，编辑文本消息，F-18）：protocol/protocol.md §4.3。</summary>
+/// <param name="ConversationId">目标会话 ID。</param>
+/// <param name="MessageId">待编辑消息 ID。</param>
+/// <param name="Content">新文本内容（trim 后 1..4096 字符）。</param>
+public sealed record MessageEditFrame(string ConversationId, string MessageId, string Content) : FrameEnvelope
+{
+    /// <inheritdoc />
+    public override string Type => FrameTypes.MessageEdit;
+}
+
+/// <summary>message.edited（S→C，编辑广播/回执，F-18）。</summary>
+/// <param name="ConversationId">会话 ID。</param>
+/// <param name="MessageId">被编辑消息 ID。</param>
+/// <param name="Seq">被编辑消息的会话内序号。</param>
+/// <param name="Content">编辑后的文本内容。</param>
+/// <param name="EditedAt">编辑时间（UTC 毫秒）。</param>
+/// <param name="OperatorId">操作者用户 ID（当前仅发送者本人）。</param>
+public sealed record MessageEditedFrame(
+    string ConversationId,
+    string MessageId,
+    long Seq,
+    string Content,
+    long EditedAt,
+    string OperatorId) : FrameEnvelope
+{
+    /// <inheritdoc />
+    public override string Type => FrameTypes.MessageEdited;
+}

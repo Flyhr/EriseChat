@@ -265,6 +265,12 @@ public sealed class WebSocketConnectionHandler
                 case MessageSendFrame messageSend:
                     await HandleMessageSendAsync(connection, messageSend, connectionAborted);
                     break;
+                case MessageRecallFrame messageRecall:
+                    await HandleMessageRecallAsync(connection, messageRecall, connectionAborted);
+                    break;
+                case MessageEditFrame messageEdit:
+                    await HandleMessageEditAsync(connection, messageEdit, connectionAborted);
+                    break;
                 case SyncRequestFrame syncRequest:
                     await HandleSyncAsync(connection, syncRequest, connectionAborted);
                     break;
@@ -319,6 +325,28 @@ public sealed class WebSocketConnectionHandler
         using var scope = _scopeFactory.CreateScope();
         var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
         await hub.HandleSendAsync(connection, request, connectionAborted);
+    }
+
+    /// <summary>message.recall（F-18）：撤回/幂等/广播由 MessageHub 处理；校验失败只回 error，不断连。</summary>
+    private async Task HandleMessageRecallAsync(
+        WsConnection connection,
+        MessageRecallFrame request,
+        CancellationToken connectionAborted)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
+        await hub.HandleRecallAsync(connection, request, connectionAborted);
+    }
+
+    /// <summary>message.edit（F-18）：编辑/广播由 MessageHub 处理；校验失败只回 error，不断连。</summary>
+    private async Task HandleMessageEditAsync(
+        WsConnection connection,
+        MessageEditFrame request,
+        CancellationToken connectionAborted)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var hub = scope.ServiceProvider.GetRequiredService<MessageHub>();
+        await hub.HandleEditAsync(connection, request, connectionAborted);
     }
 
     /// <summary>sync.request（M1-08）：只读补拉，reqId 原样回传。</summary>

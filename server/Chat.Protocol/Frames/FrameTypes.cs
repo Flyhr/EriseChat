@@ -1,8 +1,8 @@
 namespace Chat.Protocol.Frames;
 
 /// <summary>
-/// WebSocket 帧 type 常量（唯一来源：protocol/protocol.md §3，共 18 个）。
-/// 帧 DTO 与处理逻辑在 M1 按协议补全，本批只固定 type 契约。
+/// WebSocket 帧 type 常量（唯一来源：protocol/protocol.md §3，共 22 个）。
+/// 帧 DTO 与处理逻辑在 M1 按协议补全；F-18 追加消息撤回/编辑 4 个 type。
 /// </summary>
 public static class FrameTypes
 {
@@ -26,6 +26,18 @@ public static class FrameTypes
 
     /// <summary>新消息广播（S→C）。</summary>
     public const string MessageNew = "message.new";
+
+    /// <summary>撤回消息请求（C→S，F-18）。</summary>
+    public const string MessageRecall = "message.recall";
+
+    /// <summary>撤回消息广播/回执（S→C，F-18）。</summary>
+    public const string MessageRecalled = "message.recalled";
+
+    /// <summary>编辑消息请求（C→S，F-18）。</summary>
+    public const string MessageEdit = "message.edit";
+
+    /// <summary>编辑消息广播/回执（S→C，F-18）。</summary>
+    public const string MessageEdited = "message.edited";
 
     /// <summary>补拉请求（C→S）。</summary>
     public const string SyncRequest = "sync.request";

@@ -37,4 +37,10 @@ public sealed class AppOptions
 
     /// <summary>是否仅群主可邀请成员，默认 false = 所有成员可邀请（M3-04）。</summary>
     public bool GroupOnlyOwnerCanInvite { get; set; }
+
+    /// <summary>消息撤回窗口（秒），自消息 createdAt 起算，默认 120；使用时代码内限制 1~86400（F-18）。</summary>
+    public int MessageRecallWindowSeconds { get; set; } = 120;
+
+    /// <summary>消息编辑窗口（秒），自消息 createdAt 起算，默认 900；使用时代码内限制 1~86400（F-18）。</summary>
+    public int MessageEditWindowSeconds { get; set; } = 900;
 }

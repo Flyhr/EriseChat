@@ -94,6 +94,130 @@ public sealed class MessageHub
         }
     }
 
+    /// <summary>处理 message.recall（F-18）：本人/窗口校验 → 落库撤回 → 向会话全部在线连接广播（含操作者）。</summary>
+    public async Task HandleRecallAsync(
+        WsConnection sender,
+        MessageRecallFrame request,
+        CancellationToken connectionAborted)
+    {
+        if (string.IsNullOrWhiteSpace(sender.UserId))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _messages.RecallAsync(
+                sender.UserId,
+                request.ConversationId,
+                request.MessageId,
+                connectionAborted);
+            var message = result.Message;
+            var frame = new MessageRecalledFrame(
+                message.ConversationId,
+                message.MessageId,
+                message.Seq,
+                message.DeletedAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                sender.UserId);
+
+            if (result.Changed)
+            {
+                var sent = await BroadcastToAllAsync(result.MemberUserIds, frame);
+                _logger.LogInformation(
+                    "message.recalled 广播：会话 {ConversationId} seq={Seq} messageId={MessageId} → {ConnectionCount} 条在线连接",
+                    message.ConversationId,
+                    message.Seq,
+                    message.MessageId,
+                    sent);
+            }
+            else
+            {
+                // 幂等撤回：只向请求连接重发一条，deletedAt 不变、不重复广播（protocol §4.3 规则 3）。
+                await sender.SendFrameAsync(frame, connectionAborted);
+                _logger.LogInformation(
+                    "message.recalled 幂等重发：会话 {ConversationId} seq={Seq} messageId={MessageId}（连接 {ConnectionId}）",
+                    message.ConversationId,
+                    message.Seq,
+                    message.MessageId,
+                    sender.ConnectionId);
+            }
+        }
+        catch (ApiException exception)
+        {
+            _logger.LogInformation(
+                "message.recall 校验失败：{Code}（连接 {ConnectionId}，会话 {ConversationId}）",
+                exception.Code,
+                sender.ConnectionId,
+                request.ConversationId);
+            await sender.SendErrorAsync(exception.Code, exception.Message, request.ReqId, connectionAborted);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "message.recall 处理异常（连接 {ConnectionId}）", sender.ConnectionId);
+            await sender.SendErrorAsync(
+                ErrorCodes.InternalError,
+                "服务端内部错误",
+                request.ReqId,
+                connectionAborted);
+        }
+    }
+
+    /// <summary>处理 message.edit（F-18）：本人/仅文本/未撤回/窗口校验 → 落库编辑 → 向会话全部在线连接广播。</summary>
+    public async Task HandleEditAsync(
+        WsConnection sender,
+        MessageEditFrame request,
+        CancellationToken connectionAborted)
+    {
+        if (string.IsNullOrWhiteSpace(sender.UserId))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _messages.EditAsync(
+                sender.UserId,
+                request.ConversationId,
+                request.MessageId,
+                request.Content,
+                connectionAborted);
+            var message = result.Message;
+            var content = message.Content.IsString ? message.Content.GetString() ?? string.Empty : string.Empty;
+            var frame = new MessageEditedFrame(
+                message.ConversationId,
+                message.MessageId,
+                message.Seq,
+                content,
+                message.EditedAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                sender.UserId);
+            var sent = await BroadcastToAllAsync(result.MemberUserIds, frame);
+            _logger.LogInformation(
+                "message.edited 广播：会话 {ConversationId} seq={Seq} messageId={MessageId} → {ConnectionCount} 条在线连接",
+                message.ConversationId,
+                message.Seq,
+                message.MessageId,
+                sent);
+        }
+        catch (ApiException exception)
+        {
+            _logger.LogInformation(
+                "message.edit 校验失败：{Code}（连接 {ConnectionId}，会话 {ConversationId}）",
+                exception.Code,
+                sender.ConnectionId,
+                request.ConversationId);
+            await sender.SendErrorAsync(exception.Code, exception.Message, request.ReqId, connectionAborted);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "message.edit 处理异常（连接 {ConnectionId}）", sender.ConnectionId);
+            await sender.SendErrorAsync(
+                ErrorCodes.InternalError,
+                "服务端内部错误",
+                request.ReqId,
+                connectionAborted);
+        }
+    }
+
     /// <summary>处理 sync.request：只读补拉，回传 reqId。</summary>
     public async Task HandleSyncAsync(
         WsConnection sender,
@@ -155,6 +279,22 @@ public sealed class MessageHub
                     continue;
                 }
 
+                await connection.SendFrameAsync(frame, CancellationToken.None);
+                sent++;
+            }
+        }
+
+        return sent;
+    }
+
+    /// <summary>向会话全部成员的所有在线连接发送帧（含操作者本人，F-18 撤回/编辑广播语义）。</summary>
+    private async Task<int> BroadcastToAllAsync(IReadOnlyList<string> memberUserIds, FrameEnvelope frame)
+    {
+        var sent = 0;
+        foreach (var userId in memberUserIds.Distinct(StringComparer.Ordinal))
+        {
+            foreach (var connection in _connections.GetConnections(userId))
+            {
                 await connection.SendFrameAsync(frame, CancellationToken.None);
                 sent++;
             }

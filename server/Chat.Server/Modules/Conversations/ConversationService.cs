@@ -869,7 +869,8 @@ public sealed class ConversationService
             string.IsNullOrEmpty(message.ClientMsgId) ? null : message.ClientMsgId,
             message.ReplyTo,
             message.DeletedAt,
-            reply);
+            reply,
+            message.EditedAt);
     }
 
     /// <summary>

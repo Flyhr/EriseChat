@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
@@ -17,6 +18,12 @@ namespace Chat.Server.Modules.Messages;
 
 /// <summary>message.send 落库结果：协议消息 + 会话成员（用于广播）+ 是否新落库（幂等重发为 false）。</summary>
 public sealed record MessageSendResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds, bool Created);
+
+/// <summary>message.recall 处理结果（F-18）：协议消息 + 会话成员（用于广播）+ 是否实际撤回（幂等重发为 false）。</summary>
+public sealed record MessageRecallResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds, bool Changed);
+
+/// <summary>message.edit 处理结果（F-18）：协议消息 + 会话成员（用于广播）。</summary>
+public sealed record MessageEditResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds);
 
 /// <summary>sync.request 补拉结果（reqId 由 Realtime 层回填）。</summary>
 public sealed record SyncPullResult(IReadOnlyList<SyncBatch> Batches, bool HasMore);
@@ -200,6 +207,134 @@ public sealed class MessageService
             throw;
         }
     }
+
+    /// <summary>
+    /// 撤回消息（F-18）：仅发送者本人、窗口内、非 system；已撤回再撤回幂等（deletedAt 不变、不重复广播）。
+    /// 撤回后置 deleted_at、content_json 置空文本（file_id 保留供孤儿清理引用，文件不立即删除）。
+    /// </summary>
+    public async Task<MessageRecallResult> RecallAsync(
+        string userId,
+        string conversationId,
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        var conversationIdValue = ValidateId(conversationId, "conversationId");
+        var messageIdValue = ValidateId(messageId, "messageId");
+        await EnsureMemberAsync(userId, conversationIdValue, cancellationToken);
+
+        var message = await _db.Messages.FirstOrDefaultAsync(
+            item => item.Id == messageIdValue && item.ConversationId == conversationIdValue,
+            cancellationToken);
+        if (message is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "消息不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (!string.Equals(message.SenderId, userId, StringComparison.Ordinal))
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "只能撤回自己的消息", StatusCodes.Status403Forbidden);
+        }
+
+        if (message.MsgType == MessageType.System)
+        {
+            throw ApiException.ValidationFailed("系统消息不支持撤回");
+        }
+
+        var memberUserIds = await LoadMemberUserIdsAsync(conversationIdValue, cancellationToken);
+        if (message.DeletedAt is not null)
+        {
+            // 幂等：已撤回不再改 deletedAt、不重复广播（protocol/protocol.md §4.3 规则 3）。
+            return new MessageRecallResult(ToProtocolMessage(message), memberUserIds, Changed: false);
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var windowSeconds = Math.Clamp(_appOptions.MessageRecallWindowSeconds, 1, 86400);
+        if (now - message.CreatedAt > windowSeconds * 1000L)
+        {
+            throw ApiException.ValidationFailed("超过可撤回时间");
+        }
+
+        message.DeletedAt = now;
+        // 撤回后不再暴露原文与文件信息（协议 §4.3 规则 4）；file_id 保留供孤儿清理引用。
+        message.ContentJson = "\"\"";
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new MessageRecallResult(ToProtocolMessage(message), memberUserIds, Changed: true);
+    }
+
+    /// <summary>
+    /// 编辑消息（F-18）：仅发送者本人、仅 text、未撤回、窗口内；content trim 后按 Unicode 码点 1..4096。
+    /// 每次编辑刷新 edited_at；seq / clientMsgId 幂等语义不变。返回最新 Message 与成员 ID。
+    /// </summary>
+    public async Task<MessageEditResult> EditAsync(
+        string userId,
+        string conversationId,
+        string messageId,
+        string? content,
+        CancellationToken cancellationToken)
+    {
+        var conversationIdValue = ValidateId(conversationId, "conversationId");
+        var messageIdValue = ValidateId(messageId, "messageId");
+        await EnsureMemberAsync(userId, conversationIdValue, cancellationToken);
+
+        var message = await _db.Messages.FirstOrDefaultAsync(
+            item => item.Id == messageIdValue && item.ConversationId == conversationIdValue,
+            cancellationToken);
+        if (message is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "消息不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (!string.Equals(message.SenderId, userId, StringComparison.Ordinal))
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "只能编辑自己的消息", StatusCodes.Status403Forbidden);
+        }
+
+        if (message.MsgType != MessageType.Text)
+        {
+            throw ApiException.ValidationFailed("仅文本消息支持编辑");
+        }
+
+        if (message.DeletedAt is not null)
+        {
+            throw ApiException.ValidationFailed("已撤回的消息不支持编辑");
+        }
+
+        var trimmed = (content ?? string.Empty).Trim();
+        var length = trimmed.EnumerateRunes().Count();
+        if (length == 0)
+        {
+            throw ApiException.ValidationFailed("编辑内容不能为空");
+        }
+
+        if (length > TextMaxLength)
+        {
+            throw ApiException.ValidationFailed($"文本内容超过 {TextMaxLength} 字符上限");
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var windowSeconds = Math.Clamp(_appOptions.MessageEditWindowSeconds, 1, 86400);
+        if (now - message.CreatedAt > windowSeconds * 1000L)
+        {
+            throw ApiException.ValidationFailed("超过可编辑时间");
+        }
+
+        message.ContentJson = JsonSerializer.Serialize(trimmed, FrameCodec.JsonOptions);
+        message.EditedAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var memberUserIds = await LoadMemberUserIdsAsync(conversationIdValue, cancellationToken);
+        return new MessageEditResult(ToProtocolMessage(message), memberUserIds);
+    }
+
+    /// <summary>读取会话全部成员用户 ID（撤回/编辑广播用）。</summary>
+    private async Task<IReadOnlyList<string>> LoadMemberUserIdsAsync(
+        string conversationId,
+        CancellationToken cancellationToken) =>
+        await _db.ConversationMembers.AsNoTracking()
+            .Where(member => member.ConversationId == conversationId)
+            .Select(member => member.UserId)
+            .ToListAsync(cancellationToken);
 
     /// <summary>判断异常链中是否包含 SQLITE_BUSY(5)/SQLITE_LOCKED(6)。</summary>
     private static bool IsSqliteBusy(Exception exception)
@@ -722,6 +857,12 @@ public sealed class MessageService
     /// </summary>
     private static MessageReply ToReply(MessageEntity message)
     {
+        // F-18：被引用消息已撤回时固定「[已撤回]」，messageId 保留供点击定位（协议 §4.3 规则 8）。
+        if (message.DeletedAt is not null)
+        {
+            return new MessageReply(message.Id, message.Seq, message.SenderId, message.MsgType, "[已撤回]", null, null);
+        }
+
         using var document = JsonDocument.Parse(message.ContentJson);
         var root = document.RootElement;
         string? text = null;
