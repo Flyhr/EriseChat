@@ -23,6 +23,7 @@ import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles 
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
+import type { MentionCandidateMember } from '../core/mentions'
 import type { MessageActionId } from '../core/messageActions'
 import { createPanelHistoryGuard } from '../core/historyGuard'
 import { shouldAdvanceRead } from '../core/readReceipt'
@@ -70,6 +71,14 @@ const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
 )
 const isGroup = computed(() => activeConversation.value?.type === 'group')
+/** F-25：群聊 @ 成员候选（单聊为空 = 不启用候选面板）；角色用于候选行小字。 */
+const mentionCandidates = computed<MentionCandidateMember[]>(() => {
+  const conversation = activeConversation.value
+  if (!conversation || conversation.type !== 'group') return []
+  return conversation.members
+    .filter((member) => member.userId !== selfUserId.value)
+    .map((member) => ({ userId: member.userId, displayName: member.displayName, role: member.role }))
+})
 const memberCount = computed(() => activeConversation.value?.members.length ?? 0)
 const activeTitle = computed(() => {
   const conversation = activeConversation.value
@@ -997,6 +1006,7 @@ function onWindowDrop(event: DragEvent): void {
                 :upload-error="uploadError"
                 :emoji-open="activeDrawer === 'emoji'"
                 :reply-to="replyTarget?.preview ?? null"
+                :mention-candidates="mentionCandidates"
                 @send="sendMessage"
                 @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"

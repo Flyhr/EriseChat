@@ -20,6 +20,8 @@ export interface MentionToken {
 export interface MentionCandidateMember {
   userId: string
   displayName: string
+  /** 平台内角色：群主 / 成员（仅用于候选行小字展示）。 */
+  role?: 'owner' | 'member'
 }
 
 /** 富文本分段：普通文本 / 安全链接 / @提及。 */

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { MAX_TEXT_LENGTH } from '../core/config'
 import { ALLOWED_EXTENSIONS } from '../core/attachments'
 import { insertAtCursor } from '../core/emoji'
+import { filterMentionCandidates, findMentionToken, insertMention } from '../core/mentions'
+import type { MentionCandidateMember, MentionToken } from '../core/mentions'
 import { filesOfClipboard, normalizeDroppedFile } from '../core/fileDrop'
 import { replyCardText, type ReplyPreviewLike } from '../core/replyPreview'
 
@@ -41,8 +43,18 @@ const props = withDefaults(
     initialDraft?: string
     /** F-09：当前回复目标摘要（空 = 未回复），显示在输入框上方的引用条。 */
     replyTo?: ReplyPreviewLike | null
+    /** F-25：群聊 @ 成员候选（空数组 = 单聊/不启用，不弹候选面板）。 */
+    mentionCandidates?: MentionCandidateMember[]
   }>(),
-  { uploading: false, uploadError: null, emojiOpen: false, conversationId: '', initialDraft: '', replyTo: null },
+  {
+    uploading: false,
+    uploadError: null,
+    emojiOpen: false,
+    conversationId: '',
+    initialDraft: '',
+    replyTo: null,
+    mentionCandidates: () => [],
+  },
 )
 
 /** 输入框最大高度（计划 §5.5：自动增长至约 360px，超出后内部滚动）。 */
@@ -85,6 +97,140 @@ function focusInput(): void {
 }
 
 defineExpose({ insertEmoji, focusInput })
+
+// F-25：@ 成员选择面板状态（纯前端文本约定：选中后把「@昵称 」写回输入框，不额外发帧）。
+const field = ref<HTMLElement | null>(null)
+const mentionToken = ref<MentionToken | null>(null)
+const mentionActiveIndex = ref(0)
+/** 候选面板是否打开（光标处于未完成的 @ 片段内且有候选成员）。 */
+const mentionOpen = computed(() => mentionToken.value !== null)
+const mentionQuery = computed(() => mentionToken.value?.query ?? '')
+const mentionList = computed(() =>
+  mentionToken.value ? filterMentionCandidates(props.mentionCandidates, mentionToken.value.query) : [],
+)
+/** 输入框 aria-activedescendant：把当前高亮项告诉读屏器。 */
+const mentionActiveId = computed(() => {
+  if (!mentionOpen.value || mentionList.value.length === 0) return undefined
+  const index = Math.min(mentionActiveIndex.value, mentionList.value.length - 1)
+  const member = mentionList.value[index]
+  return member ? mentionOptionId(member.userId) : undefined
+})
+
+function mentionOptionId(userId: string): string {
+  return `send-box-mention-${userId}`
+}
+
+/** 依据当前光标重新计算 @ 片段与候选；无候选/单聊/输入法组合时关闭面板。 */
+function updateMentionState(): void {
+  const el = input.value
+  if (!el || props.uploading || props.mentionCandidates.length === 0 || el.disabled) {
+    mentionToken.value = null
+    mentionActiveIndex.value = 0
+    return
+  }
+  const token = findMentionToken(text.value, el.selectionStart ?? text.value.length)
+  if (!token) {
+    mentionToken.value = null
+    mentionActiveIndex.value = 0
+    return
+  }
+  mentionToken.value = token
+  const list = filterMentionCandidates(props.mentionCandidates, token.query)
+  if (mentionActiveIndex.value >= list.length) mentionActiveIndex.value = 0
+}
+
+function closeMention(): void {
+  mentionToken.value = null
+  mentionActiveIndex.value = 0
+}
+
+function moveMention(step: number): void {
+  const total = mentionList.value.length
+  if (total === 0) return
+  mentionActiveIndex.value = (mentionActiveIndex.value + step + total) % total
+}
+
+/** 选中候选项：替换 @ 片段为「@昵称 」，光标置其后并保持焦点，不发送消息。 */
+function selectMention(member: MentionCandidateMember): void {
+  const token = mentionToken.value
+  if (!token) return
+  const el = input.value
+  const caret = el?.selectionStart ?? text.value.length
+  const result = insertMention(text.value, { ...token, end: caret }, member)
+  text.value = result.text
+  closeMention()
+  void nextTick(() => {
+    el?.focus()
+    el?.setSelectionRange(result.caret, result.caret)
+    resizeInput()
+    updateMentionState()
+  })
+}
+
+function selectActiveMention(): void {
+  const member = mentionList.value[mentionActiveIndex.value]
+  if (member) selectMention(member)
+}
+
+/** 键盘：面板打开时 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭；面板打开时 Enter 不发送消息。 */
+function onKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || event.keyCode === 229) return
+
+  if (mentionOpen.value) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveMention(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      selectActiveMention()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMention()
+      return
+    }
+  }
+
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    submit()
+    return
+  }
+  if (event.key === 'Escape' && props.replyTo) {
+    emit('cancel-reply')
+  }
+}
+
+/** 点击输入框外关闭候选面板（点击面板内部由 mousedown.prevent 保持焦点，不关闭）。 */
+function onDocumentPointerDown(event: PointerEvent): void {
+  const target = event.target as Node | null
+  if (target && field.value?.contains(target)) return
+  closeMention()
+}
+
+watch(mentionOpen, (open) => {
+  if (open) document.addEventListener('pointerdown', onDocumentPointerDown, true)
+  else document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+})
+
+// 切换会话/成员变化时关闭面板，避免把上一个会话的候选带过去。
+watch(
+  () => props.conversationId,
+  () => closeMention(),
+)
+watch(
+  () => props.mentionCandidates,
+  () => {
+    if (mentionOpen.value) updateMentionState()
+  },
+)
 
 // 草稿（F-04）：切换会话时用父组件传入的 initialDraft 重置输入框；输入变化统一回传父组件持久化。
 watch(
@@ -137,29 +283,17 @@ function onPaste(event: ClipboardEvent): void {
 /** 输入变化（M3-09）：非空且未超上限时通知父组件发送 typing（父组件负责 3 秒节流）。 */
 function onInput(): void {
   resizeInput()
+  updateMentionState()
   if (props.uploading) return
   const value = text.value.trim()
   if (value.length === 0 || value.length > MAX_TEXT_LENGTH) return
   emit('typing')
 }
-
-/** Enter 发送（Shift+Enter 换行）：组合输入期间（IME 候选词确认）不发送。 */
-function onEnter(event: KeyboardEvent): void {
-  if (event.isComposing || event.keyCode === 229) return
-  event.preventDefault()
-  submit()
-}
-
-/** F-09：Esc 取消回复引用（不拦截默认行为之外的其他键）。 */
-function onEscape(): void {
-  if (!props.replyTo) return
-  emit('cancel-reply')
-}
 </script>
 
 <template>
   <form class="send-box" @submit.prevent="submit">
-    <div class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
+    <div ref="field" class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
       <div v-if="replyTo" class="send-box__reply">
         <span class="send-box__reply-text">{{ replyCardText(replyTo) }}</span>
         <button
@@ -172,6 +306,33 @@ function onEscape(): void {
           <AppIcon name="close" :size="14" />
         </button>
       </div>
+      <!-- F-25：@ 成员候选面板，绝对定位在输入卡上方；↑/↓ 移动、Enter/Tab 选中、Esc 关闭。 -->
+      <div
+        v-if="mentionOpen"
+        class="send-box__mentions"
+        role="listbox"
+        aria-label="选择要提及的成员"
+        :aria-activedescendant="mentionActiveId"
+      >
+        <button
+          v-for="(member, index) in mentionList"
+          :id="mentionOptionId(member.userId)"
+          :key="member.userId"
+          type="button"
+          role="option"
+          class="send-box__mention"
+          :class="{ 'send-box__mention--active': index === mentionActiveIndex }"
+          :aria-selected="index === mentionActiveIndex"
+          @mousedown.prevent
+          @click="selectMention(member)"
+        >
+          <span class="send-box__mention-name">{{ member.displayName }}</span>
+          <span class="send-box__mention-role">{{ member.role === 'owner' ? '群主' : '成员' }}</span>
+        </button>
+        <p v-if="mentionList.length === 0" class="send-box__mention-empty">
+          {{ mentionQuery ? `没有匹配「${mentionQuery}」的成员` : '没有可提及的成员' }}
+        </p>
+      </div>
       <textarea
         ref="input"
         v-model="text"
@@ -181,9 +342,12 @@ function onEscape(): void {
         :disabled="uploading"
         placeholder="输入消息，Enter 发送，Shift+Enter 换行"
         aria-label="消息输入框"
+        :aria-activedescendant="mentionActiveId"
         @input="onInput"
-        @keydown.enter.exact="onEnter"
-        @keydown.esc="onEscape"
+        @keydown="onKeydown"
+        @keyup="updateMentionState"
+        @click="updateMentionState"
+        @focus="updateMentionState"
         @paste="onPaste"
       />
       <!-- 工具栏与正文同处一个输入框：图标放在输入框下侧，分隔线用浅色避免抢视觉。 -->
@@ -283,6 +447,7 @@ function onEscape(): void {
 }
 
 .send-box__field {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -308,6 +473,72 @@ function onEscape(): void {
 
 .send-box__field--error {
   border-color: var(--ec-danger);
+}
+
+/* F-25：@ 成员候选面板（绝对定位在输入卡上方，不推动聊天内容）。 */
+.send-box__mentions {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--ec-space-2));
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  padding: var(--ec-space-1);
+  overflow-y: auto;
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-panel);
+  background: var(--ec-surface);
+  box-shadow: var(--ec-shadow-lg);
+}
+
+.send-box__mention {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.send-box__mention--active {
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .send-box__mention:hover {
+    background: var(--ec-brand-050);
+    color: var(--ec-brand-600);
+  }
+}
+
+.send-box__mention-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.send-box__mention-role {
+  flex: none;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.send-box__mention-empty {
+  margin: 0;
+  padding: var(--ec-space-3);
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+  text-align: center;
 }
 
 /* F-09：回复引用条（输入框左上角），点击 × 或按 Esc 取消。 */
@@ -458,6 +689,15 @@ function onEscape(): void {
   .send-box__input {
     min-height: var(--ec-size-mobile-input-min);
     max-height: var(--ec-size-mobile-input-max);
+  }
+
+  /* F-25：移动端候选面板全宽、限制高度，触屏行高 ≥44px。 */
+  .send-box__mentions {
+    max-height: 200px;
+  }
+
+  .send-box__mention {
+    min-height: var(--ec-touch-target);
   }
 
   .send-box__toolbar {
