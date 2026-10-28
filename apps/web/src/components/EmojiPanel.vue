@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else>
-        <p v-if="customEmojis.length === 0" class="ec-emoji-panel__hint">还没有自定义表情，上传一张图片试试</p>
+		<p v-if="customEmojis.length === 0" class="ec-emoji-panel__empty">还没有自定义表情，上传一张图片试试</p>
         <div v-else class="ec-emoji-panel__grid ec-emoji-panel__grid--custom">
           <div
             v-for="item in customEmojis"
@@ -346,6 +346,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   width: 360px;
+  /* F-21 修复：固定高度，切换「表情/自定义」页签时面板不跳大小（内容不足时用空白填充）。 */
+  height: 300px;
   max-width: calc(100vw - var(--ec-space-8));
   max-height: 300px;
   overflow: hidden;
@@ -477,6 +479,18 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
+/* 空态：占满页签剩余高度并居中，保证空面板与有表情时大小一致。 */
+.ec-emoji-panel__empty {
+  display: grid;
+  flex: 1;
+  margin: 0;
+  place-items: center;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: 1.6;
+  text-align: center;
+}
+
 .ec-emoji-panel__actions {
   display: flex;
   align-items: center;
@@ -541,6 +555,7 @@ onBeforeUnmount(() => {
 @media (max-width: 800px) {
   .ec-emoji-panel {
     width: auto;
+    height: 260px;
     max-height: 260px;
   }
 
