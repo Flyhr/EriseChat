@@ -208,6 +208,7 @@
 - `image` / `file`：FileContent 对象，格式见 §7。
 - `system`：服务端生成的系统事件对象（M3 使用），核心字段为 `event`（事件名，必填）、`actorId`（触发者，可选）、`targetUserIds`（涉及成员，可选）、`text`（服务端生成的中文描述，可选）；后续新增可选字段属向后兼容增量。
 - 系统消息事件名（v1，M3）：`group.created`、`member.joined`、`member.left`、`member.removed`；`text` 为服务端生成的中文描述，客户端渲染为居中小字，不做 i18n。
+- F-24 追加系统消息事件 `owner.transferred`（群主转让）：`actorId` 为原群主、`targetUserIds` 为新群主 userId、`text` 形如「张三 将群主转让给 李四」；旧客户端按未知事件渲染为「系统消息」，符合向后兼容规则。
 
 #### 消息撤回 / 编辑（`message.recall` / `message.recalled` / `message.edit` / `message.edited`，F-18）
 
@@ -371,6 +372,8 @@ batch 对象：
 > `announcement` 为群公告，只有 `group` 会话可能有值；修改入口为 `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?, avatarFileId?}`，仅群主可用，空串表示清空（落库 `null`））。
 >
 > `avatarFileId` 为群头像，只有 `group` 会话可能有值；修改入口同上 `PATCH /api/conversations/{conversationId}`（空串表示清空、缺省表示不修改）；下载走 `GET /api/files/{fileId}`，头像文件可见性规则与个人头像一致（已登录用户可下载、未登录 401）。
+>
+> 群主转让入口为 `POST /api/conversations/{conversationId}/owner`（body `{ "userId": "<新群主 userId>" }`，仅当前群主可用）：成功后两条成员行 `role` 互换（原群主 → `member`、目标 → `owner`），追加一条 `owner.transferred` 系统消息（`actorId` = 原群主、`targetUserIds` = [新群主]，`seq` 仍严格 +1），并按收件人视角逐连接下发 `conv.updated`（各自 `pinned` / `muted` / `lastReadSeq` 不变）。错误：会话不存在 `NOT_FOUND`（404）、非群聊 `VALIDATION_FAILED`（400）、非会话成员 `NOT_MEMBER`（403）、非群主 `FORBIDDEN`（403）、目标非本群成员或目标为自己 `VALIDATION_FAILED`（400）。
 
 ### 4.6 `read.update` / `read.updated`（已读）
 
@@ -679,3 +682,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（群头像） | 2026-10-28 | Conversation 新增可选字段 `avatarFileId`（群头像 `files.id`，仅 group、单聊恒 null、null=未设置）；`conv.updated` 触发场景补充「群头像变更」；`conversations` 新增 `avatar_file_id TEXT` 列（`protocol/schema.sql` 同步）；`PATCH /api/conversations/{conversationId}` body 增加 `avatarFileId`（空串清空、缺省不修改，仅群主）；头像文件对已登录用户可见；无新帧、`protocolVersion` 仍为 1 |
 | v1（F-15 共享文件） | 2026-10-28 | 新增 `GET /api/conversations/{conversationId}/files`（type=image 或 file、beforeSeq、limit）共享文件汇总接口：只统计 `messages.file_id` 非空的 image/file 消息、按文件去重取最新引用 seq、按 seq 降序分页（beforeSeq 排他）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-18 撤回与编辑） | 2026-10-28 | 新增 4 个帧（共 22 个 type）：`message.recall` / `message.recalled` / `message.edit` / `message.edited`（§4.3）；撤回窗口 120s、编辑窗口 900s，仅发送者本人，撤回后 content 为空且不再返回文件信息，编辑仅 text、内容 1..4096；Message 新增可选 `editedAt`，`deletedAt` 语义改为「非空=已撤回」；messages 新增 `edited_at INTEGER` 列（`protocol/schema.sql` 同步）；无新 REST 端点，历史/同步返回最新状态；`protocolVersion` 仍为 1 |
+| v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
