@@ -2,6 +2,7 @@
 // M0 只提供最小可用封装；M1 按需补消息分页、会话快照与清理策略。
 
 import { config } from './config'
+import { sortCustomEmojis } from './customEmoji'
 import type { Conversation, FileContent, Message, MessageSendType } from '../types/frames'
 
 export const STORE_MESSAGES = 'messages'
@@ -9,6 +10,11 @@ export const STORE_CONVERSATIONS = 'conversations'
 export const STORE_META = 'meta'
 /** F-03：待发消息持久化（只缓存未收到 ack 的乐观消息，刷新后可恢复并重发）。 */
 export const STORE_PENDING = 'pending'
+/** F-21：自定义表情（仅本设备；存 blob 不存 objectURL）。 */
+export const STORE_CUSTOM_EMOJIS = 'customEmojis'
+
+/** 本地缓存库版本（升级时递增并只在 onupgradeneeded 中做增量变更）。 */
+export const DB_VERSION = 3
 
 export interface MetaRecord {
   key: string
@@ -40,7 +46,7 @@ let dbPromise: Promise<IDBDatabase> | null = null
 export function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(config.dbName, 2)
+    const request = indexedDB.open(config.dbName, DB_VERSION)
 
     request.onupgradeneeded = () => {
       const db = request.result
@@ -59,6 +65,11 @@ export function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_PENDING)) {
         const store = db.createObjectStore(STORE_PENDING, { keyPath: 'clientMsgId' })
         store.createIndex('byConversation', 'conversationId')
+      }
+      // F-21：v2 → v3 只新增 customEmojis store，不改动已有 store。
+      if (!db.objectStoreNames.contains(STORE_CUSTOM_EMOJIS)) {
+        const store = db.createObjectStore(STORE_CUSTOM_EMOJIS, { keyPath: 'id' })
+        store.createIndex('byCreatedAt', 'createdAt')
       }
     }
 
@@ -180,9 +191,38 @@ export async function clearPending(): Promise<void> {
   }
 }
 
+// ===== F-21 自定义表情（仅本设备 IndexedDB；不随账号同步，登出不清空） =====
+
+export interface CustomEmojiRecord {
+  /** crypto.randomUUID() 生成。 */
+  id: string
+  /** 图片二进制（原始或压缩后的 PNG/GIF 等）。 */
+  blob: Blob
+  mime: string
+  createdAt: number
+}
+
+/** 列出本设备自定义表情（createdAt 倒序）。 */
+export function listCustomEmojis(): Promise<CustomEmojiRecord[]> {
+  return getAllRecords<CustomEmojiRecord>(STORE_CUSTOM_EMOJIS).then((items) => sortCustomEmojis(items))
+}
+
+export function putCustomEmoji(record: CustomEmojiRecord): Promise<void> {
+  return putRecord(STORE_CUSTOM_EMOJIS, record)
+}
+
+export function deleteCustomEmoji(id: string): Promise<void> {
+  return deleteRecord(STORE_CUSTOM_EMOJIS, id)
+}
+
+export function clearCustomEmojis(): Promise<void> {
+  return runRequest<void>(STORE_CUSTOM_EMOJIS, 'readwrite', (store) => store.clear())
+}
+
 /**
  * 清空全部本地缓存（M3-00：退出登录/账号切换时调用）。
  * 缓存只是加速渲染，清空不影响服务端事实源；下次登录会重新拉取。
+ * 注意：F-21 自定义表情属于「本设备」偏好而非账号缓存，故意不在清理范围内。
  */
 export async function clearAllData(): Promise<void> {
   try {
