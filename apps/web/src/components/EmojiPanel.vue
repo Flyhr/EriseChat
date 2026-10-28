@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
               aria-label="删除该自定义表情"
               @click.stop="askDelete(item)"
             >
-              <AppIcon name="close" :size="12" />
+              <AppIcon name="close" :size="14" />
             </button>
           </div>
         </div>
@@ -427,7 +427,9 @@ onBeforeUnmount(() => {
 }
 
 .ec-emoji-panel__item--custom {
-  padding: 2px;
+  width: 64px;
+  height: 64px;
+  padding: 3px;
   overflow: hidden;
 }
 
@@ -445,11 +447,11 @@ onBeforeUnmount(() => {
 
 .ec-emoji-panel__delete {
   position: absolute;
-  top: -4px;
-  right: -4px;
+  top: -6px;
+  right: -6px;
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   place-items: center;
   border: 1px solid var(--ec-border);
@@ -566,9 +568,16 @@ onBeforeUnmount(() => {
     font-size: 20px;
   }
 
+  /* F-21：自定义表情缩略图再放大（触屏下 88px，桌面 64px 的等比放大）。 */
+  .ec-emoji-panel__item--custom {
+    width: 88px;
+    height: 88px;
+    padding: 4px;
+  }
+
   .ec-emoji-panel__delete {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
   }
 }
 </style>
