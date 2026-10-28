@@ -22,12 +22,13 @@ export interface MemberSettingsRequest {
 }
 
 /**
- * 群资料更新请求（F-14）：字段缺省 = 不修改；`announcement: ''` = 清空公告；
- * title 必须为非空字符串（不传表示不改）。仅群聊群主可用。
+ * 群资料更新请求（F-14 / F-23）：字段缺省 = 不修改；`announcement: ''` = 清空公告；
+ * `avatarFileId: ''` = 清空群头像；title 必须为非空字符串（不传表示不改）。仅群聊群主可用。
  */
 export interface GroupProfileUpdate {
   title?: string
   announcement?: string
+  avatarFileId?: string
 }
 
 export const conversationsApi = {
@@ -69,7 +70,7 @@ export const conversationsApi = {
     ),
 
   /**
-   * 修改群资料（F-14）：仅群聊群主可用；字段缺省 = 不修改，`announcement: ''` = 清空公告。
+   * 修改群资料（F-14 / F-23）：仅群聊群主可用；字段缺省 = 不修改，`announcement: ''` / `avatarFileId: ''` = 清空。
    * 返回当前用户视角的完整 Conversation；其他成员通过服务端按收件人下发的 conv.updated 刷新。
    */
   updateGroupProfile: (conversationId: string, body: GroupProfileUpdate) =>

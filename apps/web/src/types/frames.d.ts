@@ -143,6 +143,8 @@ export interface Conversation {
   muted?: boolean
   /** 群公告（F-14）：≤500 字符、支持换行；null/缺省 = 无公告；单聊恒为 null */
   announcement?: string | null
+  /** 群头像（F-23）：files.id；null/缺省 = 未设置；仅群聊可能非空，单聊恒为 null */
+  avatarFileId?: string | null
   lastMessage?: Message | null
   members: ConversationMember[]
 }
