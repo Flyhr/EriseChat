@@ -4,6 +4,7 @@
 import { config } from './config'
 import { sortCustomEmojis } from './customEmoji'
 import type { Conversation, FileContent, Message, MessageSendType } from '../types/frames'
+import type { FavoriteRecord } from './favorites'
 
 export const STORE_MESSAGES = 'messages'
 export const STORE_CONVERSATIONS = 'conversations'
@@ -12,9 +13,11 @@ export const STORE_META = 'meta'
 export const STORE_PENDING = 'pending'
 /** F-21：自定义表情（仅本设备；存 blob 不存 objectURL）。 */
 export const STORE_CUSTOM_EMOJIS = 'customEmojis'
+/** F-26：本地收藏（快照，按账号隔离；换账号只做内存过滤，不删除数据）。 */
+export const STORE_FAVORITES = 'favorites'
 
 /** 本地缓存库版本（升级时递增并只在 onupgradeneeded 中做增量变更）。 */
-export const DB_VERSION = 3
+export const DB_VERSION = 4
 
 export interface MetaRecord {
   key: string
@@ -70,6 +73,10 @@ export function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_CUSTOM_EMOJIS)) {
         const store = db.createObjectStore(STORE_CUSTOM_EMOJIS, { keyPath: 'id' })
         store.createIndex('byCreatedAt', 'createdAt')
+      }
+      // F-26：v3 → v4 只新增 favorites store；老数据（消息/会话/草稿）保持不变。
+      if (!db.objectStoreNames.contains(STORE_FAVORITES)) {
+        db.createObjectStore(STORE_FAVORITES, { keyPath: 'favoriteId' })
       }
     }
 
@@ -222,7 +229,8 @@ export function clearCustomEmojis(): Promise<void> {
 /**
  * 清空全部本地缓存（M3-00：退出登录/账号切换时调用）。
  * 缓存只是加速渲染，清空不影响服务端事实源；下次登录会重新拉取。
- * 注意：F-21 自定义表情属于「本设备」偏好而非账号缓存，故意不在清理范围内。
+ * 注意：F-21 自定义表情属于「本设备」偏好而非账号缓存，故意不在清理范围内；
+ * F-26 本地收藏同样按账号隔离、换账号只做内存过滤，故意不清空（收藏是用户资产，不能因登出丢失）。
  */
 export async function clearAllData(): Promise<void> {
   try {
@@ -237,4 +245,19 @@ export async function clearAllData(): Promise<void> {
   } catch (error) {
     console.warn('[db] 清理本地缓存失败', error)
   }
+}
+
+// ===== F-26 本地收藏（IndexedDB 快照；跨刷新保留、按账号隔离、不做云端同步） =====
+
+/** 读取本设备全部账号的收藏记录（内存里再按 ownerId 过滤）。 */
+export function getAllFavorites(): Promise<FavoriteRecord[]> {
+  return getAllRecords<FavoriteRecord>(STORE_FAVORITES)
+}
+
+export function putFavorite(record: FavoriteRecord): Promise<void> {
+  return putRecord(STORE_FAVORITES, record)
+}
+
+export function deleteFavorite(favoriteId: string): Promise<void> {
+  return deleteRecord(STORE_FAVORITES, favoriteId)
 }

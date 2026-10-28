@@ -10,6 +10,7 @@ import { chatWs, type WsState } from './core/ws'
 import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
 import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
+import { useFavoritesStore } from './stores/favorites'
 import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useVisualViewport } from './core/useVisualViewport'
@@ -22,6 +23,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
+const favorites = useFavoritesStore()
 const friends = useFriendsStore()
 const presence = usePresenceStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
@@ -63,6 +65,16 @@ onMounted(() => {
   // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
   unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)
 })
+
+// F-26：登录后加载当前账号本地收藏；登出/切账号只清内存（IndexedDB 保留，换账号可见性由 ownerId 过滤）。
+watch(
+  () => auth.user?.userId ?? '',
+  (userId) => {
+    if (userId && auth.isLoggedIn) void favorites.loadForUser(userId)
+    else favorites.clear()
+  },
+  { immediate: true },
+)
 
 // F-02：会话未读变化时同步到桌面壳（Web/移动端无桌面桥时静默跳过）。
 watch(
