@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Modules.Conversations;
+using Chat.Server.Modules.Files;
 using Microsoft.AspNetCore.Http;
 
 namespace Chat.Server.Api;
@@ -50,6 +51,12 @@ public static class ConversationsEndpoints
             .WithName("UpdateGroupProfile")
             .RequireAuthorization()
             .Produces<Conversation>();
+
+        // F-15：会话共享图片/文件汇总（只读分页；type=image|file、beforeSeq、limit）。
+        app.MapGet("/api/conversations/{conversationId}/files", GetSharedFilesAsync)
+            .WithName("ListConversationFiles")
+            .RequireAuthorization()
+            .Produces<ConversationFilesPage>();
 
         return app;
     }
@@ -208,6 +215,30 @@ public static class ConversationsEndpoints
         notifier.PushUpdatedPerRecipient(perRecipient);
 
         return Results.Json(perRecipient[currentUserId]);
+    }
+
+    /// <summary>
+    /// 会话共享图片/文件汇总（F-15）：type=image|file 必填、beforeSeq 排他游标、limit 1~100 默认 50；
+    /// 只统计 messages.file_id 非空的 image/file 消息，按文件去重取最新引用 seq 倒序分页。
+    /// </summary>
+    private static async Task<IResult> GetSharedFilesAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        string? type,
+        long? beforeSeq,
+        int? limit,
+        ConversationFilesService files,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetUserId(principal);
+        var page = await files.GetSharedFilesAsync(
+            userId,
+            conversationId,
+            type,
+            beforeSeq,
+            limit,
+            cancellationToken);
+        return Results.Json(page);
     }
 
     private static async Task<IResult> GetAsync(

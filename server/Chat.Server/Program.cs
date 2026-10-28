@@ -102,6 +102,9 @@ builder.Services.AddSingleton<PresenceService>();
 builder.Services.AddSingleton<FileStorage>();
 builder.Services.AddScoped<FileService>();
 
+// F-15：会话共享图片/文件汇总（只读分页，按文件去重取最新引用 seq）。
+builder.Services.AddScoped<ConversationFilesService>();
+
 // 孤儿文件清理（M3-02）：启动 30 秒后首轮，之后按 App:OrphanFileCleanupIntervalHours 轮询（默认 24 小时）。
 builder.Services.AddHostedService<OrphanFileCleanupService>();
 
