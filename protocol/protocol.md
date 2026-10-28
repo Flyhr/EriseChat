@@ -347,6 +347,7 @@ batch 对象：
 | `createdAt` | integer | 是 | 创建时间（UTC 毫秒） |
 | `lastSeq` | integer | 是 | 会话最新序号 |
 | `lastReadSeq` | integer | 是 | 当前用户在该会话的已读游标 |
+| `unread` | integer | 否 | 当前用户的未读数：只统计**他人发送**且 `seq > lastReadSeq` 的消息（自己发送的消息不计入）；服务端实时计算，客户端可直接展示；旧客户端忽略 |
 | `pinned` | bool | 否 | 当前用户是否置顶该会话（成员级设置，默认 `false`；旧客户端忽略） |
 | `muted` | bool | 否 | 当前用户是否对该会话免打扰（成员级设置，默认 `false`；旧客户端忽略） |
 | `announcement` | string / null | 否 | 群公告（≤500 字符，支持换行）；`null` / 缺省表示无公告；单聊恒为 `null`；旧客户端忽略 |
@@ -365,7 +366,7 @@ batch 对象：
 | `joinedAt` | integer | 是 | 加入时间（UTC 毫秒） |
 | `avatarFileId` | string | 否 | 头像文件 ID |
 
-> 未读数由客户端按 `未读 = lastSeq − lastReadSeq` 计算，协议不单独下发 `unread`（`AGENTS.md` §5.6）。
+> 未读数由服务端在会话对象 `unread` 字段实时计算并下发：只统计他人发送、`seq > lastReadSeq` 的消息，自己发送的消息不计入（例如向未打开的会话转发消息后，自己不会收到未读徽标）。客户端不应再用 `lastSeq − lastReadSeq` 估算（会把本人消息误计为未读）；该字段可由旧客户端忽略（旧客户端仍会按旧公式展示）。
 
 > `pinned` / `muted` 是**当前登录用户自己的成员级设置**（`conversation_members` 行上的列）：服务端在 `conv.list`、`conv.updated`、`GET /api/conversations` 中按各自收件人填充，不广播给其他成员；改动入口为 `PATCH /api/conversations/{conversationId}/member-settings`。会话排序规则属客户端展示层：`conv.list` 仍按最近消息时间倒序，客户端可将置顶会话排在前面（置顶组内保持时间倒序）。
 >
@@ -682,4 +683,6 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（群头像） | 2026-10-28 | Conversation 新增可选字段 `avatarFileId`（群头像 `files.id`，仅 group、单聊恒 null、null=未设置）；`conv.updated` 触发场景补充「群头像变更」；`conversations` 新增 `avatar_file_id TEXT` 列（`protocol/schema.sql` 同步）；`PATCH /api/conversations/{conversationId}` body 增加 `avatarFileId`（空串清空、缺省不修改，仅群主）；头像文件对已登录用户可见；无新帧、`protocolVersion` 仍为 1 |
 | v1（F-15 共享文件） | 2026-10-28 | 新增 `GET /api/conversations/{conversationId}/files`（type=image 或 file、beforeSeq、limit）共享文件汇总接口：只统计 `messages.file_id` 非空的 image/file 消息、按文件去重取最新引用 seq、按 seq 降序分页（beforeSeq 排他）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-18 撤回与编辑） | 2026-10-28 | 新增 4 个帧（共 22 个 type）：`message.recall` / `message.recalled` / `message.edit` / `message.edited`（§4.3）；撤回窗口 120s、编辑窗口 900s，仅发送者本人，撤回后 content 为空且不再返回文件信息，编辑仅 text、内容 1..4096；Message 新增可选 `editedAt`，`deletedAt` 语义改为「非空=已撤回」；messages 新增 `edited_at INTEGER` 列（`protocol/schema.sql` 同步）；无新 REST 端点，历史/同步返回最新状态；`protocolVersion` 仍为 1 |
+| v1（F-26 未读口径） | 2026-10-28 | Conversation 新增可选字段 `unread`（当前用户未读数，只统计他人发送且 `seq > lastReadSeq` 的消息，自己发送的消息不计入；服务端实时计算，客户端可直接展示；旧客户端忽略）；无新帧、不改库表、`protocolVersion` 仍为 1 |
+
 | v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
