@@ -52,6 +52,12 @@ public static class ConversationsEndpoints
             .RequireAuthorization()
             .Produces<Conversation>();
 
+        // F-24：群主转让；系统消息先于 conv.updated，conv.updated 按成员各自视角逐连接推送。
+        app.MapPost("/api/conversations/{conversationId}/owner", TransferOwnerAsync)
+            .WithName("TransferConversationOwner")
+            .RequireAuthorization()
+            .Produces<Conversation>();
+
         // F-15：会话共享图片/文件汇总（只读分页；type=image|file、beforeSeq、limit）。
         app.MapGet("/api/conversations/{conversationId}/files", GetSharedFilesAsync)
             .WithName("ListConversationFiles")
@@ -218,6 +224,36 @@ public static class ConversationsEndpoints
     }
 
     /// <summary>
+    /// 转让群主（F-24）：仅群主可操作，body 为目标成员 userId；成功后角色互换并写 owner.transferred 系统消息。
+    /// conv.updated 按每个成员的视角分别构建后逐连接推送（保留各自 pinned/muted/lastReadSeq）。
+    /// </summary>
+    private static async Task<IResult> TransferOwnerAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        TransferOwnerRequest request,
+        ConversationService conversations,
+        ConversationRealtimeNotifier notifier,
+        CancellationToken cancellationToken)
+    {
+        var currentUserId = GetUserId(principal);
+        var result = await conversations.TransferOwnerAsync(
+            currentUserId,
+            conversationId,
+            request.UserId,
+            cancellationToken);
+
+        // 有变更才推送：message.new（系统消息）先于 conv.updated。
+        notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
+        var perRecipient = await conversations.BuildPerRecipientAsync(
+            result.Conversation,
+            result.MemberUserIds,
+            cancellationToken);
+        notifier.PushUpdatedPerRecipient(perRecipient);
+
+        return Results.Json(perRecipient[currentUserId]);
+    }
+
+    /// <summary>
     /// 会话共享图片/文件汇总（F-15）：type=image|file 必填、beforeSeq 排他游标、limit 1~100 默认 50；
     /// 只统计 messages.file_id 非空的 image/file 消息，按文件去重取最新引用 seq 倒序分页。
     /// </summary>
@@ -269,4 +305,7 @@ public static class ConversationsEndpoints
 
     /// <summary>群资料更新请求（F-14 / F-23）：title/announcement/avatarFileId 至少一个非 null；announcement/avatarFileId 传空串表示清空。</summary>
     public sealed record GroupProfileRequest(string? Title = null, string? Announcement = null, string? AvatarFileId = null);
+
+    /// <summary>群主转让请求（F-24）：目标成员用户 ID。</summary>
+    public sealed record TransferOwnerRequest(string? UserId);
 }

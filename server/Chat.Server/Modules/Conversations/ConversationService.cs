@@ -28,6 +28,15 @@ public sealed record GroupProfileUpdateResult(
     IReadOnlyList<string> MemberUserIds);
 
 /// <summary>
+/// 群主转让结果（F-24）：最新会话实体（供按收件人视角构建 conv.updated）、全部成员用户 ID、
+/// 写入的 owner.transferred 系统消息。协议见 protocol/protocol.md §4.3。
+/// </summary>
+public sealed record ConversationOwnerTransferResult(
+    ConversationEntity Conversation,
+    IReadOnlyList<string> MemberUserIds,
+    Message SystemMessage);
+
+/// <summary>
 /// 会话业务（M1-07 单聊最小集 + M3-04 群聊成员管理）：创建单聊（direct_key 去重）/群聊、
 /// 当前用户会话列表、单会话读取（成员校验）、群成员邀请/退出/移除。
 /// 输出 DTO 为 protocol/protocol.md §4.5 的 Conversation 对象，REST 与 WS conv.list 共用。
@@ -506,6 +515,98 @@ public sealed class ConversationService
             .Select(member => member.UserId)
             .ToList();
         return new GroupMutationResult(updated, remainingMemberIds, systemMessage, RemovedUserId: normalizedTargetId);
+    }
+
+    /// <summary>
+    /// 转让群主（F-24）：仅当前群主可把群主身份交给本群另一名成员。
+    /// 成员角色互换与 owner.transferred 系统消息在同一事务内提交；返回最新会话实体与全部成员，
+    /// 调用方按每个成员视角构建后逐连接推送 conv.updated（保留各自 pinned/muted/lastReadSeq）。
+    /// </summary>
+    public async Task<ConversationOwnerTransferResult> TransferOwnerAsync(
+        string currentUserId,
+        string conversationId,
+        string? newOwnerUserId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedNewOwnerId = (newOwnerUserId ?? string.Empty).Trim();
+        if (normalizedNewOwnerId.Length == 0)
+        {
+            throw ApiException.ValidationFailed("userId 不能为空");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (conversation.Type != ConversationType.Group)
+        {
+            throw ApiException.ValidationFailed("仅群聊支持转让群主");
+        }
+
+        var members = await _db.ConversationMembers
+            .Where(member => member.ConversationId == conversationId)
+            .ToListAsync(cancellationToken);
+
+        var currentMembership = members.FirstOrDefault(member => string.Equals(member.UserId, currentUserId, StringComparison.Ordinal));
+        if (currentMembership is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        if (currentMembership.Role != MemberRole.Owner)
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "仅群主可转让群主", StatusCodes.Status403Forbidden);
+        }
+
+        if (string.Equals(normalizedNewOwnerId, currentUserId, StringComparison.Ordinal))
+        {
+            throw ApiException.ValidationFailed("不能转让给自己");
+        }
+
+        var targetMembership = members.FirstOrDefault(member => string.Equals(member.UserId, normalizedNewOwnerId, StringComparison.Ordinal));
+        if (targetMembership is null)
+        {
+            throw ApiException.ValidationFailed("目标用户不在群聊中");
+        }
+
+        var operatorUser = await _db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == currentUserId, cancellationToken);
+        if (operatorUser is null)
+        {
+            throw ApiException.Unauthorized("登录状态已失效，请重新登录");
+        }
+
+        var targetUser = await _db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == normalizedNewOwnerId, cancellationToken);
+        var targetName = targetUser?.DisplayName ?? "该成员";
+
+        // 先用 EF 更新两条成员行，再在事务内分配 seq + 写系统消息，保证角色互换与系统消息原子提交。
+        currentMembership.Role = MemberRole.Member;
+        targetMembership.Role = MemberRole.Owner;
+
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var systemContent = new SystemContent(
+            "owner.transferred",
+            currentUserId,
+            new[] { normalizedNewOwnerId },
+            $"{operatorUser.DisplayName} 将群主转让给 {targetName}");
+        var systemMessage = await _systemMessages.AppendAsync(conversation, currentUserId, systemContent, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "群主转让：会话 {ConversationId}，原群主 {FromUserId}，新群主 {ToUserId}",
+            conversationId,
+            currentUserId,
+            normalizedNewOwnerId);
+
+        var memberUserIds = members.Select(member => member.UserId).ToList();
+        return new ConversationOwnerTransferResult(conversation, memberUserIds, systemMessage);
     }
 
     /// <summary>读取单个会话：不存在 NOT_FOUND，非成员 NOT_MEMBER。</summary>
