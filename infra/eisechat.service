@@ -16,9 +16,9 @@ RestartSec=5
 KillSignal=SIGINT
 TimeoutStopSec=20
 
-# 配置：生产环境；只监听本机 8080，由 Caddy 反代做 HTTPS（AGENTS §6 公网入口）。
+# 配置：生产环境；只监听本机 6580，由 Caddy 反代做 HTTPS（AGENTS §6 公网入口）。
 Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=ASPNETCORE_URLS=http://127.0.0.1:8080
+Environment=ASPNETCORE_URLS=http://127.0.0.1:6580
 Environment=DOTNET_NOLOGO=1
 Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
 # 数据统一放 /var/lib/eisechat（SQLite、messages/ 文件、downloads/ 安装包）。

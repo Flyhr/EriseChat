@@ -807,7 +807,7 @@ async function saveProfile(): Promise<void> {
                   v-model="serverUrlInput"
                   class="settings-input"
                   type="url"
-                  placeholder="https://chat.example.com 或 http://127.0.0.1:8080"
+                  placeholder="https://chat.example.com 或 http://127.0.0.1:6580"
                   aria-label="服务器地址"
                 />
                 <button

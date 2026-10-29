@@ -30,8 +30,8 @@ describe('normalizeServerUrl', () => {
   })
 
   it('保留显式端口（本机开发地址）', () => {
-    expect(normalizeServerUrl('http://127.0.0.1:8080')).toBe('http://127.0.0.1:8080')
-    expect(normalizeServerUrl('http://127.0.0.1:8080/')).toBe('http://127.0.0.1:8080')
+    expect(normalizeServerUrl('http://127.0.0.1:6580')).toBe('http://127.0.0.1:6580')
+    expect(normalizeServerUrl('http://127.0.0.1:6580/')).toBe('http://127.0.0.1:6580')
   })
 
   it('协议与主机名归一为小写', () => {
@@ -98,9 +98,9 @@ describe('resolveApiBase / resolveWsUrl', () => {
   })
 
   it('配置 http 地址后 WS 走 ws://<host>/ws（保留端口）', () => {
-    setServerUrl('http://127.0.0.1:8080')
-    expect(resolveApiBase()).toBe('http://127.0.0.1:8080/api')
-    expect(resolveWsUrl()).toBe('ws://127.0.0.1:8080/ws')
+    setServerUrl('http://127.0.0.1:6580')
+    expect(resolveApiBase()).toBe('http://127.0.0.1:6580/api')
+    expect(resolveWsUrl()).toBe('ws://127.0.0.1:6580/ws')
   })
 
   it('桌面壳注入地址时作为初始值（只读来源，Web 版无此对象）', () => {

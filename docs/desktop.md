@@ -23,7 +23,7 @@
    - 若出现 SmartScreen「Windows 已保护你的电脑」：点「更多信息 → 仍要运行」。这是**未购买代码签名证书**的正常提示（AGENTS §2.2 不产生授权费用），不是安装包损坏。
    - 向导默认「当前用户」安装，无需管理员权限；可改安装目录；自动创建桌面与开始菜单快捷方式。
 2. 安装完成启动 EiseChat；首次打开进入登录页，点「服务器地址」填写服务端地址后保存：
-   - 本机联调：`http://127.0.0.1:8080`（服务端 `dotnet run` 默认监听）
+   - 本机联调：`http://127.0.0.1:6580`（服务端 `dotnet run` 默认监听）
    - 云端部署：`https://<你的域名>`（Caddy 自动 HTTPS，见 `docs/deploy.md`）
 3. 地址保存后客户端按该地址连接（REST + WebSocket）；切换服务器地址后会自动断开并按新地址重连，需要重新登录。
 4. 新账号切「注册」→ 发送验证码（开发环境固定 `123456`，生产走真实邮件）→ 填昵称/验证码注册并登录。
@@ -57,7 +57,7 @@
 前置：Node.js **20+**（本机 v24.18.0）；服务端与 Web 依赖已安装。
 
 ```bash
-# 终端 1：服务端（127.0.0.1:8080）
+# 终端 1：服务端（127.0.0.1:6580）
 dotnet run --project server/Chat.Server
 
 # 终端 2：Web 开发服务器（127.0.0.1:5173）
@@ -74,7 +74,7 @@ npm run dev          # = npm run build && electron .
 - 开发态 `main.ts` 加载 `http://127.0.0.1:5173`（可用环境变量 `EISECHAT_DEV_SERVER_URL` 覆盖）；请确保终端 2 的 Vite 已启动，否则窗口空白。
 - 改 `apps/web` 页面/逻辑：Vite 热更新，窗口内即时生效；改 `apps/desktop/electron/*.ts`：需重跑 `npm run dev`（或 `npm run build` 后重启 Electron）。
 - `npm run typecheck` 只做 Electron 侧 tsc 类型检查；前端类型检查在 `apps/web` 的 `npm run typecheck`。
-- 开发态若出现「登录 Failed to fetch」：确认 8080 已启动；服务端已开 CORS 允许桌面端 `file://` 页面跨域调用（M4-08）。
+- 开发态若出现「登录 Failed to fetch」：确认 6580 已启动；服务端已开 CORS 允许桌面端 `file://` 页面跨域调用（M4-08）。
 
 ## 5. 打包 Windows 安装包
 
@@ -136,7 +136,7 @@ Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 | 现象 | 排查 |
 |---|---|
 | 打开窗口白屏 | 开发态：终端 2 的 Vite（5173）是否启动；打包态：是否先构建了 `apps/web`（安装包内 `resources/web-dist/index.html` 是否存在）；F12 看静态资源 404 |
-| 登录提示「Failed to fetch」/无法连接 | 服务端 8080 是否启动（`curl http://127.0.0.1:8080/api/health`）；桌面设置里的服务器地址是否正确；服务端是否已开 CORS（桌面端 `file://` 跨域） |
+| 登录提示「Failed to fetch」/无法连接 | 服务端 6580 是否启动（`curl http://127.0.0.1:6580/api/health`）；桌面设置里的服务器地址是否正确；服务端是否已开 CORS（桌面端 `file://` 跨域） |
 | 收不到系统通知 | 应用内「设置 → 通知」开关是否开启；Windows 通知/专注助手设置；**应用必须运行**（关闭后无推送）；仅窗口不可见时弹 |
 | 关闭后程序「不见了」 | 关闭到托盘是默认行为，看任务栏右下角托盘图标；要退出用托盘菜单 |
 | 托盘图标空白 | 安装包缺少 `resources/icon.ico`（打包时 `build/icon.ico` 是否存在）；重新打包 |

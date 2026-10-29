@@ -47,17 +47,17 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
-log "等待服务健康检查（127.0.0.1:8080/api/health）"
+log "等待服务健康检查（127.0.0.1:6580/api/health）"
 healthy=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 http://127.0.0.1:6580/api/health >/dev/null 2>&1; then
     healthy=1
     break
   fi
   sleep 1
 done
 if [ "$healthy" = "1" ]; then
-  log "服务已启动：$(curl -fsS http://127.0.0.1:8080/api/health)"
+  log "服务已启动：$(curl -fsS http://127.0.0.1:6580/api/health)"
 else
   die "健康检查失败，请查看：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
 fi
@@ -71,7 +71,7 @@ if command -v caddy >/dev/null 2>&1; then
     log "已写入 /etc/caddy/Caddyfile；请先把 chat.example.com 改成真实域名，再执行 systemctl reload caddy"
   fi
 else
-  log "未检测到 Caddy（可跳过，Web 端可通过 http://<公网IP>:8080 临时访问，不推荐长期使用）"
+  log "未检测到 Caddy（可跳过，Web 端可通过 http://<公网IP>:6580 临时访问，不推荐长期使用）"
 fi
 
 cat <<EOF
@@ -82,7 +82,7 @@ cat <<EOF
   数据目录：$DATA_DIR（chat.db / files / downloads）
   服务管理：systemctl status|restart|stop $SERVICE_NAME
   查看日志：journalctl -u $SERVICE_NAME -n 100 --no-pager
-  健康检查：curl http://127.0.0.1:8080/api/health
+  健康检查：curl http://127.0.0.1:6580/api/health
 
 注册账号：打开 https://<你的域名>/ 在登录页切换到「注册」用邮箱验证码注册（首个账号角色为 user）。
 管理员提权（v1 无后台提权界面，需手工执行一次）：

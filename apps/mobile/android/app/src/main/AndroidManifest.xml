@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- M5-01：内网联调允许明文 HTTP（登录页填 http://<内网IP>:8080）；生产换 https 域名后可收紧。 -->
+    <!-- M5-01：内网联调允许明文 HTTP（登录页填 http://<内网IP>:6580）；生产换 https 域名后可收紧。 -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

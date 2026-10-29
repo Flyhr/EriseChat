@@ -1,7 +1,7 @@
 # EiseChat 服务端部署说明（Docker Compose 一键部署）
 
 > 适用版本：1.1.0+。目标环境：**Ubuntu 22.04 / 24.04 / 26.04**（云服务器 2C4G 轻量即可），宿主机只需 **Docker + Docker Compose**。
-> 服务端为**单进程**（ASP.NET Core，Kestrel 在容器内监听 8080，宿主机只绑定 `127.0.0.1:8080`）；
+> 服务端为**单进程**（ASP.NET Core，Kestrel 在容器内监听 6580，宿主机只绑定 `127.0.0.1:6580`）；
 > 数据落容器挂载卷（SQLite + 文件目录），镜像内置 Web 前端与 `GET /download` 下载页。
 > 部署方式见 AGENTS.md §2.4：**Docker Compose 单容器一键部署**（不引入多容器编排）。
 
@@ -13,7 +13,7 @@
 客户端（Web / Windows exe / Android APK）
    │  HTTPS（Tailscale Serve 内测）或 宿主 Caddy（公网域名）
    ▼
-宿主机 127.0.0.1:8080  ──>  docker 容器 eisechat-server（ASP.NET Core 单进程）
+宿主机 127.0.0.1:6580  ──>  docker 容器 eisechat-server（ASP.NET Core 单进程）
                               ├─ /data/chat.db      SQLite（WAL，容器外 /opt/eisechat/data/chat.db）
                               ├─ /data/files/       聊天图片/文件
                               └─ /data/downloads/   安装包（GET /download 分发）
@@ -23,9 +23,24 @@
   └── .env                  配置与密钥（JWT、SMTP，权限 600，不入库）
 ```
 
-- 公网只开放 22（SSH，建议限来源 IP）与 HTTPS 端口；**8080 不对公网开放**。
+- 公网只开放 22（SSH，建议限来源 IP）与 HTTPS 端口；**6580 不对公网开放**。
 - 容器镜像内包含：Web 前端（Vite 构建）、服务端、`wwwroot`、`/download` 页。
 - 备份、恢复、邮件通道等运维操作见 §5~§7。
+
+### 1.1 端口分配（项目约定 6500–6600）
+
+| 用途 | 端口 | 绑定/说明 |
+|---|---|---|
+| 容器内应用（Kestrel） | **6580** | 容器网络内监听 `0.0.0.0:6580`，不直接暴露 |
+| 宿主回环映射（唯一服务端口） | `127.0.0.1:6580` | 由 Tailscale Serve / Caddy 反代；可用 `EISECHAT_PORT` 覆盖 |
+| HTTPS 入口 | 443 | Tailscale Serve（内测）或宿主 Caddy（公网） |
+| SSH | 22 | 服务器管理，建议限制来源 IP |
+| Web 开发服务器 | 5173 | Vite，仅开发机 |
+| Vite 预览 | 4173 | `vite preview`，仅开发机 |
+
+- 约定：本项目自有服务端口统一放在 **6500–6600** 区间，默认 **6580**；同机多实例依次用 6581/6582…（改 `EISECHAT_PORT`）。
+- 容器内部与宿主映射用**同一个端口号**，避免“宿主在区间内、容器里又是另一个端口”的混淆。
+- 6500–6600 之外只使用标准端口（22/80/443）与开发工具端口（5173/4173）。
 
 ---
 
@@ -88,7 +103,7 @@ sudo bash /opt/eisechat/src/infra/docker/deploy.sh
 1. 创建 `/opt/eisechat/{data,data/files,data/downloads}` 并按容器内非 root 用户（UID 1654）授权；
 2. 首次部署自动生成 `/opt/eisechat/.env`（随机 JWT 密钥，权限 600；SMTP 项待填）；
 3. `docker compose up -d --build` 构建镜像（Node 构建 Web → .NET 发布 → ASP.NET Core 运行时镜像）并启动；
-4. 等待 `http://127.0.0.1:8080/api/health` 通过后打印容器状态。
+4. 等待 `http://127.0.0.1:6580/api/health` 通过后打印容器状态。
 
 首次构建需拉取 `node:24-alpine`、`dotnet/sdk:10.0`、`dotnet/aspnet:10.0`，耗时取决于网络。
 
@@ -103,11 +118,11 @@ sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh              # �
 ### 3.3 验证
 
 ```bash
-curl -s http://127.0.0.1:8080/api/health
+curl -s http://127.0.0.1:6580/api/health
 # {"status":"ok","serverTime":...,"version":"1.1.0","protocolVersion":1,"db":"ok"}
 
 docker compose -f /opt/eisechat/src/docker-compose.yml ps      # STATUS 应为 healthy
-sudo ss -ltnp | grep 8080                                      # 必须只有 127.0.0.1:8080
+sudo ss -ltnp | grep 6580                                      # 必须只有 127.0.0.1:6580
 sudo docker logs --tail=30 eisechat-server
 ```
 
@@ -119,15 +134,15 @@ sudo docker logs --tail=30 eisechat-server
 # 一次性：允许当前普通用户管理 serve（之后 tailscale serve 不用 sudo）
 sudo tailscale set --operator="$USER"
 
-# 把 tailnet 的 https://<host>.<tailnet>.ts.net/ 反代到本机 8080（后台常驻）
-tailscale serve --bg --https=443 http://127.0.0.1:8080
+# 把 tailnet 的 https://<host>.<tailnet>.ts.net/ 反代到本机 6580（后台常驻）
+tailscale serve --bg --https=443 http://127.0.0.1:6580
 tailscale serve status
 ```
 
 - 访问地址形如 `https://chat-server.tail8c07f5.ts.net/`（以 `tailscale status --json` 的 `Self.DNSName` 为准）。
 - 客户端（Windows exe / Android APK）需加入**同一个 tailnet** 才能访问。
 - 首次使用需在 Tailscale 管理台开启 **HTTPS Certificates**，否则无法签发证书。
-- 之后若换公网域名，可在宿主机装 Caddy 反代 `127.0.0.1:8080`（见 §3.6）。
+- 之后若换公网域名，可在宿主机装 Caddy 反代 `127.0.0.1:6580`（见 §3.6）。
 
 ### 3.5 管理员提权（v1 无后台提权界面）
 
@@ -143,7 +158,7 @@ sudo sqlite3 /opt/eisechat/data/chat.db "UPDATE users SET role='admin' WHERE ema
 # 安装 Caddy 后，/etc/caddy/Caddyfile 示例（域名指向本机公网 IP）
 chat.example.com {
     encode gzip
-    reverse_proxy 127.0.0.1:8080
+    reverse_proxy 127.0.0.1:6580
 }
 sudo systemctl reload caddy
 ```
@@ -201,7 +216,7 @@ Email__FromName=EiseChat
 
 ```bash
 sudo docker compose -f /opt/eisechat/src/docker-compose.yml restart
-curl -s -X POST http://127.0.0.1:8080/api/auth/email/send \
+curl -s -X POST http://127.0.0.1:6580/api/auth/email/send \
   -H 'Content-Type: application/json' -d '{"email":"你的邮箱@qq.com","purpose":"register"}'
 # 返回 200 且邮箱收到 6 位验证码；失败时看 docker logs --tail=100 eisechat-server
 ```
@@ -249,7 +264,7 @@ sudo chown -R 1654:1654 /opt/eisechat/data
 
 # 3) 启动并验证
 sudo docker compose -f /opt/eisechat/src/docker-compose.yml start
-curl -s http://127.0.0.1:8080/api/health
+curl -s http://127.0.0.1:6580/api/health
 ```
 
 > 恢复前先确认目标归档、先备份当前数据；恢复后抽查登录、历史消息、附件下载。
@@ -259,6 +274,8 @@ curl -s http://127.0.0.1:8080/api/health
 ---
 
 ## 7. 升级与回滚
+
+> 日常“改了代码 → 重新构建 → 上线”的完整步骤（含自检、打包、上传、回滚）见 **[docs/update-deploy.md](update-deploy.md)**。
 
 ### 7.1 升级
 
@@ -311,12 +328,12 @@ docker compose -f /opt/eisechat/src/docker-compose.yml ps
 sudo docker logs --tail=100 eisechat-server
 ```
 
-常见原因：`/opt/eisechat/data` 权限不是 UID 1654（重新执行 deploy.sh 会自动 chown）；端口 8080 被占用；
+常见原因：`/opt/eisechat/data` 权限不是 UID 1654（重新执行 deploy.sh 会自动 chown）；端口 6580 被占用；
 `.env` 缺失或权限不对（应 600 且属主 root）。
 
 ### 10.2 只能本机访问 / 外网打不开
 
-- 确认 `ss -ltnp | grep 8080` 是 `127.0.0.1:8080`（正常，公网入口应经 Tailscale Serve / Caddy）；
+- 确认 `ss -ltnp | grep 6580` 是 `127.0.0.1:6580`（正常，公网入口应经 Tailscale Serve / Caddy）；
 - Tailscale：`tailscale serve status` 是否 RUNNING、客户端是否在同一 tailnet、管理台 HTTPS 证书是否开启；
 - Caddy：`systemctl status caddy`、`journalctl -u caddy -n 100`。
 
@@ -344,7 +361,7 @@ SQLite 已启用 WAL；备份用 `VACUUM INTO`。确认没有第二个进程直�
 ## 11. 上线检查清单
 
 - [ ] `docker compose ps` 显示 `healthy`；`/api/health` 返回 `version` 与 `db: ok`。
-- [ ] `ss -ltnp` 确认 8080 仅绑定 `127.0.0.1`。
+- [ ] `ss -ltnp` 确认 6580 仅绑定 `127.0.0.1`。
 - [ ] `/opt/eisechat/.env` 权限 600、无软链接；JWT 密钥为随机值；SMTP 密码只在 .env。
 - [ ] HTTPS 入口可用（Tailscale Serve 或 Caddy），Web 端可完成注册/登录/收发消息。
 - [ ] SMTP 已配置并实测收到验证码（§5）。

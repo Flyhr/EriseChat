@@ -48,7 +48,7 @@ log "启动服务并等待健康检查"
 systemctl start "$SERVICE_NAME"
 healthy=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 http://127.0.0.1:6580/api/health >/dev/null 2>&1; then
     healthy=1
     break
   fi
@@ -56,6 +56,6 @@ for _ in $(seq 1 30); do
 done
 [ "$healthy" = "1" ] || die "恢复后健康检查失败，请查看 journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
 
-log "恢复完成：$(curl -fsS http://127.0.0.1:8080/api/health)"
+log "恢复完成：$(curl -fsS http://127.0.0.1:6580/api/health)"
 log "原有数据保留在 $safety（确认无误后可手工删除）"
 log "建议立即用两个账号抽查最近消息与文件下载，并记录本次演练（docs/deploy.md §7）。"

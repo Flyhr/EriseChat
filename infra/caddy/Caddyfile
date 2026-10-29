@@ -3,7 +3,7 @@
 #   sudo cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
 #   sudo caddy validate --config /etc/caddy/Caddyfile
 #   sudo systemctl reload caddy
-# 服务端只监听 127.0.0.1:8080（见 infra/eisechat.service），不直接暴露公网。
+# 服务端只监听 127.0.0.1:6580（见 infra/eisechat.service），不直接暴露公网。
 
 {
 	# 证书到期提醒邮箱（替换为管理员邮箱）
@@ -12,7 +12,7 @@
 
 chat.example.com {
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:8080
+	reverse_proxy 127.0.0.1:6580
 
 	# 访问日志（滚动保留）
 	log {

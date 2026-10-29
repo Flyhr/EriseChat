@@ -5,7 +5,7 @@
 import { readStorage, removeStorage, writeStorage } from './safeStorage'
 
 export interface AppConfig {
-  /** REST 基础路径（默认 /api，开发期由 vite 代理到 127.0.0.1:8080） */
+  /** REST 基础路径（默认 /api，开发期由 vite 代理到 127.0.0.1:6580） */
   apiBase: string
   /** WebSocket 地址（默认按当前页面 origin 推导） */
   wsUrl: string

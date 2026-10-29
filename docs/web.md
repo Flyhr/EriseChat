@@ -8,7 +8,7 @@
 
 | 形态 | 入口 / 产物 | 说明 |
 |---|---|---|
-| 开发服务器 | `http://127.0.0.1:5173` | `npm run dev`，带 `/api`、`/ws` 到本机服务端 8080 的代理 |
+| 开发服务器 | `http://127.0.0.1:5173` | `npm run dev`，带 `/api`、`/ws` 到本机服务端 6580 的代理 |
 | 生产构建 | `apps/web/dist/`（不入库） | `npm run build`，相对基路径 `./`，可直接被服务端同域托管 |
 | 生产访问 | `https://<域名>/` | 构建产物复制到 `server/Chat.Server/wwwroot/` 后由服务端静态托管 |
 | 安装包下载页 | `GET /download` | 服务端页面（exe/apk 放 `data/downloads/`） |
@@ -19,12 +19,12 @@
 
 ## 2. 快速开始（本地开发）
 
-前提：本机服务端已启动并监听 `127.0.0.1:8080`（Kestrel）。
+前提：本机服务端已启动并监听 `127.0.0.1:6580`（Kestrel）。
 
 ```bash
 # 终端 1：服务端（仓库根）
 dotnet run --project server/Chat.Server
-curl http://127.0.0.1:8080/api/health   # {"status":"ok",...,"db":"ok"}
+curl http://127.0.0.1:6580/api/health   # {"status":"ok",...,"db":"ok"}
 
 # 终端 2：Web 开发服务器
 cd apps/web
@@ -32,7 +32,7 @@ npm install        # 首次
 npm run dev        # http://127.0.0.1:5173
 ```
 
-- 开发期 `vite.config.ts` 把 `/api` 代理到 `http://127.0.0.1:8080`、`/ws` 代理到 `ws://127.0.0.1:8080`，所以**开发调试请用 5173**；直接打开 8080 没有前端资源（除非已把 dist 复制到 wwwroot）。
+- 开发期 `vite.config.ts` 把 `/api` 代理到 `http://127.0.0.1:6580`、`/ws` 代理到 `ws://127.0.0.1:6580`，所以**开发调试请用 5173**；直接打开 6580 没有前端资源（除非已把 dist 复制到 wwwroot）。
 - 服务端 `Development` 环境使用 mock 邮件：验证码固定 `123456`，同时打印到服务端控制台（`[email][mock] ... code=123456`），不写入日志文件；登录页与「发送验证码」响应也带 `devCode` 提示。
 - 两浏览器验收：一个普通窗口 + 一个无痕窗口，用两个不同邮箱账号注册/登录（两者共享同一浏览器存储会互相顶号）。
 
@@ -101,7 +101,7 @@ npm run test:unit   # vitest run（271 个纯逻辑用例，约 2 秒，不依�
 
 - `infra/publish-linux.sh` **目前不会自动构建/复制前端**：必须先做第 1、2 步；`wwwroot/` 为空时服务端只提供 `/api`、`/ws`、`/download`，访问 `/` 会 404。
 - **SPA 路由限制**：Web 使用 history 路由，但服务端当前没有 SPA fallback（未配置 `MapFallbackToFile`），部署后直接刷新 `/chat/:id` 之类深链接会 404；从根路径进入、页面内跳转正常。后续可在服务端加 fallback（改服务端前先按 AGENTS §2.7 更新协议/计划文档）。
-- 服务端只监听 `127.0.0.1:8080`，公网入口由 Caddy 反代并提供 HTTPS（`docs/deploy.md` §1/§3.3）；8080 不对公网开放。
+- 服务端只监听 `127.0.0.1:6580`，公网入口由 Caddy 反代并提供 HTTPS（`docs/deploy.md` §1/§3.3）；6580 不对公网开放。
 - 下载页安装包来自服务器 `data/downloads/`（`App:DownloadDirectory`），页面自动取最新的 `EiseChat-Setup-*.exe` / `EiseChat-*.apk`。
 
 ## 6. 运行时能力与限制（当前版本）
@@ -148,8 +148,8 @@ npm run test:unit   # vitest run（271 个纯逻辑用例，约 2 秒，不依�
 | 现象 | 排查 |
 |---|---|
 | `npm run dev` 打不开 5173 | `npm install` 是否完成；端口被占用（改端口或结束进程）；`vite.config.ts` 固定 host `127.0.0.1`，不要用 `localhost` 以外的地址访问 |
-| 页面能开但接口全 404 / Network 报错 | 服务端 8080 是否启动；代理目标是否被改；检查 `curl http://127.0.0.1:8080/api/health` |
-| 登录提示「无法连接服务器」 | 服务端未启动；登录页服务器地址填错（本机应为 `http://127.0.0.1:8080`；局域网/手机不能用 `127.0.0.1`）；端口被改 |
+| 页面能开但接口全 404 / Network 报错 | 服务端 6580 是否启动；代理目标是否被改；检查 `curl http://127.0.0.1:6580/api/health` |
+| 登录提示「无法连接服务器」 | 服务端未启动；登录页服务器地址填错（本机应为 `http://127.0.0.1:6580`；局域网/手机不能用 `127.0.0.1`）；端口被改 |
 | 收不到验证码 | 开发环境固定码 `123456`（不真的发邮件）；服务端控制台看 `[email][mock]`；Production 未配置 SMTP 会返回 500（`docs/deploy.md` §5） |
 | 生产环境白屏 / 404 | `dist` 是否已复制到 `server/Chat.Server/wwwroot/`；是否从根路径进入；F12 看静态资源 404 还是 JS 报错 |
 | 刷新深链接 404 | 已知限制（服务端无 SPA fallback）：从根路径进入；修复需服务端加 fallback |

@@ -19,6 +19,7 @@ HOME_DIR="${EISECHAT_HOME:-/opt/eisechat}"
 DATA_DIR="$HOME_DIR/data"
 ENV_FILE="$HOME_DIR/.env"
 VERSION="${APP_VERSION:-1.1.0}"
+PORT="${EISECHAT_PORT:-6580}"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] 错误：$*" >&2; exit 1; }
@@ -61,6 +62,7 @@ else
 fi
 
 export EISECHAT_DATA_DIR="$DATA_DIR"
+export EISECHAT_PORT="$PORT"
 export EISECHAT_ENV_FILE="$ENV_FILE"
 export APP_VERSION="$VERSION"
 export DOTNET_REGISTRY="${DOTNET_REGISTRY:-mcr.microsoft.com}"
@@ -75,17 +77,17 @@ else
   docker compose up -d --build
 fi
 
-log "等待健康检查 http://127.0.0.1:8080/api/health"
+log "等待健康检查 http://127.0.0.1:${PORT}/api/health"
 healthy=0
 for _ in $(seq 1 90); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
     healthy=1
     break
   fi
   sleep 2
 done
 if [ "$healthy" = "1" ]; then
-  log "服务已就绪：$(curl -fsS http://127.0.0.1:8080/api/health)"
+  log "服务已就绪：$(curl -fsS "http://127.0.0.1:${PORT}/api/health")"
 else
   log "健康检查失败，最近日志："
   docker compose logs --tail=80 eisechat || true
@@ -97,8 +99,9 @@ cat <<EOF
 
 [deploy] 完成。
   部署目录：$HOME_DIR（源码 src/，数据 data/，配置 .env）
-  容器：eisechat-server，仅绑定 127.0.0.1:8080
+  端口：仅绑定 127.0.0.1:${PORT}（可用 EISECHAT_PORT 覆盖）
   管理：docker compose ps | logs -f eisechat | restart | down
+  更新：改了代码后按 docs/update-deploy.md 重新构建部署
   下一步：配置 SMTP（编辑 $ENV_FILE 后 docker compose restart）；
           HTTPS 入口用 Tailscale Serve（docs/deploy.md §3.4）；管理员提权见同文档。
 EOF

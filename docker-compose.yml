@@ -21,13 +21,15 @@ services:
     container_name: eisechat-server
     restart: unless-stopped
     ports:
-      # 只绑定回环：公网入口由 Tailscale Serve / Caddy 反代本机 8080
-      - "127.0.0.1:8080:8080"
+      # 只绑定回环：公网入口由 Tailscale Serve / Caddy 反代本机 6580
+      - "127.0.0.1:${EISECHAT_PORT:-6580}:6580"
     env_file:
       - ${EISECHAT_ENV_FILE:-.env}
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ASPNETCORE_URLS: http://0.0.0.0:6580
+      # 显式覆盖 appsettings 的 Kestrel 回环绑定，容器内必须监听 0.0.0.0
+      Kestrel__Endpoints__Http__Url: http://0.0.0.0:6580
       App__DataDirectory: /data
       App__FileDirectory: /data/files
       App__DownloadDirectory: /data/downloads
@@ -35,7 +37,7 @@ services:
     volumes:
       - ${EISECHAT_DATA_DIR:-./data}:/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:6580/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3

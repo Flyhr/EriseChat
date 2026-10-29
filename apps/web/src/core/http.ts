@@ -73,7 +73,7 @@ function assertReachableUrl(url: string): void {
   if (/^https?:\/\//i.test(url)) return
   throw new ApiError(0, {
     code: 'SERVER_URL_REQUIRED',
-    message: '请先填写服务器地址（如 http://127.0.0.1:8080），再登录或发送验证码',
+    message: '请先填写服务器地址（如 http://127.0.0.1:6580），再登录或发送验证码',
   })
 }
 

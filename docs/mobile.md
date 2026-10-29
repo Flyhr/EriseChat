@@ -23,7 +23,7 @@
 1. 手机允许浏览器/文件管理器「安装未知应用」（设置 → 安全 → 安装未知应用）。
 2. 把 `EiseChat-1.1.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
 3. 打开 EiseChat，在登录页点「服务器地址」填写服务端地址：
-   - 手机与开发机同一局域网：`http://<开发机局域网 IP>:8080`（不能用 `127.0.0.1`，那指向手机自身）
+   - 手机与开发机同一局域网：`http://<开发机局域网 IP>:6580`（不能用 `127.0.0.1`，那指向手机自身）
    - 互联网部署：`https://<域名>`（Caddy 自动 HTTPS，见 `docs/deploy.md`）
 4. 新账号先切「注册」→「发送验证码」（开发环境固定测试码 `123456`，生产环境走真实邮件）→ 填昵称/验证码注册并登录。
 5. 登录后可搜索用户发起单聊/建群、收发文本、图片与文件消息；断线重连后自动补拉消息。
@@ -147,10 +147,10 @@ D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downl
 
 ```bat
 cd /d D:\Code\EriseChat\server\Chat.Server
-dotnet run --urls http://0.0.0.0:8080
+dotnet run --urls http://0.0.0.0:6580
 ```
 
-开发模式默认只监听 `127.0.0.1`，手机访问不到，所以启动时必须加 `--urls http://0.0.0.0:8080`。
+开发模式默认只监听 `127.0.0.1`，手机访问不到，所以启动时必须加 `--urls http://0.0.0.0:6580`。
 
 另开一个终端查看本机 IP：
 
@@ -160,8 +160,8 @@ ipconfig
 
 记下「IPv4 地址」一行，例如 `192.168.1.23`。
 
-- Windows 防火墙需放行 8080（首次运行会弹窗，选「允许」；或手动在「Windows Defender 防火墙 → 允许应用通过防火墙」放行 dotnet）。
-- 手机浏览器打开 `http://<电脑IPv4>:8080/download` → 下载 APK → 安装。
+- Windows 防火墙需放行 6580（首次运行会弹窗，选「允许」；或手动在「Windows Defender 防火墙 → 允许应用通过防火墙」放行 dotnet）。
+- 手机浏览器打开 `http://<电脑IPv4>:6580/download` → 下载 APK → 安装。
 - 从手机浏览器点 APK 安装通常比文件管理器多一步「仍然安装」确认。
 
 **D. 其他传输方式**：微信/QQ「文件传输助手」传 APK 后点开安装亦可；只需保证 APK 完整（对比 SHA256）。
@@ -170,28 +170,28 @@ ipconfig
 
 ### 5.6 本机联调（服务端 + 手机，USB 或局域网）
 
-1. **启动服务端**（开发模式，监听 8080，固定验证码 `123456`）：
+1. **启动服务端**（开发模式，监听 6580，固定验证码 `123456`）：
 
    ```bat
    cd /d D:\Code\EriseChat\server\Chat.Server
    dotnet run
    ```
 
-   另开一个终端确认：`curl http://127.0.0.1:8080/api/health` 返回 `{"status":"ok",...,"db":"ok"}`。
+   另开一个终端确认：`curl http://127.0.0.1:6580/api/health` 返回 `{"status":"ok",...,"db":"ok"}`。
 
-2. **USB 联调（推荐）**：执行一次端口反向映射，让手机的 `127.0.0.1:8080` 指向电脑的 8080：
+2. **USB 联调（推荐）**：执行一次端口反向映射，让手机的 `127.0.0.1:6580` 指向电脑的 6580：
 
    ```bat
-   D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
+   D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
    D:\softWare\android-sdk\platform-tools\adb.exe reverse --list
    ```
 
-   `reverse --list` 的输出里应出现 `tcp:8080 tcp:8080`。
+   `reverse --list` 的输出里应出现 `tcp:6580 tcp:6580`。
 
-   App 登录页「服务器地址」保持默认 `http://127.0.0.1:8080` 即可。
+   App 登录页「服务器地址」保持默认 `http://127.0.0.1:6580` 即可。
    **注意**：拔插 USB、重启 adb 或电脑后映射会失效，需要重新执行；手机端提示「无法连接服务器」时先查这一步。
 
-3. **局域网联调（不接 USB）**：服务端按 §5.5-C 用 `--urls http://0.0.0.0:8080` 启动、防火墙放行；App 登录页服务器地址改为 `http://<电脑IPv4>:8080`（不能填 `127.0.0.1`）。
+3. **局域网联调（不接 USB）**：服务端按 §5.5-C 用 `--urls http://0.0.0.0:6580` 启动、防火墙放行；App 登录页服务器地址改为 `http://<电脑IPv4>:6580`（不能填 `127.0.0.1`）。
 
 4. **注册/登录**：登录页切「注册」→ 输入邮箱 →「发送验证码」→ 验证码 `123456`（服务端控制台会打印 `[email][mock] ... code=123456`，不写日志文件）→ 填昵称 → 注册并登录。
 
@@ -247,15 +247,15 @@ cd /d D:\Code\EriseChat\server\Chat.Server
 dotnet run
 ```
 
-**④ 回到 cmd：USB 端口反向映射**（App 服务器地址保持 `127.0.0.1:8080`）
+**④ 回到 cmd：USB 端口反向映射**（App 服务器地址保持 `127.0.0.1:6580`）
 
 ```bat
-D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
+D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 ```
 
 **⑤ 手机打开 EiseChat → 注册/登录 → 按 §5.7 清单验收。**
 
-> 若走局域网而不接 USB：③ 改为 `dotnet run --urls http://0.0.0.0:8080`、放行防火墙 8080，④ 跳过，App 内服务器地址改填 `http://<电脑IPv4>:8080`。
+> 若走局域网而不接 USB：③ 改为 `dotnet run --urls http://0.0.0.0:6580`、放行防火墙 6580，④ 跳过，App 内服务器地址改填 `http://<电脑IPv4>:6580`。
 
 ## 6. 故障排查
 
@@ -267,8 +267,8 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:8080 tcp:8080
 | `adb devices` 为空 / `unauthorized` | 打开手机开发者选项与 USB 调试；换数据线（需支持数据传输）；手机上点「允许 USB 调试」；`adb kill-server && adb start-server` 后重试 |
 | `adb install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | 新旧 APK 签名不同（keystore 变化）→ 先 `adb uninstall com.eisechat.mobile` 再安装（服务端聊天数据不受影响） |
 | `adb install` 报 `INSTALL_FAILED_VERSION_DOWNGRADE` | 新包 `versionCode` 比已安装的小；按 `major*10000+minor*100+patch` 递增后重打包 |
-| App 登录提示「无法连接服务器」 | ① 服务端是否已启动（`curl http://127.0.0.1:8080/api/health`）；② USB 联调是否执行过 `adb reverse tcp:8080 tcp:8080`（拔插 USB 后需重做，`adb reverse --list` 确认）；③ 局域网联调时服务器是否用 `--urls http://0.0.0.0:8080` 监听且防火墙放行 8080；④ App 内服务器地址不能填 `127.0.0.1`（局域网模式要填电脑 IPv4） |
-| 手机访问 `/download` 打不开 | 开发默认只监听 `127.0.0.1:8080`；按 §5.5-C 改用 `--urls http://0.0.0.0:8080` 并放行防火墙，手机与电脑需同一 Wi-Fi |
+| App 登录提示「无法连接服务器」 | ① 服务端是否已启动（`curl http://127.0.0.1:6580/api/health`）；② USB 联调是否执行过 `adb reverse tcp:6580 tcp:6580`（拔插 USB 后需重做，`adb reverse --list` 确认）；③ 局域网联调时服务器是否用 `--urls http://0.0.0.0:6580` 监听且防火墙放行 6580；④ App 内服务器地址不能填 `127.0.0.1`（局域网模式要填电脑 IPv4） |
+| 手机访问 `/download` 打不开 | 开发默认只监听 `127.0.0.1:6580`；按 §5.5-C 改用 `--urls http://0.0.0.0:6580` 并放行防火墙，手机与电脑需同一 Wi-Fi |
 | 页面白屏 | 确认打包前 `apps/web` 已用 `base: './'` 构建（M4-07）；重新执行 `cap sync` 后打包 |
 | 安装被拦截 | 允许「安装未知应用」；确认 APK 完整（对比下载页/`sha256sum` 输出的 SHA256） |
 | 收不到新消息提醒 | v1 无系统推送，打开应用会自动补拉；后台被系统冻结属预期 |

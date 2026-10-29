@@ -28,12 +28,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out ./
-ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
+ENV ASPNETCORE_URLS=http://0.0.0.0:6580 \
+    Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580 \
     ASPNETCORE_ENVIRONMENT=Production \
     App__DataDirectory=/data \
     App__FileDirectory=/data/files \
     App__DownloadDirectory=/data/downloads
 RUN mkdir -p /data/files /data/downloads && chown -R app:app /data /app
 USER app
-EXPOSE 8080
+EXPOSE 6580
 ENTRYPOINT ["dotnet", "Chat.Server.dll"]

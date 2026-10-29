@@ -18,6 +18,7 @@
 | `protocol/protocol.md` | 帧定义唯一来源（M0 创建，先改文档再改实现） | 改协议、写 WS 代码时 |
 | `protocol/schema.sql` | 表结构唯一来源（M0 创建，与 EF 迁移同步） | 改库表、写迁移时 |
 | `docs/deploy.md` | 云服务器部署、HTTPS、升级、备份恢复（M4 产出） | 部署/排障时 |
+| `docs/update-deploy.md` | 改代码后的自行构建/部署/升级与回滚步骤（Docker 一键部署） | 发布新版本、改完代码上线时 |
 | `docs/web.md` | Web 端（`apps/web`）开发运行、构建、生产部署（dist → wwwroot）、验收与排障 | 运行/构建/部署 Web 时 |
 | `docs/desktop.md` | Windows 桌面端（`apps/desktop`）安装、托盘/通知/设置行为、开发联调、NSIS 打包 | 打包或排查桌面端时 |
 | `docs/usage.md` | 安装与使用说明（M6 交付给最终用户） | 内测发版时 |
@@ -36,7 +37,7 @@
 - **一句话**：EiseChat 是公司内部使用的**自研轻量 IM**：一台 ASP.NET Core 单进程服务端 + 一套 Vue 3 前端核心 + Windows（Electron）与 Android（Capacitor）安装包，服务 10~100 个账号、峰值 ≤100 在线。
 - **为什么自己做**：不引第三方 IM（协议自研、可控可改）、零软件授权费用、单进程易部署易备份、出 Windows 安装包和 Android APK 给同事直接装。
 - **交付物**：`EiseChat-Setup-x.y.z.exe`（Windows 安装包）、`EiseChat-x.y.z.apk`（Android 侧载包）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）。
-- **技术骨架**：Caddy 自动 HTTPS → Kestrel（`127.0.0.1:8080`）→ SQLite（WAL）+ 本地文件目录；消息走自研 JSON-over-WebSocket，登录/历史/文件走 REST；服务端是**唯一事实源**，客户端 IndexedDB 只是缓存。
+- **技术骨架**：Caddy 自动 HTTPS → Kestrel（`127.0.0.1:6580`）→ SQLite（WAL）+ 本地文件目录；消息走自研 JSON-over-WebSocket，登录/历史/文件走 REST；服务端是**唯一事实源**，客户端 IndexedDB 只是缓存。
 - **本期不做**：iPhone/iOS 代码（只出方案）、音视频、朋友圈、AI、机器人、E2EE、ICP/等保/短信/厂商推送（见 `AGENTS.md` §2.5）。
 
 ---
@@ -94,7 +95,7 @@
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI | 核心 `core/ws.ts`、`core/sync.ts`；IndexedDB 缓存 |
 | Windows 壳 | Electron + electron-builder（NSIS） | `appId=com.eisechat.desktop`；免签名，SmartScreen 提示选"仍要运行" |
 | Android 壳 | Capacitor（Web 资源打进 APK，不依赖在线加载） | 最低 API 26；自签名 keystore 放 `infra/keys/`（gitignore，另行离线备份） |
-| 部署 | Ubuntu + Caddy 自动 HTTPS + systemd | 8080 只监听 `127.0.0.1`；备份到对象存储/异机，保留最近 30 份 |
+| 部署 | Ubuntu + Caddy 自动 HTTPS + systemd | 6580 只监听 `127.0.0.1`；备份到对象存储/异机，保留最近 30 份 |
 | 测试 | xUnit（服务端）+ Vitest（前端核心）单测随工程 | 临时脚本/验收数据统一放 `docs/test/`（不入库）；不搞重型测试体系 |
 
 **依赖许可**：只允许 MIT / Apache-2.0 / BSD / ISC；新增 npm/NuGet 依赖前检查 LICENSE，禁止 GPL/AGPL/SSPL/BUSL。不确定先问用户。
@@ -111,7 +112,7 @@
                            │ HTTPS / WSS（公网域名）
                            ▼
               ┌────────────────────────────┐
-              │ Caddy 443 → 127.0.0.1:8080 │  TLS / gzip / 静态缓存
+              │ Caddy 443 → 127.0.0.1:6580 │  TLS / gzip / 静态缓存
               └──────────────┬─────────────┘
                              ▼
         ┌────────────────────────────────────────┐
@@ -276,7 +277,7 @@ EriseChat/
 │   ├── install.ps1                         # Windows 可选安装（sc.exe 服务）
 │   ├── backup.sh / backup.ps1              # 备份与恢复（SQLite 在线备份 + files/）
 │   ├── eisechat.service                    # systemd 单元（旧方案备选）
-│   ├── caddy/Caddyfile                     # 公网 HTTPS 反代 127.0.0.1:8080（宿主侧）
+│   ├── caddy/Caddyfile                     # 公网 HTTPS 反代 127.0.0.1:6580（宿主侧）
 │   ├── email/                              # 邮件通道配置示例 + 自测脚本
 │   └── keys/                               # Android keystore（gitignore + 离线备份）
 └── data/                                   # 本地开发运行时数据（gitignore）

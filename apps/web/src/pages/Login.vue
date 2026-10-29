@@ -35,7 +35,7 @@ const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.n
 
 /** 桌面/APK 打包态：页面以 file:// 加载，「同源」不可用，必须显式配置服务器地址（M4-08）。 */
 const isFileShell = typeof window !== 'undefined' && window.location.protocol === 'file:'
-const DEFAULT_DESKTOP_SERVER = 'http://127.0.0.1:8080'
+const DEFAULT_DESKTOP_SERVER = 'http://127.0.0.1:6580'
 
 /** M4-01：服务器地址配置（桌面/APK 首次使用需填写；Web 同源可留空）。 */
 const serverUrlOpen = ref(false)
@@ -88,7 +88,7 @@ const sendButtonLabel = computed(() => {
 function toErrorMessage(error: unknown): string {
   // 桌面/APK 以 file:// 加载时，网络失败需额外提示先配置服务器地址（其余错误统一走 friendlyError）。
   if (isFileShell && error instanceof TypeError) {
-    return '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:8080）后重试'
+    return '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:6580）后重试'
   }
   return friendlyError(error)
 }
@@ -333,8 +333,8 @@ function clearServerUrl(): void {
                 aria-label="服务器地址"
                 :placeholder="
                   isFileShell
-                    ? 'http://127.0.0.1:8080（本机）或 https://你的域名'
-                    : 'https://chat.example.com 或 http://127.0.0.1:8080（留空 = 同源）'
+                    ? 'http://127.0.0.1:6580（本机）或 https://你的域名'
+                    : 'https://chat.example.com 或 http://127.0.0.1:6580（留空 = 同源）'
                 "
               />
               <div class="login-server__actions">

@@ -47,7 +47,7 @@
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI；核心模块 `core/ws.ts`、`core/sync.ts`、`stores/` |
 | Windows 壳 | Electron + electron-builder（NSIS，`appId=com.eisechat.desktop`，安装包 `EiseChat-Setup-x.y.z.exe`，免签名） |
 | Android 壳 | Capacitor，Web 资源打进 APK（不依赖在线加载），最低 API 26，自签名 keystore 放 `infra/keys/`（gitignore），APK 名 `EiseChat-x.y.z.apk` |
-| 部署 | **Docker Compose 单容器一键部署**（`docker compose up -d --build`，宿主只需 Docker；容器内 ASP.NET Core 单进程 + SQLite + 本地文件卷，端口只绑 `127.0.0.1:8080`）；HTTPS 入口用 Tailscale Serve（内测）或宿主 Caddy（公网）；备份到对象存储/异机 |
+| 部署 | **Docker Compose 单容器一键部署**（`docker compose up -d --build`，宿主只需 Docker；容器内 ASP.NET Core 单进程 + SQLite + 本地文件卷，端口只绑 `127.0.0.1:6580`）；HTTPS 入口用 Tailscale Serve（内测）或宿主 Caddy（公网）；备份到对象存储/异机 |
 | 测试 | xUnit（服务端）+ Vitest（前端核心）单测随工程提交；临时脚本、验证数据与输出放 `docs/test/`（细则见 §11.1）；不搞重型测试体系 |
 
 > 依赖与架构禁区以 §2 硬规则为准（本表只固定选型，不重复列禁用清单）。
@@ -61,7 +61,7 @@
 - 协议唯一来源：`protocol/protocol.md`；表结构唯一来源：`protocol/schema.sql`（与 EF 迁移同步维护）。
 - 新增项目文档一律写在 `docs/`，不散落到仓库根或代码目录（`README.md` 除外）。
 - **文档入库范围（1.7 新增）**：
-  - **入库（说明类）**：`README.md`、`AGENTS.md`、`docs/project-overview.md`、`docs/deploy.md`、`docs/mobile.md`、`docs/usage.md`、`docs/ui/README.md`、`protocol/protocol.md`、`protocol/schema.sql`。
+  - **入库（说明类）**：`README.md`、`AGENTS.md`、`docs/project-overview.md`、`docs/deploy.md`、`docs/update-deploy.md`、`docs/web.md`、`docs/desktop.md`、`docs/mobile.md`、`docs/usage.md`、`docs/ui/README.md`、`protocol/protocol.md`、`protocol/schema.sql`。
   - **不入库（计划与过程类，本地保留）**：`docs/internal-plan.md`、UI 专项计划与审查/验收报告、任务清单与进度记录、AI 指令与交付说明、测试脚本与日志、基线/对比截图、参考图与交互验收包。
   - 已入库的计划/过程文件用 `git rm --cached` 移出索引（**不删除本地文件**），并在 `.gitignore` 中登记；之后新建同类文件默认不提交，需要入库必须先在 AGENTS/README 中改规则并告知用户。
 
@@ -85,7 +85,7 @@
 - 限流：同邮箱 60 秒/次、10 次/天；同 IP 20 次/小时；验证码错误 5 次作废；登录失败 5 次锁 5 分钟。
 - 文件：默认上限 50MB（可配）；下载只走 `GET /api/files/{id}` 并校验会话成员；不暴露磁盘路径；上传校验 MIME/扩展名；图片发送前客户端压缩（最长边 1280px、约 ≤300KB）。
 - 日志：滚动保留 30 天；错误返回 traceId；禁止记录 token/密码/验证码/邮件明文。
-- 公网入口：Docker 容器端口只绑定 `127.0.0.1:8080`；HTTPS 用 Tailscale Serve（内测）或宿主 Caddy；安全组只开必要端口；可用 fail2ban。
+- 公网入口：Docker 容器端口只绑定 `127.0.0.1:6580`；HTTPS 用 Tailscale Serve（内测）或宿主 Caddy；安全组只开必要端口；可用 fail2ban。
 - 备份：每日备份 SQLite（在线备份 API）+ 文件目录到对象存储/异机；恢复步骤写文档并演练。
 - 明确不做 E2EE（内部信任模型），使用说明中写清楚。
 
@@ -102,7 +102,7 @@
 
 ```bash
 dotnet build server/Chat.Server.sln             # 服务端构建
-dotnet run --project server/Chat.Server         # 服务端启动（http://127.0.0.1:8080）
+dotnet run --project server/Chat.Server         # 服务端启动（http://127.0.0.1:6580）
 dotnet test server/Chat.Server.Tests            # 服务端单测（默认不跑，见 §11）
 cd apps/web && npm install && npm run dev       # Web 开发（http://127.0.0.1:5173）
 cd apps/web && npm run build                    # Web 构建（产物 dist/，不入库）
