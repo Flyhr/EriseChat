@@ -58,7 +58,7 @@ EOF
   )
   chmod 600 "$ENV_FILE"
 else
-  log "复用已有 $ENV_FILE（如需改 SMTP/密钥，编辑后 docker compose restart）"
+  log "复用已有 $ENV_FILE（改 SMTP/密钥后重新执行本脚本生效；docker compose restart 不会重读 .env）"
 fi
 
 export EISECHAT_DATA_DIR="$DATA_DIR"
@@ -102,6 +102,6 @@ cat <<EOF
   端口：仅绑定 127.0.0.1:${PORT}（可用 EISECHAT_PORT 覆盖）
   管理：docker compose ps | logs -f eisechat | restart | down
   更新：改了代码后按 docs/update-deploy.md 重新构建部署
-  下一步：配置 SMTP（编辑 $ENV_FILE 后 docker compose restart）；
+  下一步：配置 SMTP（编辑 $ENV_FILE 后重新执行本脚本，勿用 docker compose restart）；
           HTTPS 入口用 Tailscale Serve（docs/deploy.md §3.4）；管理员提权见同文档。
 EOF

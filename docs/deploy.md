@@ -216,10 +216,10 @@ Docker 部署统一用 `/opt/eisechat/.env` 注入环境变量（该文件权限
 | `App__RegistrationEnabled` / `App__AllowedEmailDomains` | 是否开放注册 / 允许邮箱域名白名单（空=不限） |
 | `App__ProtocolVersion` | 协议版本（保持 1） |
 
-修改后重启生效：
+修改后重新执行部署脚本生效（**不要用 `docker compose restart`**，它不会重读 `.env`）：
 
 ```bash
-sudo docker compose -f /opt/eisechat/src/docker-compose.yml restart
+sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh
 ```
 
 > 容器内数据目录已由 compose 固定为 `/data`（`App__DataDirectory=/data`），无需改动；
@@ -248,12 +248,12 @@ Email__FromAddress=你的邮箱@qq.com
 Email__FromName=EiseChat
 ```
 
-3. 重启并验证：
+3. 重新执行部署脚本并验证：
 
 ```bash
-sudo docker compose -f /opt/eisechat/src/docker-compose.yml restart
+sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh
 curl -s -X POST http://127.0.0.1:6580/api/auth/email/send \
-  -H 'Content-Type: application/json' -d '{"email":"你的邮箱@qq.com","purpose":"register"}'
+  -H 'Content-Type: application/json' -d '{"email":"你的邮箱@qq.com","purpose":"Register"}'
 # 返回 200 且邮箱收到 6 位验证码；失败时看 docker logs --tail=100 eisechat-server
 ```
 

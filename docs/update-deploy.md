@@ -130,7 +130,7 @@ ssh chat "sudo ls -lt /var/backups/eisechat/ | head"
 | 镜像/发布版本 | `APP_VERSION=1.1.1 sudo -E bash infra/docker/deploy.sh` | compose 镜像 tag 与 `.env`/脚本默认值；同时记得同步源码里的版本号（F-27 流程） |
 | 服务端口 | `/opt/eisechat/.env` 里 `EISECHAT_PORT=6581`，或部署时 `EISECHAT_PORT=6581 sudo -E bash infra/docker/deploy.sh` | 仅 6500–6600 区间；改完需同步更新 Tailscale Serve/Caddy 反代目标 |
 | Tailscale Serve HTTPS | `sudo tailscale serve --bg --https=443 http://127.0.0.1:<端口>` | 查看：`tailscale serve status`；关闭：`tailscale serve reset` |
-| SMTP / JWT | 编辑 `/opt/eisechat/.env`（600）后 `docker compose restart eisechat` | 密钥/口令不写入仓库、不打印到日志 |
+| SMTP / JWT | 编辑 `/opt/eisechat/.env`（600）后 `sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh` | 配置变更必须重建容器；`docker compose restart` 不会重读 `.env`，密钥/口令不写入仓库、不打印到日志 |
 
 ---
 
