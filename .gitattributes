@@ -1,0 +1,16 @@
+# 统一换行符：仓库内容一律 LF（Windows 开发机 core.autocrlf=true 会把检出/打包变 CRLF，
+# 导致 Linux 上的 .sh / Dockerfile / compose 解析失败，见 2026-10-29 部署问题）。
+* text=auto eol=lf
+
+# 明确二进制，避免被当作文本转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.jks  binary
+*.keystore binary
+*.apk  binary
+*.exe  binary
+*.zip  binary
