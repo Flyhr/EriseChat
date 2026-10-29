@@ -209,7 +209,7 @@ Docker 部署统一用 `/opt/eisechat/.env` 注入环境变量（该文件权限
 | 变量 | 说明 |
 |---|---|
 | `Jwt__Key` | JWT 签名密钥（HS256，≥32 字节随机值；deploy.sh 已自动生成） |
-| `Email__SmtpHost` / `Email__SmtpPort` / `Email__SmtpUseSsl` | SMTP 服务器（如 `smtp.qq.com:465` + SSL） |
+| `Email__SmtpHost` / `Email__SmtpPort` / `Email__SmtpUseSsl` | SMTP 服务器（推荐 `smtp.qq.com:587` + STARTTLS；465 隐式 TLS 不被 `System.Net.Mail` 支持，会超时） |
 | `Email__SmtpUser` / `Email__SmtpPassword` | SMTP 账号与授权码（密码只放 .env） |
 | `Email__FromAddress` / `Email__FromName` | 发件人地址/显示名 |
 | `App__UploadMaxBytes` | 附件上限（默认 52428800 = 50MB） |
@@ -240,13 +240,15 @@ sudo nano /opt/eisechat/.env
 
 ```ini
 Email__SmtpHost=smtp.qq.com
-Email__SmtpPort=465
+Email__SmtpPort=587
 Email__SmtpUseSsl=true
 Email__SmtpUser=你的邮箱@qq.com
 Email__SmtpPassword=你的授权码
 Email__FromAddress=你的邮箱@qq.com
 Email__FromName=EiseChat
 ```
+
+> 端口必须用 **587**（STARTTLS）。465 是隐式 TLS（连上即握手），.NET 的 `System.Net.Mail` 不支持，会报 `The operation has timed out`。
 
 3. 重新执行部署脚本并验证：
 

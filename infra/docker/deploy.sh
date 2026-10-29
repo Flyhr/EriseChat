@@ -47,8 +47,9 @@ ASPNETCORE_ENVIRONMENT=Production
 Jwt__Key=$key
 
 # --- SMTP 邮件通道（生产必须配置；不配置则无法发送验证码）---
+# 用 587（STARTTLS）；465 隐式 TLS 不被 System.Net.Mail 支持，会连接超时
 # Email__SmtpHost=smtp.qq.com
-# Email__SmtpPort=465
+# Email__SmtpPort=587
 # Email__SmtpUseSsl=true
 # Email__SmtpUser=
 # Email__SmtpPassword=
