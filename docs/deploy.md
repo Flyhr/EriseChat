@@ -1,6 +1,7 @@
 # EiseChat 服务端部署说明（Docker Compose 一键部署）
 
 > 适用版本：1.1.0+。目标环境：**Ubuntu 22.04 / 24.04 / 26.04**（云服务器 2C4G 轻量即可），宿主机只需 **Docker + Docker Compose**。
+> **已核查的服务器环境（2026-10-29，可直接照做）**：Ubuntu Server **26.04.1 LTS**（kernel 7.0.0-38-generic）、Docker Engine **29.1.3**、Docker Compose **2.40.3**（compose v2 插件）、Tailscale **1.104.4**、UFW 已启用、DaoCloud 镜像加速已配置并通过 `hello-world` 拉取验证；22.04 / 24.04 同样适用。
 > 服务端为**单进程**（ASP.NET Core，Kestrel 在容器内监听 6580，宿主机只绑定 `127.0.0.1:6580`）；
 > 数据落容器挂载卷（SQLite + 文件目录），镜像内置 Web 前端与 `GET /download` 下载页。
 > 部署方式见 AGENTS.md §2.4：**Docker Compose 单容器一键部署**（不引入多容器编排）。
@@ -46,6 +47,24 @@
 
 ## 2. 服务器准备
 
+> **已核查的服务器环境（2026-10-29，可直接照做）**：Ubuntu Server **26.04.1 LTS**（kernel 7.0.0-38-generic）、Docker Engine **29.1.3**、Docker Compose **2.40.3**（compose v2 插件）、Tailscale **1.104.4**、UFW 已启用、DaoCloud 镜像加速已配置并通过 `hello-world` 拉取验证；22.04 / 24.04 同样适用。
+
+| 组件 | 实际状态 | 说明 |
+|---|---|---|
+| 操作系统 | Ubuntu Server **26.04.1 LTS**（kernel 7.0.0-38-generic） | 22.04 / 24.04 同样适用 |
+| Docker Engine | **29.1.3**（Ubuntu 包 `29.1.3-0ubuntu4.1`） | 已安装，`hello-world` 拉取/运行通过 |
+| Docker Compose | **2.40.3**（`2.40.3+ds1-0ubuntu1`，compose v2 插件） | 已安装，无需另装 |
+| 镜像加速 | DaoCloud（Docker Hub 加速已生效） | 只加速 Docker Hub；MCR 基础镜像见 §10.4 |
+| Tailscale | **1.104.4**，节点 `chat-server`（100.115.90.9） | 内测 HTTPS 入口（§3.4） |
+| UFW | 已启用 | 仅放行 22；部署后由 Tailscale Serve / Caddy 回源本机 6580 |
+| 硬件 | 4 核 / 14G 内存 / 468G 磁盘（已用 7.8G） | 2C4G 轻量规格即可 |
+| 端口占用 | 仅 22 监听；80 / 443 / 6580 未占用 | 部署后只绑 `127.0.0.1:6580` |
+
+> 若 `docker ps` 报 `permission denied`，说明当前用户不在 docker 组：`sudo usermod -aG docker ggbond`（执行后**重新登录**生效）；本机 `sudo` 需要密码，命令前加 `sudo`。
+> 服务器**未安装 `unzip`**：解压源码包用 `python3`（§3.1）或 `tar`。
+
+以下为从零开始的完整步骤，已具备的可跳过。
+
 1. 云服务器安装 **Ubuntu 22.04 / 24.04 / 26.04**，2C4G 起（峰值 ≤100 在线）。
 2. 安全组入站：`22`（建议限制来源 IP）、`80`、`443`；其余拒绝。
 3. 安装 Docker Engine 与 Compose 插件（二选一）：
@@ -68,7 +87,7 @@ docker compose version
 docker run --rm hello-world          # 能拉取并运行即网络正常（国内可配置镜像加速）
 ```
 
-5. 基础工具（备份/核查用，可选）：`sudo apt-get install -y curl sqlite3 rsync`。
+5. 基础工具（备份/提权/核查用，建议安装）：`sudo apt-get install -y sqlite3 rsync`（`curl` 已自带；`sqlite3` 用于 §3.5 管理员提权与 §6.1 备份）。
 
 > 国内网络若拉取 Docker Hub / MCR 镜像慢，可通过 `/etc/docker/daemon.json` 配置镜像加速（如 DaoCloud），
 > 或用构建参数换基础镜像源（见 §10.4）。
@@ -79,19 +98,24 @@ docker run --rm hello-world          # 能拉取并运行即网络正常（国�
 
 ### 3.1 上传源码
 
-在开发机把当前仓库源码打成 tar.gz（Docker 构建需要完整源码，含 `server/`、`apps/web/`）：
+Docker 构建需要完整源码（含 `server/`、`apps/web/`）。在开发机（仓库根目录）出源码包：
 
 ```bash
-git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD
-scp /tmp/eisechat-src.tar.gz ggbond@<服务器>:/tmp/
+git status --short          # 必须干净
+git archive --format=zip -o EiseChat-src-$(git rev-parse --short HEAD).zip HEAD
+scp EiseChat-src-xxxxxxx.zip chat:~/eisechat-src.zip     # chat = ~/.ssh/config 里的服务器别名
 ```
 
-服务器上解压到部署目录：
+服务器上解压并原子替换部署目录（服务器无 `unzip`，用 `python3`；已有源码会先备份成 `src.old`）：
 
 ```bash
-sudo mkdir -p /opt/eisechat/src
-sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src
+sudo bash -c 'set -e; cd /opt/eisechat \
+  && rm -rf src.new && mkdir -p src.new \
+  && python3 -c "import zipfile; zipfile.ZipFile(\"/home/ggbond/eisechat-src.zip\").extractall(\"src.new\")" \
+  && rm -rf src.old && mv src src.old 2>/dev/null || true; mv src.new src; chown -R root:root src'
 ```
+
+`tar.gz` 替代方案：`git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD` → `sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src`。
 
 ### 3.2 执行一键部署脚本
 
@@ -351,6 +375,8 @@ sudo DOTNET_REGISTRY=mcr.m.daocloud.io \
 ```
 
 或配置 `/etc/docker/daemon.json` 的 `registry-mirrors` 后 `sudo systemctl restart docker`。
+
+> **注意：** DaoCloud / `registry-mirrors` 只加速 **Docker Hub**（如 `node:24-alpine`）；本项目的 `mcr.microsoft.com/dotnet/sdk|aspnet` 基础镜像不经 Docker Hub，需用上面的 `DOTNET_REGISTRY=mcr.m.daocloud.io`（或直连 MCR）。
 
 ### 10.5 数据库被锁定 / WAL 文件增大
 

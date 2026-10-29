@@ -22,7 +22,8 @@
 
 - 服务器已按 [docs/deploy.md](deploy.md) §3 完成首次部署：`/opt/eisechat/{src,data,.env}` 存在，容器 `eisechat-server` 运行中；
 - 开发机工作区干净（未提交的改动不会进入源码包）：`git status --short` 无输出；
-- 服务器需要的基本命令：`curl`、`python3`（本机已验证；`unzip` 缺失时用 §3 的 python 解压方式）；
+- 服务器环境（2026-10-29 已核查）：**Ubuntu Server 26.04.1 LTS**、**Docker Engine 29.1.3**、**Docker Compose 2.40.3**、Tailscale 1.104.4、UFW 已启用、DaoCloud 镜像加速生效；`curl` / `python3` 已装，**未装 `unzip`**（§3 用 python3 解压）；
+- 权限：若 `docker ps` 报 `permission denied`，先 `sudo usermod -aG docker ggbond` 并重新登录；`sudo` 需要密码，命令前加 `sudo`；
 - 配置项（JWT/SMTP/端口）在 `/opt/eisechat/.env`（权限 600），重新部署会**复用**该文件，不会被覆盖；
 - 数据升级前先备份（§5）；协议/库表只允许向后兼容增量（AGENTS.md §2.7）。
 
