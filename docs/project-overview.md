@@ -148,12 +148,14 @@ EriseChat/                                  ← 仓库根（D:\Code\EriseChat）
 ├── AGENTS.md                               # 硬约束（AI/开发代理必读）
 ├── .gitignore                              # 不提交清单（构建产物/数据/密钥）
 ├── .editorconfig                           # 缩进/换行/编码统一（M0 建）
+├── docker-compose.yml                      # Docker 一键部署入口（2.0 新增）
+├── .dockerignore                           # 镜像构建上下文排除（2.0 新增）
 │
 ├── docs/                                   # 文档（计划、说明、部署；test/ 测试脚本不入库）
 ├── protocol/                               # 协议与库表唯一来源
 ├── apps/                                   # 三个客户端工程（web / desktop / mobile）
 ├── server/                                 # 服务端解决方案（三个 .NET 工程）
-├── infra/                                  # 安装、部署、备份、邮件、密钥
+├── infra/                                  # Docker 部署（docker/）、安装、备份、邮件、密钥
 └── data/                                   # 本地开发运行时数据（gitignore，不入库）
 ```
 
@@ -267,14 +269,16 @@ EriseChat/
 │   └── Chat.Server.Tests/                  # xUnit
 │
 ├── infra/
-│   ├── install.sh                          # Linux 安装/升级（systemd）
+│   ├── docker/                             # Docker 一键部署（2.0 默认）
+│   │   ├── Dockerfile                      # Node 构建 Web → .NET 发布 → aspnet 运行时
+│   │   └── deploy.sh                       # 服务器一键部署/升级（生成 .env、构建、健康检查）
+│   ├── install.sh                          # 旧：Linux 安装/升级（systemd，备选）
 │   ├── install.ps1                         # Windows 可选安装（sc.exe 服务）
 │   ├── backup.sh / backup.ps1              # 备份与恢复（SQLite 在线备份 + files/）
-│   ├── eisechat.service                    # systemd 单元（Restart=always、开机自启）
-│   ├── caddy/Caddyfile                     # HTTPS 反代 127.0.0.1:8080
+│   ├── eisechat.service                    # systemd 单元（旧方案备选）
+│   ├── caddy/Caddyfile                     # 公网 HTTPS 反代 127.0.0.1:8080（宿主侧）
 │   ├── email/                              # 邮件通道配置示例 + 自测脚本
 │   └── keys/                               # Android keystore（gitignore + 离线备份）
-│
 └── data/                                   # 本地开发运行时数据（gitignore）
     ├── chat.db
     └── files/
@@ -296,12 +300,12 @@ EriseChat/
 | `server/Chat.Server/BackgroundJobs/` | 孤儿文件清理、备份触发、统计 | 与请求强相关的逻辑 |
 | `server/Chat.Protocol/` | 帧 DTO、枚举、错误码（服务端与前端共享契约） | 数据库实体、业务逻辑 |
 | `protocol/` | 协议文档、DDL、JSON Schema | 可执行代码 |
-| `infra/` | 脚本、Caddy 配置、systemd、keystore（不进 git） | 应用源码 |
+| `infra/` | Docker 部署（`infra/docker/`）、脚本、Caddy 配置、systemd（备选）、keystore（不进 git） | 应用源码 |
 | `docs/test/` | 临时测试脚本、验证用例、测试数据与输出（gitignore，不入库；建子目录需申请） | xUnit / Vitest 单测（分别在 `server/Chat.Server.Tests`、`apps/web`） |
 
 ### 7.4 不建 / 不提交
 
-- **不建**：`infra/docker/`、K8s 清单、iOS/Xcode 工程、微服务目录、`apps/server`（服务端不放在 apps 下）、根级 `tests/`（测试脚本统一放 `docs/test/`）。
+- **不建**：K8s 清单、多容器编排、iOS/Xcode 工程、微服务目录、`apps/server`（服务端不放在 apps 下）、根级 `tests/`（测试脚本统一放 `docs/test/`）。Docker 部署文件只在 `infra/docker/`（2.0 新增）。
 - **不提交**：`node_modules/`、`bin/`、`obj/`、`dist/`、`.electron-builder/`、`*.db`、`data/`、`logs/`、`infra/keys/`、`secrets.json`、`*.keystore`、`*.apk`、`*.exe`（完整清单见 `.gitignore`）。
 - **构建生成、不手改**：`server/Chat.Server/wwwroot/`（前端产物）、`apps/mobile/android/app/src/main/assets/public/`（Capacitor 同步产物）。
 
@@ -484,7 +488,7 @@ cd apps/web && npm install && npm run dev        # Web 开发
 cd apps/web && npm run build                     # Web 构建 → dist/
 npm run desktop:dev && npm run desktop:build     # Electron 开发 / 打包（脚本名 M0 定）
 npm run mobile:sync && cd apps/mobile/android && ./gradlew assembleRelease   # APK
-infra/install.sh && infra/backup.sh              # 服务器安装 / 备份
+sudo bash infra/docker/deploy.sh && infra/backup.sh   # 服务器 Docker 部署 / 备份
 ```
 
 ### 13.2 构建流水线（谁产出什么）

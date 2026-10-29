@@ -2,7 +2,7 @@
 
 > 本文件是仓库级硬约束，任何 AI / 开发代理在改动本仓库前必须阅读并遵守。
 > 唯一现行计划：`docs/internal-plan.md`（V2.3.5）。文档职责与优先级见 §1（项目介绍以 `README.md` 为准，项目说明与目录架构见 `docs/project-overview.md`）。
-> 本文件版本 1.9（2026-10-28），随计划变更时同步更新（1.9：新增 §12 编码原则——防过度防御、入口单校验、拒绝提前抽象、控制复杂度，并列为 §2.12 硬规则；1.8：§10 记录「消息撤回/编辑（F-18）」已获用户授权实施）。
+> 本文件版本 2.0（2026-10-29），随计划变更时同步更新（2.0：部署方式改为 **Docker Compose 单容器一键部署**，§2.4 相应放开 Docker、§3/§6/§8 同步；1.9：新增 §12 编码原则——防过度防御、入口单校验、拒绝提前抽象、控制复杂度，并列为 §2.12 硬规则；1.8：§10 记录「消息撤回/编辑（F-18）」已获用户授权实施）。
 
 ## 1. 文档分工与优先级
 
@@ -25,7 +25,7 @@
 1. **不引入第三方 IM**：OpenIM、融云、环信、腾讯云 IM、Sendbird 等一律不用；IM 协议由本项目自研。
 2. **不产生授权费用**：不买商业授权/SDK、不买签名证书、不买 Apple 开发者账号、不接付费推送或短信服务。
 3. **依赖许可**：只允许 MIT / Apache-2.0 / BSD / ISC 等宽松许可；**禁止** GPL / AGPL / SSPL / BUSL 或商业限制许可进入仓库。新增 npm/NuGet 依赖前检查 LICENSE，不确定先问用户。
-4. **架构边界**：不引入 Docker / Kubernetes / Redis / Kafka / MongoDB / PostgreSQL / MinIO / Nginx；不引 SignalR 等框架依赖（WS 手写）；不拆微服务。服务端必须保持单进程可部署。
+4. **架构边界**：不引入 Kubernetes / Redis / Kafka / MongoDB / PostgreSQL / MinIO / Nginx；不引 SignalR 等框架依赖（WS 手写）；不拆微服务。服务端必须保持**单进程**可部署。**部署方式（2.0 变更）统一为 Docker Compose 单容器一键部署**（根目录 `docker-compose.yml` + `infra/docker/`），允许 Docker / Compose 与官方 .NET/Node 基础镜像；禁止多容器编排，反向代理（Tailscale Serve / Caddy）部署在宿主侧。
 5. **范围边界**：不写 iPhone/iOS 代码、不做 TestFlight；不做语音/视频通话、朋友圈、AI、机器人、E2EE；公开发布类事项（ICP、等保、短信、厂商推送）不在本项目范围。
 6. **密钥纪律**：token、密码、验证码明文、SMTP 凭据、JWT 密钥、keystore 一律不进源码/日志/示例/提交历史；放 `secrets.json`（gitignore）或环境变量。日志禁止输出敏感值。
 7. **协议兼容**：协议帧与数据库结构只允许向后兼容的增量修改（新增可选字段/新 type 可以，改语义/删字段不行）；先改 `protocol/protocol.md` 与计划文档，再改实现。
@@ -47,7 +47,7 @@
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI；核心模块 `core/ws.ts`、`core/sync.ts`、`stores/` |
 | Windows 壳 | Electron + electron-builder（NSIS，`appId=com.eisechat.desktop`，安装包 `EiseChat-Setup-x.y.z.exe`，免签名） |
 | Android 壳 | Capacitor，Web 资源打进 APK（不依赖在线加载），最低 API 26，自签名 keystore 放 `infra/keys/`（gitignore），APK 名 `EiseChat-x.y.z.apk` |
-| 部署 | Ubuntu 22.04/24.04 + Caddy 自动 HTTPS（反代 `127.0.0.1:8080`）+ systemd；备份到对象存储低频/异机 |
+| 部署 | **Docker Compose 单容器一键部署**（`docker compose up -d --build`，宿主只需 Docker；容器内 ASP.NET Core 单进程 + SQLite + 本地文件卷，端口只绑 `127.0.0.1:8080`）；HTTPS 入口用 Tailscale Serve（内测）或宿主 Caddy（公网）；备份到对象存储/异机 |
 | 测试 | xUnit（服务端）+ Vitest（前端核心）单测随工程提交；临时脚本、验证数据与输出放 `docs/test/`（细则见 §11.1）；不搞重型测试体系 |
 
 > 依赖与架构禁区以 §2 硬规则为准（本表只固定选型，不重复列禁用清单）。
@@ -85,7 +85,7 @@
 - 限流：同邮箱 60 秒/次、10 次/天；同 IP 20 次/小时；验证码错误 5 次作废；登录失败 5 次锁 5 分钟。
 - 文件：默认上限 50MB（可配）；下载只走 `GET /api/files/{id}` 并校验会话成员；不暴露磁盘路径；上传校验 MIME/扩展名；图片发送前客户端压缩（最长边 1280px、约 ≤300KB）。
 - 日志：滚动保留 30 天；错误返回 traceId；禁止记录 token/密码/验证码/邮件明文。
-- 公网入口：8080 只监听 `127.0.0.1`；Caddy 自动 HTTPS；安全组只开必要端口；可用 fail2ban。
+- 公网入口：Docker 容器端口只绑定 `127.0.0.1:8080`；HTTPS 用 Tailscale Serve（内测）或宿主 Caddy；安全组只开必要端口；可用 fail2ban。
 - 备份：每日备份 SQLite（在线备份 API）+ 文件目录到对象存储/异机；恢复步骤写文档并演练。
 - 明确不做 E2EE（内部信任模型），使用说明中写清楚。
 
@@ -110,8 +110,9 @@ cd apps/desktop && npm install && npm run dev   # Electron 开发（需先启动
 cd apps/desktop && npm run dist                 # NSIS 安装包（M4 已产出 1.0.0，产物 dist/ 不入库）
 cd apps/mobile && npm install && npm run sync   # 同步 Web 产物到 Android 工程
 cd apps/mobile/android && ./gradlew assembleRelease  # APK（M5 验证，需 Android SDK/Gradle）
-bash infra/publish-linux.sh 1.0.0               # 发布 Linux 包（产物 docs/test/，不入库）
-sudo bash infra/install.sh <chat-server.zip>    # 服务器安装/升级（详见 docs/deploy.md）
+bash infra/publish-linux.sh 1.1.0               # 备用：产出 Linux 发布包（Docker 部署不需要）
+sudo bash infra/docker/deploy.sh                # 服务器 Docker 一键部署/升级（详见 docs/deploy.md §3）
+docker compose ps | docker compose logs -f eisechat   # 容器状态 / 日志
 sudo bash infra/backup.sh                       # 服务器每日备份（cron 见部署文档）
 ```
 

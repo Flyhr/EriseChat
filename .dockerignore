@@ -1,0 +1,25 @@
+# Docker 镜像构建上下文裁剪（上下文 = 仓库根目录）
+.git
+.github
+AGENTS.md
+README.md
+docs
+data
+logs
+node_modules
+**/node_modules
+**/dist
+**/dist-electron
+**/bin
+**/obj
+**/.vite
+infra/keys
+secrets.json
+**/secrets.json
+*.db
+*.db-wal
+*.db-shm
+*.keystore
+apps/desktop
+apps/mobile
+protocol

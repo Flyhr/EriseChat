@@ -1,274 +1,361 @@
-# EiseChat 服务端部署说明（Ubuntu + Caddy）
+# EiseChat 服务端部署说明（Docker Compose 一键部署）
 
-> 适用版本：M4（安装包 1.1.0，F-27 统一发布；1.0.0 为历史基线）。目标环境：**Ubuntu 22.04 / 24.04**（云服务器 2C4G 轻量即可），
-> 服务端为**单进程**（ASP.NET Core，Kestrel 只监听 `127.0.0.1:8080`），数据落本地 SQLite + 文件目录。
-> **明确不使用 Docker / K8s / Nginx**，也不引入 Redis/MongoDB 等外部组件（AGENTS.md §2.4）。
+> 适用版本：1.1.0+。目标环境：**Ubuntu 22.04 / 24.04 / 26.04**（云服务器 2C4G 轻量即可），宿主机只需 **Docker + Docker Compose**。
+> 服务端为**单进程**（ASP.NET Core，Kestrel 在容器内监听 8080，宿主机只绑定 `127.0.0.1:8080`）；
+> 数据落容器挂载卷（SQLite + 文件目录），镜像内置 Web 前端与 `GET /download` 下载页。
+> 部署方式见 AGENTS.md §2.4：**Docker Compose 单容器一键部署**（不引入多容器编排）。
 
 ---
 
 ## 1. 部署架构
 
 ```
-Internet ──(443/80, HTTPS)──> Caddy ──(127.0.0.1:8080)──> EiseChat 服务端（systemd 单进程）
-   或 Tailscale Serve ──(https://chat-server.<tailnet>.ts.net)──┘
-                                                             ├─ /var/lib/eisechat/chat.db      SQLite（WAL）
-                                                             ├─ /var/lib/eisechat/files/       聊天图片/文件
-                                                             └─ /var/lib/eisechat/downloads/   安装包（GET /download 分发）
-/opt/eisechat-server/   应用二进制（publish-linux.sh 产出的 self-contained 包）
-/opt/eisechat-server/secrets.json  JWT 密钥 / SMTP 凭据（首次启动自动生成，权限 600）
+客户端（Web / Windows exe / Android APK）
+   │  HTTPS（Tailscale Serve 内测）或 宿主 Caddy（公网域名）
+   ▼
+宿主机 127.0.0.1:8080  ──>  docker 容器 eisechat-server（ASP.NET Core 单进程）
+                              ├─ /data/chat.db      SQLite（WAL，容器外 /opt/eisechat/data/chat.db）
+                              ├─ /data/files/       聊天图片/文件
+                              └─ /data/downloads/   安装包（GET /download 分发）
+/opt/eisechat/              部署根目录
+  ├── src/                  源码（git 仓库快照，供 docker compose 构建镜像）
+  ├── data/                 持久化数据（chat.db / files / downloads）
+  └── .env                  配置与密钥（JWT、SMTP，权限 600，不入库）
 ```
 
-- 公网只开放 22（SSH，限来源 IP 更佳）、80、443；**8080 不对公网开放**。
-- Web 端、Windows 安装包、Android APK 都连同一个域名（HTTPS/WSS）。
+- 公网只开放 22（SSH，建议限来源 IP）与 HTTPS 端口；**8080 不对公网开放**。
+- 容器镜像内包含：Web 前端（Vite 构建）、服务端、`wwwroot`、`/download` 页。
+- 备份、恢复、邮件通道等运维操作见 §5~§7。
 
 ---
 
-## 2. 服务器与域名准备
+## 2. 服务器准备
 
-1. 云服务器安装 **Ubuntu 22.04 / 24.04**，配置 2C4G 起（峰值 ≤100 在线）。
+1. 云服务器安装 **Ubuntu 22.04 / 24.04 / 26.04**，2C4G 起（峰值 ≤100 在线）。
 2. 安全组入站：`22`（建议限制来源 IP）、`80`、`443`；其余拒绝。
-3. 域名 A 记录指向服务器公网 IP（开发期可先用占位域名 `chat.example.com`，上线前替换）。
-4. 安装基础工具：
+3. 安装 Docker Engine 与 Compose 插件（二选一）：
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y curl unzip sqlite3 rsync
+# 方式 A：官方脚本（最快）
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker "$USER"        # 之后可免 sudo 管理 docker（需重新登录生效）
+
+# 方式 B：发行版仓库
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2
+sudo usermod -aG docker "$USER"
 ```
 
-5. 安装 Caddy（官方 apt 源，自动 HTTPS）：
+4. 校验：
 
 ```bash
-sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt-get update && sudo apt-get install -y caddy
+docker version
+docker compose version
+docker run --rm hello-world          # 能拉取并运行即网络正常（国内可配置镜像加速）
 ```
+
+5. 基础工具（备份/核查用，可选）：`sudo apt-get install -y curl sqlite3 rsync`。
+
+> 国内网络若拉取 Docker Hub / MCR 镜像慢，可通过 `/etc/docker/daemon.json` 配置镜像加速（如 DaoCloud），
+> 或用构建参数换基础镜像源（见 §10.4）。
 
 ---
 
-## 3. 发布并安装服务端
+## 3. 一键部署
 
-### 3.1 在开发机打包（Windows 亦可用）
+### 3.1 上传源码
+
+在开发机把当前仓库源码打成 tar.gz（Docker 构建需要完整源码，含 `server/`、`apps/web/`）：
 
 ```bash
-bash infra/publish-linux.sh 1.1.0
-# 脚本会先构建 apps/web 并复制到 server/Chat.Server/wwwroot，再 publish（前端随包分发）
-# 产出：docs/test/publish-linux/chat-server-1.1.0-linux-x64.zip（docs/test/ 不入库）
+git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD
+scp /tmp/eisechat-src.tar.gz ggbond@<服务器>:/tmp/
 ```
 
-> 已有 wwwroot 时可 `EISECHAT_SKIP_WEB=1 bash infra/publish-linux.sh 1.1.0` 跳过前端构建。
-
-把 zip 上传到服务器（如 `/tmp`）：
+服务器上解压到部署目录：
 
 ```bash
-scp docs/test/publish-linux/chat-server-1.1.0-linux-x64.zip root@<服务器IP>:/tmp/
+sudo mkdir -p /opt/eisechat/src
+sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src
 ```
 
-### 3.2 在服务器安装
-
-把仓库中的 `infra/` 目录一并上传/解压；`install.sh` 需要同目录的 `eisechat.service` 与 `caddy/Caddyfile`。
+### 3.2 执行一键部署脚本
 
 ```bash
-sudo bash infra/install.sh /tmp/chat-server-1.1.0-linux-x64.zip
+sudo bash /opt/eisechat/src/infra/docker/deploy.sh
 ```
 
-脚本会：创建 `eisechat` 系统用户与 `/var/lib/eisechat` 数据目录 → 解压应用到 `/opt/eisechat-server` →
-安装 `eisechat.service` 并 `enable --now` → 等待 `/api/health` 通过 → 提示 Caddy 配置。
+脚本会：
+1. 创建 `/opt/eisechat/{data,data/files,data/downloads}` 并按容器内非 root 用户（UID 1654）授权；
+2. 首次部署自动生成 `/opt/eisechat/.env`（随机 JWT 密钥，权限 600；SMTP 项待填）；
+3. `docker compose up -d --build` 构建镜像（Node 构建 Web → .NET 发布 → ASP.NET Core 运行时镜像）并启动；
+4. 等待 `http://127.0.0.1:8080/api/health` 通过后打印容器状态。
 
-验证：
+首次构建需拉取 `node:24-alpine`、`dotnet/sdk:10.0`、`dotnet/aspnet:10.0`，耗时取决于网络。
+
+可选环境变量：
 
 ```bash
-curl http://127.0.0.1:8080/api/health
+sudo APP_VERSION=1.1.0 bash /opt/eisechat/src/infra/docker/deploy.sh          # 镜像 tag/版本
+sudo DOTNET_REGISTRY=mcr.m.daocloud.io bash /opt/eisechat/src/infra/docker/deploy.sh   # 基础镜像镜像源
+sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh              # 只重启，不重建
+```
+
+### 3.3 验证
+
+```bash
+curl -s http://127.0.0.1:8080/api/health
 # {"status":"ok","serverTime":...,"version":"1.1.0","protocolVersion":1,"db":"ok"}
-sudo systemctl status eisechat --no-pager
+
+docker compose -f /opt/eisechat/src/docker-compose.yml ps      # STATUS 应为 healthy
+sudo ss -ltnp | grep 8080                                      # 必须只有 127.0.0.1:8080
+sudo docker logs --tail=30 eisechat-server
 ```
 
-### 3.3 配置 HTTPS（Caddy）
+### 3.4 配置 HTTPS：Tailscale Serve（内测推荐，无需域名）
 
-把 `infra/caddy/Caddyfile` 里的 `chat.example.com` 与 `admin@example.com` 换成真实域名/邮箱：
-
-```bash
-sudo cp infra/caddy/Caddyfile /etc/caddy/Caddyfile
-sudo nano /etc/caddy/Caddyfile        # 改域名与邮箱
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-curl -I https://<你的域名>/           # 200/30x，证书自动签发
-```
-
-浏览器打开 `https://<你的域名>/`，在登录页切换「注册」，用邮箱验证码注册首个账号。
-
-### 3.4 无公网域名的替代方案：Tailscale Serve（内测推荐）
-
-服务器已加入 Tailscale 时，可以不开公网 80/443、不需要域名，直接用它提供 HTTPS：
+服务器已加入 Tailscale 时（内测阶段推荐）：
 
 ```bash
-# 一次性：允许当前用户免 sudo 管理 serve（之后 tailscale serve 不用 sudo）
-sudo tailscale set --operator=ggbond
-# 把 tailnet 的 https://chat-server.<tailnet>.ts.net/ 反代到本机 8080（后台常驻）
+# 一次性：允许当前普通用户管理 serve（之后 tailscale serve 不用 sudo）
+sudo tailscale set --operator="$USER"
+
+# 把 tailnet 的 https://<host>.<tailnet>.ts.net/ 反代到本机 8080（后台常驻）
 tailscale serve --bg --https=443 http://127.0.0.1:8080
 tailscale serve status
 ```
 
-- 访问地址形如 `https://chat-server.tail8c07f5.ts.net/`（以本机 `tailscale status --json` 的 `Self.DNSName` 为准）。
-- 客户端（Windows exe / Android APK）需加入**同一个 tailnet**（手机/电脑装 Tailscale 并登录同一账号）才能访问。
-- 首次使用需在 Tailscale 管理台开启 **HTTPS Certificates**（DNS 页），否则 `serve` 无法签发证书。
-- 该方案的 Caddy 可完全不装；若以后换公网域名，再按 3.3 切到 Caddy 即可。
+- 访问地址形如 `https://chat-server.tail8c07f5.ts.net/`（以 `tailscale status --json` 的 `Self.DNSName` 为准）。
+- 客户端（Windows exe / Android APK）需加入**同一个 tailnet** 才能访问。
+- 首次使用需在 Tailscale 管理台开启 **HTTPS Certificates**，否则无法签发证书。
+- 之后若换公网域名，可在宿主机装 Caddy 反代 `127.0.0.1:8080`（见 §3.6）。
 
-### 3.5 管理员提权（v1 手工操作）
-
-计划中管理员用于 Web 端 `/admin` 查看用户与审计日志；v1 无后台提权界面，注册后手工执行一次：
+### 3.5 管理员提权（v1 无后台提权界面）
 
 ```bash
-sqlite3 /var/lib/eisechat/chat.db "UPDATE users SET role='admin' WHERE email='<你的邮箱>';"
+sudo sqlite3 /opt/eisechat/data/chat.db "UPDATE users SET role='admin' WHERE email='<你的邮箱>';"
+```
+
+登录 Web 端后可在 `/admin` 查看用户与审计日志。
+
+### 3.6 可选：宿主 Caddy 提供公网 HTTPS
+
+```bash
+# 安装 Caddy 后，/etc/caddy/Caddyfile 示例（域名指向本机公网 IP）
+chat.example.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:8080
+}
+sudo systemctl reload caddy
 ```
 
 ---
 
-## 4. 配置项（环境变量 / appsettings）
+## 4. 配置项（/opt/eisechat/.env）
 
-服务端配置读取顺序：**secrets.json（可选） > 环境变量 > appsettings.{Environment}.json > appsettings.json**。
-生产环境通过 `/etc/systemd/system/eisechat.service` 的 `Environment=` 覆盖，常用：
+配置读取顺序：**secrets.json > 环境变量 > appsettings.{Environment}.json > appsettings.json**。
+Docker 部署统一用 `/opt/eisechat/.env` 注入环境变量（该文件权限 600、不入库）：
 
-| 配置 | 默认 | 说明 |
-|---|---|---|
-| `App__DataDirectory` | `/var/lib/eisechat`（install.sh 已设） | SQLite 与数据根目录 |
-| `App__FileDirectory` | `/var/lib/eisechat/files` | 聊天图片/文件 |
-| `App__DownloadDirectory` | `/var/lib/eisechat/downloads` | `GET /download` 分发的安装包 |
-| `App__UploadMaxBytes` | 52428800（50MB） | 单文件上限 |
-| `App__RegistrationEnabled` | true | 关闭注册时设为 false |
-| `App__AllowedEmailDomains` | 空（不限制） | 逗号/数组形式的白名单域名 |
-| `App__GroupMaxMembers` | 100 | 群成员上限（2~500） |
-| `App__GroupOnlyOwnerCanInvite` | false | 是否仅群主可邀请 |
-| `App__OrphanFileCleanupIntervalHours` | 24 | 孤儿文件清理周期（小时） |
-| `RateLimit__*` | 见 appsettings.json | 验证码/登录限流阈值 |
-| `Jwt__ExpireDays` | 7 | 登录有效期（天） |
-| `Kestrel__Endpoints__Http__Url` | `http://127.0.0.1:8080` | 监听地址 |
+| 变量 | 说明 |
+|---|---|
+| `Jwt__Key` | JWT 签名密钥（HS256，≥32 字节随机值；deploy.sh 已自动生成） |
+| `Email__SmtpHost` / `Email__SmtpPort` / `Email__SmtpUseSsl` | SMTP 服务器（如 `smtp.qq.com:465` + SSL） |
+| `Email__SmtpUser` / `Email__SmtpPassword` | SMTP 账号与授权码（密码只放 .env） |
+| `Email__FromAddress` / `Email__FromName` | 发件人地址/显示名 |
+| `App__UploadMaxBytes` | 附件上限（默认 52428800 = 50MB） |
+| `App__RegistrationEnabled` / `App__AllowedEmailDomains` | 是否开放注册 / 允许邮箱域名白名单（空=不限） |
+| `App__ProtocolVersion` | 协议版本（保持 1） |
 
-修改后 `sudo systemctl restart eisechat` 生效。
+修改后重启生效：
 
-**密钥纪律**：`secrets.json`（位于 `/opt/eisechat-server/secrets.json`，JWT 密钥与 SMTP 凭据）由服务端首次启动自动生成
-（32 字节随机、权限 600），
-**不要** 提交、复制到聊天工具或写入日志；丢失后所有旧 token 失效（用户需重新登录）。
+```bash
+sudo docker compose -f /opt/eisechat/src/docker-compose.yml restart
+```
+
+> 容器内数据目录已由 compose 固定为 `/data`（`App__DataDirectory=/data`），无需改动；
+> 若确要改路径，同步改 compose 的 `volumes` 与 `environment` 后重建。
 
 ---
 
 ## 5. 邮件通道（**上线前必须配置**）
 
-- `Development` 环境使用 Mock 邮件：验证码打印到服务端控制台 stdout + 固定测试码 `123456`，
-  便于本地开发；**生产环境不可用**。
-- 服务端已实现真实 `SmtpEmailSender`（`System.Net.Mail`，无第三方依赖）：`Production` 下用 `Email:Smtp*` 配置发信，
-  未配置（`Email:SmtpHost` 为空）时接口返回 500 `INTERNAL_ERROR` 并写明「SMTP 邮件通道未配置」。
-- 在 `/etc/systemd/system/eisechat.service.d/email.conf`（drop-in）或 `appsettings.Production.json` 配置：
-  - `Email__SmtpHost`、`Email__SmtpPort`（587/465）、`Email__SmtpUseSsl`、`Email__SmtpUser`、
-    `Email__SmtpPassword`（**只放 secrets.json 或环境变量**，勿写仓库）、`Email__FromAddress`、`Email__FromName`。
-  - 例：QQ 邮箱 `smtp.qq.com:465`、授权码作密码、`Email__FromAddress` 与登录邮箱一致；企业邮箱按服务商文档。
-- 邮件通道要求：发件量小（内部 10~100 人），企业邮箱 SMTP 授权码或 Brevo/Resend 免费额度均可。
-- 上线前用真实邮箱走一遍「注册 → 收码 → 登录」，并观察是否进垃圾箱。
+生产环境（`Production`）使用真实 SMTP 发信；未配置时验证码发送会返回 500 并提示「SMTP 邮件通道未配置」。
+
+1. 准备邮箱（QQ 邮箱/企业邮箱均可，QQ 邮箱需开启 SMTP 并使用**授权码**）；宿主安装 `sqlite3`（备份脚本需要）：`sudo apt-get install -y sqlite3`。
+2. 编辑 `/opt/eisechat/.env`，取消注释并填入：
+
+```bash
+sudo nano /opt/eisechat/.env
+```
+
+```ini
+Email__SmtpHost=smtp.qq.com
+Email__SmtpPort=465
+Email__SmtpUseSsl=true
+Email__SmtpUser=你的邮箱@qq.com
+Email__SmtpPassword=你的授权码
+Email__FromAddress=你的邮箱@qq.com
+Email__FromName=EiseChat
+```
+
+3. 重启并验证：
+
+```bash
+sudo docker compose -f /opt/eisechat/src/docker-compose.yml restart
+curl -s -X POST http://127.0.0.1:8080/api/auth/email/send \
+  -H 'Content-Type: application/json' -d '{"email":"你的邮箱@qq.com","purpose":"register"}'
+# 返回 200 且邮箱收到 6 位验证码；失败时看 docker logs --tail=100 eisechat-server
+```
+
+> 开发/本地调试用 `Development` 环境的控制台输出与固定测试码，不影响生产。
 
 ---
 
 ## 6. 备份与恢复（**必须演练一次**）
 
-### 6.1 每日备份（cron）
+数据目录是宿主机的 `/opt/eisechat/data`，`infra/backup.sh` 在宿主机执行即可（容器运行中安全）：
+
+### 6.1 每日备份
 
 ```bash
-sudo mkdir -p /var/backups/eisechat
-sudo crontab -e
-# 每天 02:00 备份，顺手同步到异机（可选）
-0 2 * * * EISECHAT_DATA_DIR=/var/lib/eisechat EISECHAT_REMOTE=user@backup-host:/srv/eisechat-backup bash /opt/eisechat-server/infra/backup.sh
+sudo install -m 755 /opt/eisechat/src/infra/backup.sh /usr/local/bin/eisechat-backup.sh
+# 立即跑一次
+sudo EISECHAT_DATA_DIR=/opt/eisechat/data EISECHAT_BACKUP_DIR=/var/backups/eisechat /usr/local/bin/eisechat-backup.sh
+sudo ls -lh /var/backups/eisechat
+
+# 每天 02:00 备份（可选 EISECHAT_REMOTE=user@host:/path 同步到异机）
+sudo tee /etc/cron.d/eisechat-backup >/dev/null <<'EOF'
+0 2 * * * root EISECHAT_DATA_DIR=/opt/eisechat/data EISECHAT_BACKUP_DIR=/var/backups/eisechat /usr/local/bin/eisechat-backup.sh
+EOF
 ```
 
-`backup.sh` 用 SQLite `VACUUM INTO` 在线备份（不一致风险低），打包 `files/` 与 `downloads/`，
-归档为 `/var/backups/eisechat/eisechat-YYYYMMDD-HHMM.tar.gz`，**保留最近 30 份**，日志写
-`/var/backups/eisechat/backup.log`；失败以非 0 退出。
+备份内容是 SQLite 一致性快照（`VACUUM INTO`）+ `files/`、`downloads/`，默认保留最近 30 份。
 
-### 6.2 恢复
+### 6.2 恢复演练（停服窗口执行；建议先在测试机演练）
 
 ```bash
-sudo bash infra/restore.sh /var/backups/eisechat/eisechat-20261025-0200.tar.gz
+# 0) 先备份当前数据（便于回滚），并解包目标备份
+sudo EISECHAT_DATA_DIR=/opt/eisechat/data EISECHAT_BACKUP_DIR=/var/backups/eisechat   bash /opt/eisechat/src/infra/backup.sh
+sudo rm -rf /tmp/eisechat-restore && sudo mkdir -p /tmp/eisechat-restore
+sudo tar -xzf /var/backups/eisechat/eisechat-YYYYmmdd-HHMM.tar.gz -C /tmp/eisechat-restore
+
+# 1) 停止容器
+sudo docker compose -f /opt/eisechat/src/docker-compose.yml stop
+
+# 2) 覆盖 chat.db 与 files/（downloads 不动）
+sudo cp /tmp/eisechat-restore/chat.db /opt/eisechat/data/chat.db
+sudo rm -rf /opt/eisechat/data/files && sudo mkdir -p /opt/eisechat/data/files
+sudo tar -xzf /tmp/eisechat-restore/files.tar.gz -C /opt/eisechat/data
+sudo chown -R 1654:1654 /opt/eisechat/data
+
+# 3) 启动并验证
+sudo docker compose -f /opt/eisechat/src/docker-compose.yml start
+curl -s http://127.0.0.1:8080/api/health
 ```
 
-恢复脚本会先停服务、把当前数据备份到 `/var/lib/eisechat.pre-restore-*`、解包覆盖、修权限、
-启动并等待健康检查通过；完成后用两个账号抽查最近消息与文件下载。
-
-### 6.3 演练要求
-
-- 上线前**至少演练一次**恢复，并在 `docs/deploy.md` 中记录演练时间与结果（AGENTS §6）。
-- 演练不删除线上数据：在本地或测试服务器用同一份备份先演练。
+> 恢复前先确认目标归档、先备份当前数据；恢复后抽查登录、历史消息、附件下载。
+> **注意**：`infra/restore.sh` 是旧 systemd 方案的恢复脚本（`/var/lib/eisechat` + `systemctl`），
+> Docker 部署请用上面的手工步骤（见本文附录）。
 
 ---
 
 ## 7. 升级与回滚
 
-1. 开发机 `bash infra/publish-linux.sh <新版本>`，上传 zip；
-2. `sudo bash infra/install.sh /tmp/chat-server-<新版本>-linux-x64.zip`（覆盖 `/opt/eisechat-server`，
-   数据目录不动）；
-3. 服务端启动时自动执行 EF 迁移（仅允许向后兼容增量，见 `protocol/schema.sql` 与
-   `docs/internal-plan.md` §13）；
-4. 验证：`curl http://127.0.0.1:8080/api/health`、Web 登录、收发一条消息；
-5. 回滚：重新上传旧版本 zip 执行 install.sh；如新版本已迁移数据库且不可逆，需用升级前备份
-   `restore.sh` 恢复（因此升级前建议先手动跑一次备份）。
+### 7.1 升级
+
+1. 先备份（§6）；
+2. 上传新版本源码 tar.gz 到 `/tmp`，解压覆盖到 `/opt/eisechat/src`（或另建 `src-vX` 目录并改 compose 路径）；
+3. 执行 `sudo APP_VERSION=<新版本> bash /opt/eisechat/src/infra/docker/deploy.sh`；
+4. 验证 `/api/health` 的 `version`、`/download` 页面与客户端连通性。
+
+- 数据库迁移在服务启动时自动执行（EF Core Migrations），迁移前务必有备份；
+- 版本升级保持协议向后兼容（`protocolVersion` 不变即可平滑升级）；
+- 安装包（exe/apk）上传到 `/opt/eisechat/data/downloads/` 后自动出现在 `/download` 页（按文件名查找最新）。
+
+### 7.2 回滚
+
+```bash
+# 保留上一版本镜像 tag 时可直接切回
+sudo APP_VERSION=<旧版本> SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh
+# 或恢复旧版源码目录后重新 deploy
+```
 
 ---
 
 ## 8. 卸载
 
 ```bash
-sudo systemctl disable --now eisechat
-sudo rm -f /etc/systemd/system/eisechat.service
-sudo systemctl daemon-reload
-sudo rm -rf /opt/eisechat-server
-# 数据默认保留；确认不再需要后手工删除（不可恢复！）
-# sudo rm -rf /var/lib/eisechat
+# 停止并删除容器（数据卷在宿主机目录，不会被删除）
+sudo docker compose -f /opt/eisechat/src/docker-compose.yml down
+# 删除镜像（可选）
+sudo docker image rm eisechat-server:1.1.0
+# 确认不再需要数据后手工删除（不可恢复！）
+# sudo rm -rf /opt/eisechat /var/backups/eisechat
 ```
-
-Windows 客户端卸载：设置 → 应用 → EiseChat → 卸载（或 `Uninstall EiseChat.exe`）；卸载不影响服务端数据。
 
 ---
 
-## 9. Windows 安装包与 SmartScreen
+## 9. Windows 安装包与 Android APK 分发
 
-- 安装包名：`EiseChat-Setup-1.1.0.exe`（NSIS 每用户安装、免签名，见 M4-03；F-27 统一发布当前版本）。
-- 首次双击若出现 SmartScreen「Windows 已保护你的电脑」：点击「更多信息 → 仍要运行」。
-  这是未购买代码签名证书的正常提示（AGENTS §2.2 不产生授权费用）。
-- 安装完成后启动客户端，在登录页「服务器地址」填 `https://<你的域名>`（或本机调试用
-  `http://127.0.0.1:8080`），保存后重新连接。
+- 两个安装包放到 `/opt/eisechat/data/downloads/`，`GET /download`（及其 `/download/files/*` 直链）即可下载；
+- 客户端首次启动需在登录页配置服务器地址（内测用 `https://<host>.<tailnet>.ts.net`，公网用你的域名）；
+- 客户端细节见 [docs/web.md](docs/web.md)、[docs/mobile.md](docs/mobile.md)。
 
 ---
 
 ## 10. 故障排查
 
-| 现象 | 排查 |
-|---|---|
-| 打不开页面 | `curl -I https://<域名>/`、`systemctl status caddy`、`tailscale serve status`、`curl http://127.0.0.1:8080/api/health`；确认安全组 80/443、DNS 解析或 Tailscale 证书 |
-| 深链接刷新 404 | 确认 `server/Chat.Server/wwwroot/index.html` 已随包发布；服务端 `MapFallback` 负责返回页面 |
-| 服务起不来 | `journalctl -u eisechat -n 100 --no-pager`；检查 `/var/lib/eisechat` 权限（须 eisechat 可写）与端口占用 |
-| 验证码收不到 | 检查第 5 节邮件配置；`journalctl -u eisechat -f`（Production 下若 SMTP 未实现会返回 500） |
-| 登录后频繁掉线 | 检查系统时间（JWT 依赖 UTC）；看 Caddy 日志与客户端网络；重连会走 `sync` 补拉 |
-| 磁盘增长快 | 检查 `/var/lib/eisechat/files` 与 `downloads`；孤儿文件清理默认 24h 一轮（`App__OrphanFileCleanupIntervalHours`），可手动清理过期安装包 |
-| 备份失败 | `/var/backups/eisechat/backup.log`；确认 sqlite3/rsync 已装、目标路径可写 |
-| 忘记管理员 | `sqlite3 /var/lib/eisechat/chat.db "UPDATE users SET role='admin' WHERE email='...';"` |
-
-常用命令：
+### 10.1 容器起不来 / 健康检查失败
 
 ```bash
-sudo systemctl status|restart|stop eisechat
-sudo journalctl -u eisechat -f
-curl -s http://127.0.0.1:8080/api/health
-sudo tail -f /var/log/caddy/eisechat-access.log
-sqlite3 /var/lib/eisechat/chat.db '.tables'
+docker compose -f /opt/eisechat/src/docker-compose.yml ps
+sudo docker logs --tail=100 eisechat-server
 ```
+
+常见原因：`/opt/eisechat/data` 权限不是 UID 1654（重新执行 deploy.sh 会自动 chown）；端口 8080 被占用；
+`.env` 缺失或权限不对（应 600 且属主 root）。
+
+### 10.2 只能本机访问 / 外网打不开
+
+- 确认 `ss -ltnp | grep 8080` 是 `127.0.0.1:8080`（正常，公网入口应经 Tailscale Serve / Caddy）；
+- Tailscale：`tailscale serve status` 是否 RUNNING、客户端是否在同一 tailnet、管理台 HTTPS 证书是否开启；
+- Caddy：`systemctl status caddy`、`journalctl -u caddy -n 100`。
+
+### 10.3 页面 404 / 刷新深链接 404
+
+镜像已内置 SPA 回退（`MapFallbackToFile("index.html")`）；若仍 404，确认镜像构建时 Web 产物已进入 `wwwroot`
+（重新 deploy.sh 构建），并检查 `docker logs` 中静态文件请求路径。
+
+### 10.4 构建时镜像拉取失败
+
+```bash
+sudo DOTNET_REGISTRY=mcr.m.daocloud.io \
+     NODE_IMAGE=docker.m.daocloud.io/library/node:24-alpine \
+     bash /opt/eisechat/src/infra/docker/deploy.sh
+```
+
+或配置 `/etc/docker/daemon.json` 的 `registry-mirrors` 后 `sudo systemctl restart docker`。
+
+### 10.5 数据库被锁定 / WAL 文件增大
+
+SQLite 已启用 WAL；备份用 `VACUUM INTO`。确认没有第二个进程直接打开 `chat.db`（例如本机开发时又启动了服务端连到同一数据目录）。
 
 ---
 
 ## 11. 上线检查清单
 
-- [ ] 域名解析、安全组 22/80/443、Caddy 证书正常（`https` 可用）；**或** Tailscale Serve 已启用且 tailnet 内可访问
-  （`tailscale serve status`）
-- [ ] `/api/health` 返回 `db:"ok"`，`version` 与安装包一致
-- [ ] 邮件通道可用（注册/登录收到验证码），或明确暂用备用方案
-- [ ] 注册开关/邮箱白名单按需配置；首个管理员已提权
-- [ ] 每日备份 cron 生效，**恢复演练完成并记录**
-- [ ] 服务端时间与时区正确（UTC 存储，前端本地化显示）
-- [ ] 安装包下载页 `GET /download` 可访问，`downloads/` 已放安装包
-- [ ] 两个账号实测：登录、单聊、群聊、图片/文件、断线重连补拉
+- [ ] `docker compose ps` 显示 `healthy`；`/api/health` 返回 `version` 与 `db: ok`。
+- [ ] `ss -ltnp` 确认 8080 仅绑定 `127.0.0.1`。
+- [ ] `/opt/eisechat/.env` 权限 600、无软链接；JWT 密钥为随机值；SMTP 密码只在 .env。
+- [ ] HTTPS 入口可用（Tailscale Serve 或 Caddy），Web 端可完成注册/登录/收发消息。
+- [ ] SMTP 已配置并实测收到验证码（§5）。
+- [ ] 管理员账号已提权（§3.5）。
+- [ ] 备份已跑通一次并在 `/var/backups/eisechat` 生成产物；恢复演练已完成（§6.2）。
+- [ ] `/download` 页可下载 1.1.0 安装包；覆盖安装不影响服务端数据。
+- [ ] 日志无 token/密码/验证码明文；`docker logs` 无异常堆栈。
+
+---
+
+## 附：旧方案说明（备选，不再作为默认路径）
+
+仓库保留了直接部署（`infra/install.sh` + systemd + 宿主 Caddy）的脚本，适合不允许 Docker 的环境；
+默认部署以本文的 Docker Compose 方案为准。旧脚本与本文的数据目录不同（`/var/lib/eisechat`），迁移时注意备份与路径。

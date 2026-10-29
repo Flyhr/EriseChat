@@ -91,3 +91,6 @@ apps/mobile/android/app/src/main/assets/public/
 /docs/ui/*.png
 /docs/EiseChat_UI_*/
 
+
+# ==== Docker 部署 ====
+/.env

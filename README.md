@@ -6,7 +6,7 @@
 
 > 本节是本仓库**唯一的项目介绍**；可执行约束见 [AGENTS.md](AGENTS.md)，计划与详细说明见 `docs/`。
 
-- **是什么**：自研轻量 IM（服务端 + 客户端）；服务端为 ASP.NET Core 单进程（REST + 自研 JSON-over-WebSocket + 静态前端），数据用 SQLite（WAL）+ 服务器本地文件目录，Caddy 自动 HTTPS。
+- **是什么**：自研轻量 IM（服务端 + 客户端）；服务端为 ASP.NET Core 单进程（REST + 自研 JSON-over-WebSocket + 静态前端），数据用 SQLite（WAL）+ 服务器本地文件目录，Docker Compose 一键部署（HTTPS 走 Tailscale Serve 或宿主 Caddy）。
 - **给谁用**：公司/团队内部，10~100 个账号、峰值 ≤100 在线；部署在云服务器 + 域名/HTTPS；不做公网运营，不需要 ICP/等保/实名/内容审核。
 - **交付物**：Windows 安装包 `EiseChat-Setup-x.y.z.exe`、Android APK `EiseChat-x.y.z.apk`（侧载安装）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）；iPhone 仅出方案、本期不实现。
 - **技术骨架**：一套 Vue 3 前端核心复用到 Web / Windows（Electron）/ Android（Capacitor）；服务端是唯一事实源，客户端 IndexedDB 只是缓存。
@@ -26,7 +26,7 @@
 | Windows | Electron + electron-builder → NSIS 安装包 `EiseChat-Setup-x.y.z.exe` |
 | Android | Capacitor + Gradle 自签名 → `EiseChat-x.y.z.apk`（侧载安装，无需商店） |
 | iPhone | **本期不实现，仅保留方案**（后续启用首选 PWA，不买 $99 开发者账号） |
-| 部署 | 云服务器 2C4G（Ubuntu）+ systemd + Caddy 自动 HTTPS（Let's Encrypt）；测试期用占位域名 `chat.example.com` |
+| 部署 | 云服务器 2C4G（Ubuntu）+ **Docker Compose 单容器一键部署**（`docker compose up -d --build`）；HTTPS 内测用 Tailscale Serve，公网用宿主 Caddy |
 | 备份 | SQLite 在线备份 + 文件目录打包，每日同步到对象存储/异机，保留 30 份 |
 
 **不引入**：OpenIM、MongoDB、Kafka、Etcd、Redis、MinIO、Kubernetes、短信服务商、第三方推送 SDK、ICP/等保。
@@ -40,7 +40,7 @@
 | **README.md（本文件）** | **项目介绍与入口**：项目是什么/给谁用、技术栈概览、文档索引、里程碑、目标目录、重要边界 |
 | `docs/internal-plan.md`（本地文档，不入库） | **现行主计划（V2.3.5）**：协议设计、数据模型、Windows/Android/服务器方案（iPhone 仅方案）、安装程序、云端部署、6~7 周路线、成本与风险 |
 | [docs/project-overview.md](docs/project-overview.md) | **项目说明与目录架构**：项目定位/范围/技术栈/总体架构 + 文件级目录规划、模块职责、依赖方向；M0 建骨架按此执行 |
-| [docs/deploy.md](docs/deploy.md) | 服务端部署（Ubuntu + Caddy + systemd）、配置项、邮件通道、备份恢复、升级回滚 |
+| [docs/deploy.md](docs/deploy.md) | 服务端 Docker Compose 一键部署、HTTPS、配置项、邮件通道、备份恢复、升级回滚 |
 | [docs/web.md](docs/web.md) | Web 端开发运行、构建、生产部署（dist → wwwroot）、验收清单与排障 |
 | [docs/desktop.md](docs/desktop.md) | Windows 桌面端安装、日常行为（托盘/通知/设置）、开发联调、NSIS 打包与排障 |
 | [docs/mobile.md](docs/mobile.md) | Android 端安装、签名、USB/局域网联机、APK 打包与真机验收 |
@@ -57,7 +57,7 @@
 | M1 | 第 1~1.5 周 | 服务端：邮箱验证码注册/登录、JWT、WS、seq、ack、sync、SQLite，两账号互发无丢无重 |
 | M2 | 第 2 周 | Web 客户端：邮箱登录/注册、会话、单聊、发送状态、断线补拉 |
 | M3 | 第 3 周 | 群聊、图片/文件、未读/已读、typing |
-| M4 | 第 4 周 | Windows 安装包 + 云服务器部署（Caddy HTTPS/systemd/备份）+ 下载页 |
+| M4 | 第 4 周 | Windows 安装包 + 云服务器部署（Docker Compose 一键部署/HTTPS/备份）+ 下载页 |
 | M5 | 第 5 周 | Android APK 打包与真机测试 |
 | M6 | 第 6~7 周 | 100 连接稳定性、备份恢复演练、10~20 人内测（Windows + Android） |
 
@@ -69,7 +69,7 @@ apps/desktop    Electron 壳 + Windows 安装包
 apps/mobile     Capacitor 壳 + Android APK
 server/         ASP.NET Core 单进程（Chat.Server / Tests / Protocol）
 protocol/       协议文档、JSON Schema、DDL
-infra/          install.sh、caddy、backup、email、keys（keystore）
+infra/          docker/（Dockerfile + deploy.sh）、install.sh、caddy、backup、email、keys（keystore）
 docs/           计划、协议、部署、使用说明
 ```
 
@@ -99,9 +99,11 @@ EISECHAT_PYTHON=python node docs/test/m3-e2e.mjs
 
 # 下载页 / 安装包分发（服务端启动后；安装包放 data/downloads/，浏览器打开 http://127.0.0.1:8080/download）
 
-# 服务器部署（Linux，详见 docs/deploy.md；发布与安装也可在服务器/开发机分别执行）
-bash infra/publish-linux.sh 1.1.0               # 产出 chat-server-1.1.0-linux-x64.zip（docs/test 不入库）
-sudo bash infra/install.sh /tmp/chat-server-1.1.0-linux-x64.zip   # 服务器上执行
+# 服务器部署（Docker Compose 一键部署，详见 docs/deploy.md）
+# 开发机：git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD，再 scp 到服务器 /tmp
+sudo bash infra/docker/deploy.sh                # 服务器上执行（构建镜像 + 启动 + 健康检查）
+sudo bash infra/backup.sh                       # 服务器备份（每日 cron 见部署文档）
+# 备用（无 Docker 环境）：publish-linux.sh + install.sh，见 docs/deploy.md 附录
 ```
 
 > 完整命令清单见 [AGENTS.md](AGENTS.md) §8；M1 服务端与 M2/M3 Web 端已完成（认证/WS/消息/补拉/登录注册/会话列表/聊天页/群聊/图片文件/已读/typing/在线状态），M4 已交付 Windows 安装包、`GET /download` 下载页与 `infra/` 部署脚本/`docs/deploy.md`；M5 已产出 Android APK、F-27 统一打包 1.1.0 已发布（`GET /download` 可下载，安装说明见 [docs/mobile.md](docs/mobile.md)）；本机两个浏览器仍可直接完成登录与互发验证（端到端验收脚本见上方 `m3-e2e.mjs`，一次性，不入库）。
@@ -118,4 +120,4 @@ sudo bash infra/install.sh /tmp/chat-server-1.1.0-linux-x64.zip   # 服务器上
 ## 下一步
 
 1. 无需再确认：按主计划 §12 已定参数开工（邮箱白名单留空 = 不限制、云服务器 2C4G 轻量、占位域名 `chat.example.com`、真实域名后替换）。
-2. M5 已收口（Android APK、下载页可下载、`infra/build-apk.sh` 与 [docs/mobile.md](docs/mobile.md)）；UI 改造已完成（UI-00~UI-05；UI-06 不单独执行，打包并入下一次统一发布）。1.1.0 统一发布已完成（F-27，2026-10-28）：Windows exe 与 Android APK 同步升到 1.1.0、`/download` 已更新、功能与协议零改动；下一步：补齐占位/后续功能（消息搜索 F-11 与会话内搜索 F-19、会话置顶/免打扰 F-10、个人资料 F-12、账号安全（改密/找回密码/登录设备）F-13、群资料（群名/群公告）F-14、群头像 F-23、会话共享文件 F-15、自定义表情 F-21、消息撤回/编辑 F-18 已完成），再做 M6 稳定性/备份恢复演练/内测，并用真机验收 APK 安装与登录（本机无真机）。实际公网部署、邮件通道（SMTP/免费 API）与备份需在用户云服务器上按部署文档执行（AI 不执行 ssh/外网操作）。
+2. M5 已收口（Android APK、下载页可下载、`infra/build-apk.sh` 与 [docs/mobile.md](docs/mobile.md)）；UI 改造已完成（UI-00~UI-05；UI-06 不单独执行，打包并入下一次统一发布）。1.1.0 统一发布已完成（F-27，2026-10-28）：Windows exe 与 Android APK 同步升到 1.1.0、`/download` 已更新、功能与协议零改动；下一步：补齐占位/后续功能（消息搜索 F-11 与会话内搜索 F-19、会话置顶/免打扰 F-10、个人资料 F-12、账号安全（改密/找回密码/登录设备）F-13、群资料（群名/群公告）F-14、群头像 F-23、会话共享文件 F-15、自定义表情 F-21、消息撤回/编辑 F-18 已完成），再做 M6 稳定性/备份恢复演练/内测，并用真机验收 APK 安装与登录（本机无真机）。部署已改为 Docker Compose 一键部署（AGENTS 2.0 / docs/deploy.md）：上传源码 → `sudo bash infra/docker/deploy.sh` → Tailscale Serve 提供 HTTPS；SMTP 与备份按部署文档在服务器上配置。
