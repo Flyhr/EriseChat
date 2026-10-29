@@ -82,7 +82,7 @@ ssh chat "curl -fsS http://127.0.0.1:6580/api/health"   # version 应为本次�
 ssh chat "sudo bash -lc 'cd /opt/eisechat/src && docker compose ps && docker compose logs --tail=50 eisechat'"
 ```
 
-> 说明：登录态/消息数据在 `/opt/eisechat/data`，重建容器不会丢失；容器内以非 root 用户 `app`(UID 1654) 运行，`deploy.sh` 会确保数据目录可写。
+> 说明：登录态/消息数据在 `/opt/eisechat/data`，重建容器不会丢失；容器内以非 root 用户 `eisechat`（UID/GID 1000，可用 `EISECHAT_UID` 覆盖）运行，`deploy.sh` 会确保数据目录可写。
 > 2026-10-29 首次 Docker 部署实测通过（`eisechat-server` healthy，`/api/health` 返回 `version 1.1.0`）。
 
 ---
@@ -101,7 +101,7 @@ ssh chat "sudo bash -lc 'cd /opt/eisechat/src && docker compose ps && docker com
 
 ```powershell
 scp EiseChat-Setup-1.1.1.exe chat:/tmp/
-ssh chat "sudo bash -lc 'mv /tmp/EiseChat-Setup-1.1.1.exe /opt/eisechat/data/downloads/ && chown 1654:1654 /opt/eisechat/data/downloads/* && ls -l /opt/eisechat/data/downloads/'"
+ssh chat "sudo bash -lc 'mv /tmp/EiseChat-Setup-1.1.1.exe /opt/eisechat/data/downloads/ && chown 1000:1000 /opt/eisechat/data/downloads/* && ls -l /opt/eisechat/data/downloads/'"
 ```
 
 ---

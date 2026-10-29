@@ -134,12 +134,13 @@ sudo bash /opt/eisechat/src/infra/docker/deploy.sh
 ```
 
 脚本会：
-1. 创建 `/opt/eisechat/{data,data/files,data/downloads}` 并按容器内非 root 用户（UID 1654）授权；
+1. 创建 `/opt/eisechat/{data,data/files,data/downloads}` 并按容器内非 root 用户（默认 UID/GID 1000，可用 `EISECHAT_UID` 覆盖）授权；
 2. 首次部署自动生成 `/opt/eisechat/.env`（随机 JWT 密钥，权限 600；SMTP 项待填）；
 3. `docker compose up -d --build` 构建镜像（Node 构建 Web → .NET 发布 → ASP.NET Core 运行时镜像）并启动；
 4. 等待 `http://127.0.0.1:6580/api/health` 通过后打印容器状态。
 
 首次构建需拉取 `node:24-alpine`、`dotnet/sdk:10.0`、`dotnet/aspnet:10.0`，耗时取决于网络。
+镜像已做瘦身：`linux-x64` 单平台发布、不发布调试符号与开发配置、只保留英文卫星资源；运行用户固定为 UID/GID 1000（`EISECHAT_UID` 可覆盖），数据卷由脚本按同一 UID 授权。
 
 可选环境变量：
 
@@ -298,7 +299,7 @@ sudo docker compose -f /opt/eisechat/src/docker-compose.yml stop
 sudo cp /tmp/eisechat-restore/chat.db /opt/eisechat/data/chat.db
 sudo rm -rf /opt/eisechat/data/files && sudo mkdir -p /opt/eisechat/data/files
 sudo tar -xzf /tmp/eisechat-restore/files.tar.gz -C /opt/eisechat/data
-sudo chown -R 1654:1654 /opt/eisechat/data
+sudo chown -R 1000:1000 /opt/eisechat/data   # 默认 UID 1000；用 EISECHAT_UID 覆盖时同步修改
 
 # 3) 启动并验证
 sudo docker compose -f /opt/eisechat/src/docker-compose.yml start
@@ -366,7 +367,7 @@ docker compose -f /opt/eisechat/src/docker-compose.yml ps
 sudo docker logs --tail=100 eisechat-server
 ```
 
-常见原因：`/opt/eisechat/data` 权限不是 UID 1654（重新执行 deploy.sh 会自动 chown）；端口 6580 被占用；
+常见原因：`/opt/eisechat/data` 权限不是容器 UID（默认 1000，重新执行 deploy.sh 会自动 chown）；端口 6580 被占用；
 `.env` 缺失或权限不对（应 600 且属主 root）。
 
 ### 10.2 只能本机访问 / 外网打不开

@@ -17,6 +17,9 @@ services:
       args:
         DOTNET_REGISTRY: ${DOTNET_REGISTRY:-mcr.microsoft.com}
         NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+        # 容器内非 root 用户 UID/GID，与 deploy.sh 对数据目录的 chown 使用同一值
+        APP_UID: ${EISECHAT_UID:-1000}
+        APP_GID: ${EISECHAT_UID:-1000}
     image: eisechat-server:${APP_VERSION:-1.1.0}
     container_name: eisechat-server
     restart: unless-stopped

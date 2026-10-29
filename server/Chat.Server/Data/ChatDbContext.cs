@@ -81,11 +81,14 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(user => user.Role)
                 .HasColumnName("role")
                 .HasConversion(LowercaseEnum<UserRole>())
-                .HasDefaultValueSql("'user'");
+                .HasDefaultValueSql("'user'")
+                // EF 警告 20601：枚举 CLR 默认值与库默认值相同；配一个不存在的哨兵值关闭警告，插入时显式写值。
+                .HasSentinel((UserRole)(-1));
             entity.Property(user => user.Status)
                 .HasColumnName("status")
                 .HasConversion(LowercaseEnum<UserStatus>())
-                .HasDefaultValueSql("'active'");
+                .HasDefaultValueSql("'active'")
+                .HasSentinel((UserStatus)(-1));
             entity.Property(user => user.CreatedAt).HasColumnName("created_at");
         });
     }
@@ -371,7 +374,9 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(request => request.Status)
                 .HasColumnName("status")
                 .HasConversion(LowercaseEnum<FriendRequestStatus>())
-                .HasDefaultValueSql("'pending'");
+                .HasDefaultValueSql("'pending'")
+                // 同上：Status 的 CLR 默认值 Pending 与库默认值相同，用哨兵值消除 EF 20601 警告。
+                .HasSentinel((FriendRequestStatus)(-1));
             entity.Property(request => request.CreatedAt).HasColumnName("created_at");
             entity.Property(request => request.HandledAt).HasColumnName("handled_at");
 

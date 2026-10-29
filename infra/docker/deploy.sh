@@ -20,6 +20,8 @@ DATA_DIR="$HOME_DIR/data"
 ENV_FILE="$HOME_DIR/.env"
 VERSION="${APP_VERSION:-1.1.0}"
 PORT="${EISECHAT_PORT:-6580}"
+# 容器内非 root 用户 UID/GID（默认 1000；如部署机目录属主不同可用 EISECHAT_UID 覆盖）
+APP_UID="${EISECHAT_UID:-1000}"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] 错误：$*" >&2; exit 1; }
@@ -32,8 +34,8 @@ log "准备目录：$HOME_DIR"
 install -d -m 755 "$HOME_DIR"
 install -d -m 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
 
-# 容器内以官方镜像的非 root 用户 app(1654) 运行，数据卷需要可写
-chown -R 1654:1654 "$DATA_DIR"
+# 容器内以固定 UID（默认 1000）非 root 运行，数据卷需可写
+chown -R "${APP_UID}:${APP_UID}" "$DATA_DIR"
 chmod 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -64,6 +66,7 @@ fi
 
 export EISECHAT_DATA_DIR="$DATA_DIR"
 export EISECHAT_PORT="$PORT"
+export EISECHAT_UID="$APP_UID"
 export EISECHAT_ENV_FILE="$ENV_FILE"
 export APP_VERSION="$VERSION"
 export DOTNET_REGISTRY="${DOTNET_REGISTRY:-mcr.microsoft.com}"

@@ -22,6 +22,8 @@
     <!-- 密钥纪律（AGENTS §6）：本地 secrets.json（JWT 密钥/SMTP 凭据）只留在开发机，绝不能随发布包上线。 -->
     <Content Remove="secrets.json" />
     <None Remove="secrets.json" />
+    <!-- 开发环境配置（Mock 验证码等）不发布到服务器/镜像。 -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -30,6 +32,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- F-27：统一发布版本；/download 页面与健康检查展示的程序集版本来自此处。 -->
     <Version>1.1.0</Version>
+    <!-- 镜像瘦身：服务端只用中文错误文案（代码内），不需要 .NET/EF 的多语言卫星资源。 -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
 </Project>

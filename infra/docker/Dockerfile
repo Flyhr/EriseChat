@@ -3,6 +3,11 @@
 # 构建上下文 = 仓库根目录（见根目录 docker-compose.yml）。
 # 网络受限时可用 build-arg 换基础镜像源，例如：
 #   docker compose build --build-arg DOTNET_REGISTRY=mcr.m.daocloud.io --build-arg NODE_IMAGE=docker.m.daocloud.io/library/node:24-alpine
+#
+# 镜像瘦身要点：
+#   - dotnet publish 指定 linux-x64 RID，只带本平台 native 资产（否则 runtimes/ 会带所有平台，约 +30MB）；
+#   - 关闭调试符号、不发布 appsettings.Development.json、只保留英文卫星资源（见 Chat.Server.csproj）；
+#   - 运行期以固定 UID/GID（默认 1000，EISECHAT_UID 可覆盖）非 root 运行，数据卷由 deploy.sh 按同一 UID chown。
 ARG DOTNET_REGISTRY=mcr.microsoft.com
 ARG NODE_IMAGE=node:24-alpine
 
@@ -19,22 +24,31 @@ FROM ${DOTNET_REGISTRY}/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY server/ ./server/
 COPY --from=web /src/apps/web/dist ./server/Chat.Server/wwwroot/
-RUN dotnet publish server/Chat.Server/Chat.Server.csproj -c Release -o /out -p:UseAppHost=false
+RUN dotnet publish server/Chat.Server/Chat.Server.csproj -c Release -o /out \
+      -r linux-x64 --self-contained false \
+      -p:UseAppHost=false -p:DebugType=None -p:DebugSymbols=false \
+    && rm -f /out/appsettings.Development.json /out/secrets.json
 
-# 3) 运行时镜像：官方 ASP.NET Core 运行时，非 root（镜像自带 app 用户，UID 1654）
+# 3) 运行时镜像：官方 ASP.NET Core 运行时 + 固定 UID 非 root 用户
 FROM ${DOTNET_REGISTRY}/dotnet/aspnet:10.0 AS runtime
+ARG APP_UID=1000
+ARG APP_GID=1000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid "${APP_GID}" eisechat \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --no-create-home --shell /usr/sbin/nologin eisechat
 WORKDIR /app
 COPY --from=build /out ./
+# 数据目录由数据卷挂载覆盖；这里先建好并授权，保证容器在无卷/首次启动时也可写
+RUN mkdir -p /data/files /data/downloads && chown -R "${APP_UID}:${APP_GID}" /data /app
 ENV ASPNETCORE_URLS=http://0.0.0.0:6580 \
     Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580 \
     ASPNETCORE_ENVIRONMENT=Production \
     App__DataDirectory=/data \
     App__FileDirectory=/data/files \
-    App__DownloadDirectory=/data/downloads
-RUN mkdir -p /data/files /data/downloads && chown -R app:app /data /app
-USER app
+    App__DownloadDirectory=/data/downloads \
+    DOTNET_EnableDiagnostics=0
+USER ${APP_UID}:${APP_GID}
 EXPOSE 6580
 ENTRYPOINT ["dotnet", "Chat.Server.dll"]
