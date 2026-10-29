@@ -96,26 +96,36 @@ docker run --rm hello-world          # 能拉取并运行即网络正常（国�
 
 ## 3. 一键部署
 
-### 3.1 上传源码
+### 3.1 出源码包并上传（固定路径/固定名称，覆盖旧包）
 
-Docker 构建需要完整源码（含 `server/`、`apps/web/`）。在开发机（仓库根目录）出源码包：
+Docker 构建需要完整源码（含 `server/`、`apps/web/`）。**源码包名固定**，后续更新命令不再随提交号变化。
 
-```bash
-git status --short          # 必须干净
-git archive --format=zip -o EiseChat-src-$(git rev-parse --short HEAD).zip HEAD
-scp EiseChat-src-xxxxxxx.zip chat:~/eisechat-src.zip     # chat = ~/.ssh/config 里的服务器别名
-```
-
-服务器上解压并原子替换部署目录（服务器无 `unzip`，用 `python3`；已有源码会先备份成 `src.old`）：
+开发机（仓库根目录）出包并上传：
 
 ```bash
-sudo bash -c 'set -e; cd /opt/eisechat \
-  && rm -rf src.new && mkdir -p src.new \
-  && python3 -c "import zipfile; zipfile.ZipFile(\"/home/ggbond/eisechat-src.zip\").extractall(\"src.new\")" \
-  && rm -rf src.old && mv src src.old 2>/dev/null || true; mv src.new src; chown -R root:root src'
+bash infra/package-src.sh                          # 产出 dist/eisechat-src.zip（固定路径/名称，同名覆盖）
+scp dist/eisechat-src.zip chat:~/eisechat-src.zip  # chat = ~/.ssh/config 里的服务器别名；目标名固定
 ```
 
-`tar.gz` 替代方案：`git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD` → `sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src`。
+- `infra/package-src.sh` = `git archive HEAD` + LF 行尾自检（`.sh`/`Dockerfile`/compose 混入 CRLF 会直接失败；Windows `core.autocrlf` 曾导致部署脚本报错）；
+- 产物固定为 `dist/eisechat-src.zip`（`dist/` 已 gitignore）；服务器目标固定为 `/home/ggbond/eisechat-src.zip`；
+- 需要其他输出路径时：`bash infra/package-src.sh /tmp/eisechat-src.zip`。
+
+服务器上解压并原子替换部署目录（服务器无 `unzip`，用 `python3`；旧源码保留为 `src.old` 便于排查/回滚）。**以下命令固定不变**：
+
+```bash
+sudo bash -c 'set -e
+  cd /opt/eisechat
+  rm -rf src.new && mkdir -p src.new
+  python3 -c "import zipfile; zipfile.ZipFile(\"/home/ggbond/eisechat-src.zip\").extractall(\"src.new\")"
+  rm -rf src.old
+  if [ -d src ]; then mv src src.old; fi
+  mv src.new src
+  chown -R root:root src
+  echo "src 已更新"'
+```
+
+> `tar.gz` 替代方案（不推荐，包名/命令需另改）：`git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD` → `sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src`。
 
 ### 3.2 执行一键部署脚本
 
@@ -149,6 +159,8 @@ docker compose -f /opt/eisechat/src/docker-compose.yml ps      # STATUS 应为 h
 sudo ss -ltnp | grep 6580                                      # 必须只有 127.0.0.1:6580
 sudo docker logs --tail=30 eisechat-server
 ```
+
+> 2026-10-29 首次一键部署实测通过：`docker compose ps` 中 `eisechat-server` 为 `healthy`，`/api/health` 返回 `{"status":"ok","version":"1.1.0","protocolVersion":1,"db":"ok"}`。
 
 ### 3.4 配置 HTTPS：Tailscale Serve（内测推荐，无需域名）
 
@@ -304,7 +316,7 @@ curl -s http://127.0.0.1:6580/api/health
 ### 7.1 升级
 
 1. 先备份（§6）；
-2. 上传新版本源码 tar.gz 到 `/tmp`，解压覆盖到 `/opt/eisechat/src`（或另建 `src-vX` 目录并改 compose 路径）；
+2. 按 §3.1 用 `bash infra/package-src.sh` 出包（固定名 `dist/eisechat-src.zip`）并上传，解压替换 `/opt/eisechat/src`；
 3. 执行 `sudo APP_VERSION=<新版本> bash /opt/eisechat/src/infra/docker/deploy.sh`；
 4. 验证 `/api/health` 的 `version`、`/download` 页面与客户端连通性。
 

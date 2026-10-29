@@ -111,6 +111,7 @@ cd apps/desktop && npm run dist                 # NSIS 安装包（M4 已产出 
 cd apps/mobile && npm install && npm run sync   # 同步 Web 产物到 Android 工程
 cd apps/mobile/android && ./gradlew assembleRelease  # APK（M5 验证，需 Android SDK/Gradle）
 bash infra/publish-linux.sh 1.1.0               # 备用：产出 Linux 发布包（Docker 部署不需要）
+bash infra/package-src.sh                       # 开发机：打固定名源码包 dist/eisechat-src.zip（覆盖）
 sudo bash infra/docker/deploy.sh                # 服务器 Docker 一键部署/升级（详见 docs/deploy.md §3）
 docker compose ps | docker compose logs -f eisechat   # 容器状态 / 日志
 sudo bash infra/backup.sh                       # 服务器每日备份（cron 见部署文档）

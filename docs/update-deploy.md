@@ -9,8 +9,9 @@
 ## 0. 一句话流程
 
 ```text
-开发机（Git 干净）→ git archive 出源码 zip → scp 上传服务器
-      → 解压替换 /opt/eisechat/src → sudo bash infra/docker/deploy.sh
+开发机（Git 干净）→ bash infra/package-src.sh（固定产出 dist/eisechat-src.zip，同名覆盖）
+      → scp dist/eisechat-src.zip chat:~/eisechat-src.zip（目标名固定）
+      → 服务器解压替换 /opt/eisechat/src → sudo bash infra/docker/deploy.sh
       → 健康检查 /download / 登录验证；出问题按 §7 回滚
 ```
 
@@ -34,30 +35,42 @@
 在仓库根目录（本机 `D:\Code\EriseChat`）：
 
 ```bash
-git status --short                      # 必须干净
-git archive --format=zip -o EiseChat-src-$(git rev-parse --short HEAD).zip HEAD
+git status --short           # 必须干净
+bash infra/package-src.sh    # 产出 dist/eisechat-src.zip（固定路径/固定名称，同名覆盖旧包）
 ```
 
+- 脚本会 `git archive HEAD` 并对 `.sh`/`Dockerfile`/compose 做 LF 行尾自检，混入 CRLF 会直接失败；
+- 产物固定为 `dist/eisechat-src.zip`（已 gitignore），**不需要关心提交号**；
 - 包内含：`server/`、`apps/web/`、`apps/desktop/`、`apps/mobile/`、`infra/`、`docker-compose.yml`、`protocol/`、说明文档；
-- 不包含：`node_modules/`、`dist/`、`data/`、`secrets.json`、`.env`、`docs/test/` 等（均已 gitignore）；
-- 可选：`git archive --format=tar.gz` 同理，服务器用 `tar -xzf` 解压。
+- 不包含：`node_modules/`、`dist/`、`data/`、`secrets.json`、`.env`、`docs/test/` 等（均已 gitignore）。
 
 ---
 
-## 3. 上传并重新构建部署（Windows 开发机，`ssh chat` 免密）
+## 3. 上传并重新构建部署（命令固定，日常直接复用）
+
+Windows 开发机（`ssh chat` 免密，别名见 `~/.ssh/config`）：
 
 ```powershell
-# 1) 上传源码包（替换为实际文件名）
-scp EiseChat-src-xxxxxxx.zip chat:/home/ggbond/eisechat-src.zip
+# 1) 上传（固定目标路径/名称，覆盖服务器旧包）
+scp dist/eisechat-src.zip chat:~/eisechat-src.zip
+```
 
-# 2) 解压到临时目录（服务器无 unzip 时用 python3；有 unzip 可改成 unzip -q -o）
-ssh chat "python3 -c \"import zipfile,shutil,os; src='/home/ggbond/eisechat-src.zip'; dst='/opt/eisechat/src.new'; shutil.rmtree(dst, ignore_errors=True); os.makedirs(dst); zipfile.ZipFile(src).extractall(dst); print('extracted ->', dst)\""
+服务器上（`ssh chat` 登录后执行；旧源码会保留为 `src.old`）：
 
-# 3) 原子替换 src（旧目录保留一份 src.old 便于排查/回滚）
-ssh chat "sudo bash -lc 'set -e; cd /opt/eisechat; rm -rf src.old; mv src src.old; mv src.new src; chown -R root:root src; echo ok'"
+```bash
+# 2) 解压替换 src（服务器无 unzip，用 python3；以下命令固定不变）
+sudo bash -c 'set -e
+  cd /opt/eisechat
+  rm -rf src.new && mkdir -p src.new
+  python3 -c "import zipfile; zipfile.ZipFile(\"/home/ggbond/eisechat-src.zip\").extractall(\"src.new\")"
+  rm -rf src.old
+  if [ -d src ]; then mv src src.old; fi
+  mv src.new src
+  chown -R root:root src
+  echo "src 已更新"'
 
-# 4) 重新构建并启动（首次/大改可能拉取基础镜像；日常有缓存约 1~3 分钟）
-ssh chat "sudo bash /opt/eisechat/src/infra/docker/deploy.sh"
+# 3) 一键构建部署（固定入口，不随提交变化）
+sudo bash /opt/eisechat/src/infra/docker/deploy.sh
 ```
 
 `deploy.sh` 会：准备/复用目录与 `.env` → `docker compose up -d --build` → 轮询 `http://127.0.0.1:6580/api/health` 直到就绪 → 打印容器状态与后续步骤。
@@ -65,11 +78,12 @@ ssh chat "sudo bash /opt/eisechat/src/infra/docker/deploy.sh"
 验证：
 
 ```powershell
-ssh chat "curl -fsS http://127.0.0.1:6580/api/health"
+ssh chat "curl -fsS http://127.0.0.1:6580/api/health"   # version 应为本次发布版本
 ssh chat "sudo bash -lc 'cd /opt/eisechat/src && docker compose ps && docker compose logs --tail=50 eisechat'"
 ```
 
 > 说明：登录态/消息数据在 `/opt/eisechat/data`，重建容器不会丢失；容器内以非 root 用户 `app`(UID 1654) 运行，`deploy.sh` 会确保数据目录可写。
+> 2026-10-29 首次 Docker 部署实测通过（`eisechat-server` healthy，`/api/health` 返回 `version 1.1.0`）。
 
 ---
 
@@ -81,7 +95,7 @@ ssh chat "sudo bash -lc 'cd /opt/eisechat/src && docker compose ps && docker com
 | 服务端（`server/`） | 走 §2~§3 重新构建 |
 | 协议 / 库表（`protocol/`、EF 迁移） | 走 §2~§3；容器启动自动执行迁移；**升级前先 §5 备份**，只做兼容增量 |
 | 桌面 exe / Android APK | 不进 Docker：本地打包后 scp 到 `/opt/eisechat/data/downloads/`，`GET /download` 按文件名规则自动展示最新包 |
-| 仅配置（SMTP/JWT/端口） | 编辑 `/opt/eisechat/.env` 后 `docker compose restart eisechat`（无需重建） |
+| 仅配置（SMTP/JWT/端口） | 编辑 `/opt/eisechat/.env` 后 `sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh`（只重启，不重建） |
 
 上传新安装包示例：
 
@@ -95,14 +109,16 @@ ssh chat "sudo bash -lc 'mv /tmp/EiseChat-Setup-1.1.1.exe /opt/eisechat/data/dow
 ## 5. 升级前备份（重要）
 
 ```powershell
-# 1) 每天/升级前跑一次备份脚本（含 SQLite 在线备份 + files 目录，保留策略见脚本）
-ssh chat "sudo bash /opt/eisechat/src/infra/backup.sh"
+# 1) 每天/升级前跑一次备份脚本（SQLite 在线快照 + files/downloads 打包，保留最近 30 份）
+ssh chat "sudo EISECHAT_DATA_DIR=/opt/eisechat/data EISECHAT_BACKUP_DIR=/var/backups/eisechat bash /opt/eisechat/src/infra/backup.sh"
 
 # 2) 备份产物确认
-ssh chat "sudo ls -lt /opt/eisechat/data/backups/ | head"
+ssh chat "sudo ls -lt /var/backups/eisechat/ | head"
 ```
 
-- 备份目录：`/opt/eisechat/data/backups/`（或脚本配置的异机/对象存储位置）；
+- 备份产物：`/var/backups/eisechat/eisechat-YYYYmmdd-HHMM.tar.gz`（默认保留 30 份；异机同步用 `EISECHAT_REMOTE=user@host:/path`）；
+- 需要 `sqlite3`（`sudo apt-get install -y sqlite3 rsync`）才能用 `VACUUM INTO` 生成一致快照（未装则退化为文件拷贝）；
+- 每天自动备份可加 cron（详见 [docs/deploy.md](deploy.md) §6.1）；
 - 恢复步骤见 [docs/deploy.md](deploy.md) §6（恢复演练属于 M6 事项，内测前至少手动演练一次）。
 
 ---

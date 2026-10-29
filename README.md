@@ -41,7 +41,7 @@
 | `docs/internal-plan.md`（本地文档，不入库） | **现行主计划（V2.3.5）**：协议设计、数据模型、Windows/Android/服务器方案（iPhone 仅方案）、安装程序、云端部署、6~7 周路线、成本与风险 |
 | [docs/project-overview.md](docs/project-overview.md) | **项目说明与目录架构**：项目定位/范围/技术栈/总体架构 + 文件级目录规划、模块职责、依赖方向；M0 建骨架按此执行 |
 | [docs/deploy.md](docs/deploy.md) | 服务端 Docker Compose 一键部署、HTTPS、配置项、邮件通道、备份恢复、升级回滚 |
-| [docs/update-deploy.md](docs/update-deploy.md) | 改代码后自行构建部署：出源码包 → 上传替换 → 服务器一键重建 → 验证与回滚 |
+| [docs/update-deploy.md](docs/update-deploy.md) | 改代码后自行构建部署：出固定名源码包（`infra/package-src.sh`）→ 上传替换 → 服务器一键重建 → 验证与回滚 |
 | [docs/web.md](docs/web.md) | Web 端开发运行、构建、生产部署（dist → wwwroot）、验收清单与排障 |
 | [docs/desktop.md](docs/desktop.md) | Windows 桌面端安装、日常行为（托盘/通知/设置）、开发联调、NSIS 打包与排障 |
 | [docs/mobile.md](docs/mobile.md) | Android 端安装、签名、USB/局域网联机、APK 打包与真机验收 |
@@ -70,7 +70,7 @@ apps/desktop    Electron 壳 + Windows 安装包
 apps/mobile     Capacitor 壳 + Android APK
 server/         ASP.NET Core 单进程（Chat.Server / Tests / Protocol）
 protocol/       协议文档、JSON Schema、DDL
-infra/          docker/（Dockerfile + deploy.sh）、install.sh、caddy、backup、email、keys（keystore）
+infra/          docker/（Dockerfile + deploy.sh）、package-src.sh、install.sh、caddy、backup、email、keys（keystore）
 docs/           计划、协议、部署、使用说明
 ```
 
@@ -100,8 +100,9 @@ EISECHAT_PYTHON=python node docs/test/m3-e2e.mjs
 
 # 下载页 / 安装包分发（服务端启动后；安装包放 data/downloads/，浏览器打开 http://127.0.0.1:6580/download）
 
-# 服务器部署（Docker Compose 一键部署，详见 docs/deploy.md）
-# 开发机：git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD，再 scp 到服务器 /tmp
+# 服务器部署（Docker Compose 一键部署，详见 docs/deploy.md §3 / docs/update-deploy.md）
+bash infra/package-src.sh                       # 开发机：打固定名源码包 dist/eisechat-src.zip（覆盖）
+# 上传：scp dist/eisechat-src.zip chat:~/eisechat-src.zip（目标名固定），服务器解压替换 /opt/eisechat/src
 sudo bash infra/docker/deploy.sh                # 服务器上执行（构建镜像 + 启动 + 健康检查）
 sudo bash infra/backup.sh                       # 服务器备份（每日 cron 见部署文档）
 # 备用（无 Docker 环境）：publish-linux.sh + install.sh，见 docs/deploy.md 附录
