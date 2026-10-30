@@ -291,12 +291,6 @@ function clearServerUrl(): void {
       <div class="login-brand__inner">
         <span class="login-brand__logo">E</span>
         <h1 class="login-brand__title">EiseChat</h1>
-        <p class="login-brand__desc">团队内部使用的轻量聊天工具：消息实时送达，历史随时可查。</p>
-        <ul class="login-brand__list">
-          <li>邮箱验证码登录，无需额外注册流程</li>
-          <li>单聊与群聊，支持图片和文件</li>
-          <li>断线自动重连，消息不丢失</li>
-        </ul>
       </div>
     </section>
 
@@ -310,14 +304,6 @@ function clearServerUrl(): void {
         <h2 class="login-card__title">
           {{ mode === 'reset' ? '找回密码' : mode === 'register' ? '创建账号' : '欢迎回来' }}
         </h2>
-        <p class="login-card__subtitle">
-          {{
-            mode === 'reset'
-              ? '通过邮箱验证码重置登录密码'
-              : '内部聊天工具 · 邮箱验证码登录'
-          }}
-        </p>
-
         <div class="login-server">
           <p v-if="injectedServerUrl" class="login-server__locked">
             服务器地址：{{ injectedServerUrl }}（由桌面端配置）
@@ -530,40 +516,6 @@ function clearServerUrl(): void {
   font-weight: 700;
 }
 
-.login-brand__desc {
-  margin: 0 0 var(--ec-space-5);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-body);
-  line-height: 1.7;
-}
-
-.login-brand__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ec-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.login-brand__list li {
-  position: relative;
-  padding-left: var(--ec-space-4);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-}
-
-.login-brand__list li::before {
-  position: absolute;
-  top: 6px;
-  left: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-brand-600);
-  content: '';
-}
-
 .login-panel {
   display: flex;
   flex: 1 1 0;
@@ -594,12 +546,6 @@ function clearServerUrl(): void {
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-page-title);
   font-weight: var(--ec-font-weight-semibold);
-}
-
-.login-card__subtitle {
-  margin: 0 0 var(--ec-space-5);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
 }
 
 .login-server {

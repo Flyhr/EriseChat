@@ -45,7 +45,6 @@ interface SettingsSection {
   id: SectionId
   label: string
   title: string
-  description: string
   icon: AppIconName
 }
 
@@ -55,34 +54,30 @@ const SECTIONS: SettingsSection[] = [
     id: 'profile',
     label: '个人资料',
     title: '个人资料',
-    description: '头像和昵称会显示在你的消息、会话列表与成员列表中。',
     icon: 'user',
   },
   {
     id: 'account',
     label: '账号与安全',
     title: '账号与安全',
-    description: '查看当前登录的邮箱账号，退出当前设备上的登录。',
     icon: 'shield',
   },
   {
     id: 'notifications',
     label: '通知与提醒',
     title: '通知与提醒',
-    description: '控制新消息的提示方式。',    icon: 'bell',
+    icon: 'bell',
   },
   {
     id: 'appearance',
     label: '外观',
     title: '外观',
-    description: '主题与消息展示样式。',
     icon: 'palette',
   },
   {
     id: 'connection',
     label: '连接与关于',
     title: '连接与关于',
-    description: '服务器连接、客户端版本与下载入口。',
     icon: 'link',
   },
 ]
@@ -472,7 +467,6 @@ async function saveProfile(): Promise<void> {
     <!-- 移动端首页标题栏（桌面隐藏；进入分节详情后由内容头部的返回栏替代） -->
     <header class="settings-mobile-bar">
       <h1 class="settings-mobile-bar__title">设置</h1>
-      <p class="settings-mobile-bar__subtitle">账号、通知与连接</p>
     </header>
 
     <div class="settings-layout">
@@ -556,7 +550,6 @@ async function saveProfile(): Promise<void> {
           </button>
           <div class="settings-content__heading">
             <h2 class="settings-content__title">{{ currentSection.title }}</h2>
-            <p class="settings-content__desc">{{ currentSection.description }}</p>
           </div>
         </header>
 
@@ -708,7 +701,7 @@ async function saveProfile(): Promise<void> {
             </template>
           </SettingsGroup>
 
-          <SettingsGroup title="登录" description="同一账号同一时间只保留一个活动连接；在新设备登录会替代旧连接。">
+          <SettingsGroup title="登录">
             <SettingsRow label="退出登录" hint="退出后本机将清除登录态与本地缓存" tone="danger">
               <button
                 type="button"
@@ -749,9 +742,6 @@ async function saveProfile(): Promise<void> {
               />
             </SettingsRow>
           </SettingsGroup>
-          <p class="settings-note">
-            设置只保存在本机（localStorage），不同步到其他设备；清除浏览器数据后恢复默认值。
-          </p>
         </div>
 
         <!-- 外观 -->
@@ -762,7 +752,6 @@ async function saveProfile(): Promise<void> {
                 <span class="settings-theme__preview settings-theme__preview--light" aria-hidden="true" />
                 <span class="settings-theme__meta">
                   <span class="settings-theme__name">浅色（当前）</span>
-                  <span class="settings-theme__hint">澄蓝聊天主题</span>
                 </span>
                 <AppIcon class="settings-theme__check" name="check" :size="18" />
               </div>
@@ -1080,14 +1069,6 @@ async function saveProfile(): Promise<void> {
   line-height: 1.3;
 }
 
-.settings-content__desc {
-  margin: 0;
-  max-width: 60ch;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  line-height: 1.5;
-}
-
 .settings-content__body {
   display: flex;
   flex-direction: column;
@@ -1302,13 +1283,6 @@ async function saveProfile(): Promise<void> {
   }
 }
 
-.settings-note {
-  margin: 0;
-  color: var(--ec-text-tertiary);
-  font-size: var(--ec-font-size-small);
-  line-height: 1.5;
-}
-
 .settings-actions {
   display: flex;
   gap: var(--ec-space-3);
@@ -1433,11 +1407,6 @@ async function saveProfile(): Promise<void> {
   font-weight: var(--ec-font-weight-medium);
 }
 
-.settings-theme__hint {
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-}
-
 .settings-theme__badge {
   align-self: flex-start;
   padding: 1px 6px;
@@ -1489,12 +1458,6 @@ async function saveProfile(): Promise<void> {
     color: var(--ec-text-primary);
     font-size: var(--ec-font-size-mobile-page-title, 22px);
     font-weight: var(--ec-font-weight-semibold);
-  }
-
-  .settings-mobile-bar__subtitle {
-    margin: 0;
-    color: var(--ec-text-secondary);
-    font-size: var(--ec-font-size-mobile-list-sub, 13px);
   }
 
   .settings-index {
@@ -1672,10 +1635,6 @@ async function saveProfile(): Promise<void> {
 
   .settings-content__title {
     font-size: var(--ec-font-size-mobile-header, 17px);
-  }
-
-  .settings-content__desc {
-    display: none;
   }
 
   .settings-content__body {

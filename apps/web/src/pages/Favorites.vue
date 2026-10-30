@@ -80,10 +80,6 @@ async function confirmDelete(): Promise<void> {
       </div>
     </header>
 
-    <p class="favorites-page__hint">
-      收藏仅保存在本设备并按账号隔离，不做云端同步；内容为收藏时的快照，原消息之后的撤回或编辑不会改变这里的内容。
-    </p>
-
     <p v-if="!favorites.loaded" class="favorites-page__loading">正在读取本地收藏…</p>
 
     <EmptyState
@@ -165,14 +161,6 @@ async function confirmDelete(): Promise<void> {
   margin: var(--ec-space-1) 0 0;
   color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-small);
-}
-
-.favorites-page__hint {
-  max-width: 880px;
-  margin: 0 auto var(--ec-space-5);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  line-height: 1.6;
 }
 
 .favorites-page__loading {

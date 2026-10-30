@@ -11,7 +11,6 @@ import EmptyState from '../components/EmptyState.vue'
     <EmptyState
       icon="settings"
       title="管理功能尚未开放"
-      description="用户管理、注册策略与审计日志将在后续版本提供；当前仅保留入口占位。"
     />
   </main>
 </template>
