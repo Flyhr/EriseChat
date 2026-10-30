@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using Chat.Protocol;
 using Chat.Server.Api;
@@ -16,6 +17,7 @@ using Chat.Server.Modules.Realtime;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -200,6 +202,19 @@ builder.Services.AddDbContext<ChatDbContext>((services, options) =>
     options.UseSqlite(connectionString)
         .AddInterceptors(services.GetRequiredService<SqlitePragmaInterceptor>()));
 
+// 反向代理（Tailscale Serve / Caddy 与本进程同机）：只信任回环代理转发的 X-Forwarded-For/Proto，
+// 否则外部请求的来源 IP 全是 127.0.0.1，同 IP 限流（AGENTS §6）会变成全站共享，审计/登录锁定也会失真。
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownProxies.Clear();
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Add(IPAddress.Loopback);
+    options.KnownProxies.Add(IPAddress.IPv6Loopback);
+    // 只穿过一层代理（Serve/Caddy），多余的 X-Forwarded-For 条目不可信。
+    options.ForwardLimit = 1;
+});
+
 var app = builder.Build();
 
 if (jwtKeyGenerated)
@@ -213,6 +228,9 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
     db.Database.Migrate();
 }
+
+// 最外层先还原真实客户端 IP/协议：限流、审计、登录锁定都依赖 HttpContext.Connection.RemoteIpAddress。
+app.UseForwardedHeaders();
 
 // 统一错误处理：异常中间件在最外层；状态码兜底为 404/405 等无响应体的响应补 JSON
 // （后续鉴权中间件返回 401/403 时同样复用该错误体）。
