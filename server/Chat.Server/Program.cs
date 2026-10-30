@@ -211,6 +211,9 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Add(IPAddress.Loopback);
     options.KnownProxies.Add(IPAddress.IPv6Loopback);
+    // 容器部署时宿主代理经 Docker 端口映射进入容器，对端地址是默认桥网网关（如 172.18.0.1），
+    // 不是 127.0.0.1；因此信任 Docker 私有网段。服务端口只绑定宿主回环，外部无法直连伪造该头。
+    options.KnownIPNetworks.Add(new System.Net.IPNetwork(IPAddress.Parse("172.16.0.0"), 12));
     // 只穿过一层代理（Serve/Caddy），多余的 X-Forwarded-For 条目不可信。
     options.ForwardLimit = 1;
 });
