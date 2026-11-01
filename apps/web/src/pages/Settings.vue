@@ -556,7 +556,7 @@ async function saveProfile(): Promise<void> {
         <!-- 个人资料 -->
         <div v-if="activeSectionId === 'profile'" class="settings-content__body">
           <SettingsGroup title="资料">
-            <SettingsRow label="头像" hint="显示在消息、会话列表与成员列表">
+            <SettingsRow label="头像">
               <Avatar
                 :display-name="displayNameInput || auth.user?.displayName || ''"
                 :avatar-file-id="avatarFileIdInput ?? undefined"
@@ -579,7 +579,7 @@ async function saveProfile(): Promise<void> {
                 @change="onAvatarPicked"
               />
             </SettingsRow>
-            <SettingsRow label="昵称" hint="1~32 个字符，显示给会话中的其他成员" vertical>
+            <SettingsRow label="昵称" vertical>
               <div class="settings-field">
                 <input
                   v-model="displayNameInput"
@@ -655,10 +655,7 @@ async function saveProfile(): Promise<void> {
             </SettingsRow>
           </SettingsGroup>
 
-          <SettingsGroup
-            title="登录设备"
-            description="退出某台设备会立即断开该设备的连接；当前设备请使用「退出登录」。"
-          >
+          <SettingsGroup title="登录设备">
             <SettingsRow v-if="sessionsLoading" label="正在加载登录设备…">
               <span class="settings-value">请稍候</span>
             </SettingsRow>
@@ -702,7 +699,7 @@ async function saveProfile(): Promise<void> {
           </SettingsGroup>
 
           <SettingsGroup title="登录">
-            <SettingsRow label="退出登录" hint="退出后本机将清除登录态与本地缓存" tone="danger">
+            <SettingsRow label="退出登录" tone="danger">
               <button
                 type="button"
                 class="settings-btn settings-btn--danger"
