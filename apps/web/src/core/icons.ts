@@ -31,6 +31,10 @@ export type AppIconName =
   | 'shield'
   // F-26：收藏入口。
   | 'star'
+  // F-28：语音消息（录音 / 播放 / 暂停）。
+  | 'mic'
+  | 'play'
+  | 'pause'
 
 export interface AppIconShape {
   paths?: string[]
@@ -120,4 +124,14 @@ export const APP_ICONS: Record<AppIconName, AppIconShape> = {
     ],
   },
   star: { paths: ['M12 3.9l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8L12 3.9Z'] },
+  mic: {
+    paths: [
+      'M12 3.5a2.5 2.5 0 0 0-2.5 2.5v5a2.5 2.5 0 0 0 5 0V6A2.5 2.5 0 0 0 12 3.5Z',
+      'M6.5 11.5a5.5 5.5 0 0 0 11 0',
+      'M12 17v3.5',
+      'M9 20.5h6',
+    ],
+  },
+  play: { paths: ['M8 5.5v13l11-6.5-11-6.5Z'] },
+  pause: { paths: ['M9 5.5v13', 'M15 5.5v13'] },
 }

@@ -8,6 +8,8 @@ import { filterMentionCandidates, findMentionToken, insertMention } from '../cor
 import type { MentionCandidateMember, MentionToken } from '../core/mentions'
 import { filesOfClipboard, normalizeDroppedFile } from '../core/fileDrop'
 import { replyCardText, type ReplyPreviewLike } from '../core/replyPreview'
+import { mapRecorderError, startVoiceRecording, type VoiceRecorderHandle } from '../core/recorder'
+import { formatDuration } from '../core/voice'
 
 // 发送框（纯展示 + 本地输入）：文本只 emit send，附件只 emit file-selected；
 // 上传、压缩、发送状态机由 pages/Chat.vue 与 stores/messages.ts 负责。
@@ -27,6 +29,10 @@ const emit = defineEmits<{
   'draft-change': [text: string]
   /** F-09：取消当前回复引用。 */
   'cancel-reply': []
+  /** F-28：录音完成，交由父组件上传并以 voice 消息发送。 */
+  'send-voice': [payload: { blob: Blob; durationMs: number }]
+  /** F-28：录音失败/过短等提示，由父组件用 toast 展示。 */
+  'voice-error': [message: string]
 }>()
 
 const props = withDefaults(
@@ -68,6 +74,93 @@ const length = computed(() => text.value.length)
 const atLimit = computed(() => length.value >= MAX_TEXT_LENGTH)
 /** 与服务端白名单一致的 accept（仅影响选择框过滤，真正校验在 attachments.ts）。 */
 const accept = ALLOWED_EXTENSIONS.join(',')
+
+// F-28：录音状态。点击麦克风开始，输入区切换为录音条（计时/取消/发送）；Esc 取消。
+const recording = ref<VoiceRecorderHandle | null>(null)
+const recordingElapsed = ref(0)
+const recordingStopping = ref(false)
+const recordingActive = computed(() => recording.value !== null)
+/** 浏览器是否具备录音能力（无麦克风权限时点击仍会提示，由 recorder 映射错误文案）。 */
+const voiceSupported = computed(
+  () =>
+    typeof MediaRecorder !== 'undefined' &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.mediaDevices?.getUserMedia === 'function',
+)
+let recordingTimer: number | null = null
+let recordingStartedAt = 0
+
+function clearRecordingTimer(): void {
+  if (recordingTimer !== null) {
+    window.clearInterval(recordingTimer)
+    recordingTimer = null
+  }
+}
+
+function onRecordingKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  cancelRecording()
+}
+
+watch(recordingActive, (active) => {
+  if (active) document.addEventListener('keydown', onRecordingKeydown, true)
+  else document.removeEventListener('keydown', onRecordingKeydown, true)
+})
+
+async function startRecording(): Promise<void> {
+  if (recording.value || props.uploading || recordingStopping.value) return
+  if (!voiceSupported.value) {
+    emit('voice-error', '当前环境不支持录音')
+    return
+  }
+  closeMention()
+  try {
+    const handle = await startVoiceRecording()
+    recording.value = handle
+    recordingStartedAt = Date.now()
+    recordingElapsed.value = 0
+    clearRecordingTimer()
+    recordingTimer = window.setInterval(() => {
+      recordingElapsed.value = Math.min(Date.now() - recordingStartedAt, 60_000)
+      if (recordingElapsed.value >= 60_000) void finishRecording(true)
+    }, 200)
+  } catch (error) {
+    emit('voice-error', mapRecorderError(error))
+  }
+}
+
+async function finishRecording(autoStop = false): Promise<void> {
+  const handle = recording.value
+  if (!handle || recordingStopping.value) return
+  recordingStopping.value = true
+  clearRecordingTimer()
+  try {
+    const result = await handle.stop()
+    recording.value = null
+    if (autoStop) emit('voice-error', '录音已达 60 秒，已自动结束')
+    if (result.durationMs < 1_000 || result.blob.size === 0) {
+      emit('voice-error', '录音时间太短（至少 1 秒）')
+      return
+    }
+    emit('send-voice', { blob: result.blob, durationMs: Math.min(result.durationMs, 60_000) })
+  } catch {
+    recording.value = null
+    emit('voice-error', '录音结束失败，请重试')
+  } finally {
+    recordingStopping.value = false
+    recordingElapsed.value = 0
+  }
+}
+
+function cancelRecording(): void {
+  const handle = recording.value
+  if (!handle) return
+  recording.value = null
+  clearRecordingTimer()
+  recordingElapsed.value = 0
+  handle.cancel()
+}
 
 /** 依据内容调整 textarea 高度：3 行起，超过约 360px 改为内部滚动。 */
 function resizeInput(): void {
@@ -218,12 +311,20 @@ watch(mentionOpen, (open) => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+  document.removeEventListener('keydown', onRecordingKeydown, true)
+  clearRecordingTimer()
+  const handle = recording.value
+  recording.value = null
+  handle?.cancel()
 })
 
-// 切换会话/成员变化时关闭面板，避免把上一个会话的候选带过去。
+// 切换会话/成员变化时关闭面板，避免把上一个会话的候选带过去；录音中切换会话则取消录音。
 watch(
   () => props.conversationId,
-  () => closeMention(),
+  () => {
+    closeMention()
+    cancelRecording()
+  },
 )
 watch(
   () => props.mentionCandidates,
@@ -250,6 +351,7 @@ onMounted(() => {
 })
 
 function submit(): void {
+  if (recording.value) return
   const value = text.value.trim()
   if (!value || value.length > MAX_TEXT_LENGTH) return
   emit('send', value)
@@ -333,6 +435,32 @@ function onInput(): void {
           {{ mentionQuery ? `没有匹配「${mentionQuery}」的成员` : '没有可提及的成员' }}
         </p>
       </div>
+      <!-- F-28：录音中把输入区切换为录音条（计时/取消/发送），Esc 取消。 -->
+      <div v-if="recordingActive" class="send-box__recording" role="status" aria-live="polite">
+        <span class="send-box__recording-dot" aria-hidden="true" />
+        <span class="send-box__recording-time">{{ formatDuration(recordingElapsed) }}</span>
+        <span class="send-box__recording-hint">录音中，Esc 取消</span>
+        <span class="send-box__spacer" />
+        <button
+          class="send-box__icon"
+          type="button"
+          title="取消录音"
+          aria-label="取消录音"
+          :disabled="recordingStopping"
+          @click="cancelRecording"
+        >
+          <AppIcon name="close" :size="18" />
+        </button>
+        <button
+          class="send-box__send"
+          type="button"
+          :disabled="recordingStopping"
+          @click="finishRecording(false)"
+        >
+          发送
+        </button>
+      </div>
+      <template v-else>
       <textarea
         ref="input"
         v-model="text"
@@ -383,6 +511,17 @@ function onInput(): void {
         >
           <AppIcon name="emoji" :size="18" />
         </button>
+        <button
+          v-if="voiceSupported"
+          class="send-box__icon"
+          type="button"
+          title="录制语音消息"
+          aria-label="录制语音消息"
+          :disabled="uploading || recordingStopping"
+          @click="startRecording"
+        >
+          <AppIcon name="mic" :size="18" />
+        </button>
         <span v-if="uploading" class="send-box__status">上传中…</span>
         <span v-else-if="uploadError" class="send-box__status send-box__status--error">
           {{ uploadError }}
@@ -399,6 +538,7 @@ function onInput(): void {
           发送
         </button>
       </div>
+      </template>
     </div>
   </form>
 </template>
@@ -717,6 +857,62 @@ function onInput(): void {
     padding: 0 var(--ec-space-4);
     border-radius: var(--ec-radius-full);
     font-size: var(--ec-font-size-secondary);
+  }
+
+  /* F-28：移动端录音条与输入区同高，方便单手触达。 */
+  .send-box__recording {
+    min-height: var(--ec-touch-target);
+  }
+}
+
+/* F-28：录音条（替代输入区的临时状态）。 */
+.send-box__recording {
+  display: flex;
+  align-items: center;
+  gap: var(--ec-space-2);
+  min-height: 64px;
+  padding: 0 var(--ec-space-2);
+}
+
+.send-box__recording-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ec-danger);
+  animation: send-box-recording-blink 1.2s ease-in-out infinite;
+}
+
+.send-box__recording-time {
+  flex: none;
+  font-size: var(--ec-font-size-body);
+  font-weight: 600;
+  color: var(--ec-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.send-box__recording-hint {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--ec-font-size-small);
+  color: var(--ec-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes send-box-recording-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-box__recording-dot {
+    animation: none;
   }
 }
 </style>

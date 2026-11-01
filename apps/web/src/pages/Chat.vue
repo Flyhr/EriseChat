@@ -816,6 +816,36 @@ async function onPickCustomEmoji(file: File): Promise<void> {
   }
 }
 
+// F-28：录音完成 → 上传音频文件 → 以 voice 消息发送（复用现有上传/发送链路，不改协议）。
+async function handleVoiceRecorded(payload: { blob: Blob; durationMs: number }): Promise<void> {
+  const conversationId = activeId.value
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId) return
+  if (uploadBusy.value) return
+
+  uploadBusy.value = true
+  uploadError.value = null
+  try {
+    const uploaded = await filesApi.uploadVoice(payload.blob)
+    const sent = messages.sendVoiceMessage(
+      conversationId,
+      uploaded.fileId,
+      payload.durationMs,
+      senderId,
+    )
+    if (!sent) showToast('语音发送失败', 'error')
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message : '语音发送失败'
+    showToast(message, 'error')
+  } finally {
+    uploadBusy.value = false
+  }
+}
+
+function onVoiceError(message: string): void {
+  showToast(message, 'error')
+}
+
 // 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
 const uploadBusy = ref(false)
 const uploadError = ref<string | null>(null)
@@ -1049,6 +1079,8 @@ function onWindowDrop(event: DragEvent): void {
                 @send="sendMessage"
                 @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"
+                @send-voice="handleVoiceRecorded"
+                @voice-error="onVoiceError"
                 @typing="sendTyping"
                 @pick-emoji="toggleEmojiDrawer"
                 @cancel-reply="cancelReply"

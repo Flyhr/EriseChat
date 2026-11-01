@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Tray, nativeImage, shell, type NativeImage } from 'electron'
+import { app, BrowserWindow, Menu, Tray, nativeImage, session, shell, type NativeImage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc'
@@ -292,6 +292,15 @@ function applyAutoLaunch(): void {
   }
 }
 
+/** F-28：只放行麦克风（media）权限请求，其它权限一律拒绝（桌面壳不做摄像头/定位等能力）。 */
+function setupMediaPermissions(): void {
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'media')
+  })
+  // 部分 Chromium 版本在播放/录音前还会走同步检查，同样只放行 media。
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === 'media')
+}
+
 // 单实例锁：重复启动时聚焦已有窗口（M4-02 起隐藏窗口由托盘「显示主窗口」唤回）。
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -301,6 +310,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(() => {
+    setupMediaPermissions()
     registerIpcHandlers()
     applyAutoLaunch()
     mainWindow = createMainWindow()

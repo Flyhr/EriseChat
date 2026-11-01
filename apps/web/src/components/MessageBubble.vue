@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue'
-import type { Message } from '../types/frames'
+import type { Message, VoiceContent } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
 import { hasSelfMention, splitRichText } from '../core/mentions'
 import { replyCardText } from '../core/replyPreview'
 import Avatar from './Avatar.vue'
 import MessageAttachment from './MessageAttachment.vue'
+import VoiceMessagePlayer from './VoiceMessagePlayer.vue'
 
 // 消息气泡（纯展示，UI-02 批次2 按 D-05 调整）：自己蓝底白字、对方白底描边；时间与状态移到气泡下方；
 // 群聊他人消息左侧 32px 字母头像 + 昵称。文本只用插值渲染（自动转义），禁止 v-html（protocol.md §4.3）。
@@ -54,6 +55,15 @@ const emit = defineEmits<{
   /** F-09：点击引用条，请求定位到被引用的消息。 */
   'jump-to-message': [messageId: string]
 }>()
+
+/** F-28：语音消息内容（{ fileId, durationMs }）；非语音/已撤回时为空。 */
+const voiceContent = computed<VoiceContent | null>(() => {
+  if (props.message.msgType !== 'voice') return null
+  const content = props.message.content
+  if (typeof content !== 'object' || content === null) return null
+  if (!('durationMs' in content) || !('fileId' in content)) return null
+  return content as VoiceContent
+})
 
 const contentText = computed(() => {
   const content = props.message.content
@@ -234,6 +244,11 @@ const timeText = computed(() =>
           :message="message"
           @preview="onPreview"
           @loaded="emit('imageLoaded')"
+        />
+        <VoiceMessagePlayer
+          v-else-if="voiceContent"
+          :file-id="voiceContent.fileId"
+          :duration-ms="voiceContent.durationMs"
         />
         <p v-else class="message-bubble__text">
           <template v-if="richSegments.length > 0">

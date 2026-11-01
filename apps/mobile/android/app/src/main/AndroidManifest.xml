@@ -34,4 +34,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- F-28：语音消息需要录音权限。Capacitor 8 的 BridgeWebChromeClient 会在 WebView
+         请求 AUDIO_CAPTURE 时申请 RECORD_AUDIO/MODIFY_AUDIO_SETTINGS 运行时权限并授权，
+         因此 MainActivity 不再重复覆写 onPermissionRequest（否则会替换掉文件选择等默认能力）。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>
