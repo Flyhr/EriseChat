@@ -41,6 +41,7 @@
 | 开机自启 | 默认关闭；可在应用数据目录 `settings.json` 设 `"autoLaunch": true`（写入 Windows 登录启动项） |
 | 系统通知 | 窗口不可见时收到新消息弹 Windows 通知（点击通知聚焦窗口）；开关在应用内「设置 → 通知」（默认关闭） |
 | 提示音 | 应用内设置开关（默认开启），窗口不可见或非当前会话时响；WebAudio 合成，无音频文件 |
+| 语音消息 | 输入区麦克风按钮录音（最长 60 秒），气泡内播放/暂停；首次录音时 Windows 会请求麦克风权限，允许后由 Electron `session.setPermissionRequestHandler` 仅放行 `media` 权限 |
 | 外链 | 消息内 http(s) 链接点击后交给系统默认浏览器（应用内不新开窗口、不导航离开本应用） |
 | 最小窗口 | 960×640（`electron/main.ts` 的 `MIN_WIDTH/MIN_HEIGHT`），更窄的窗口会被限制 |
 | 安全默认 | `contextIsolation=true`、`nodeIntegration=false`、`sandbox=true`；页面仅能访问白名单 IPC（服务器地址、设置、通知） |
@@ -153,6 +154,7 @@ Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 - 无自动更新：发新版本需重新下载安装包覆盖安装（不购买签名证书/不做更新服务，AGENTS §2.2）。
 - 无离线推送：程序未运行或窗口关闭（关闭到托盘只是隐藏，进程仍在）时，重新打开后靠补拉同步；真正退出后新消息不提醒。
 - 免签名安装包：SmartScreen 会提示；杀毒软件偶发误报属正常现象。
+- 语音消息：录音依赖 Chromium 的 `MediaRecorder`（webm/opus），首次使用需在 Windows 设置中允许麦克风；时长由客户端上报；不做语音转文字/后台录音。
 - 通知内容只含会话名与消息摘要（由页面传入），不含 token 等敏感信息；聊天内容服务端可见（无 E2EE）。
 - 不做 iOS；不做商店上架。
 
