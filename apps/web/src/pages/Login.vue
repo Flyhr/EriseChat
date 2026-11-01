@@ -3,6 +3,15 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { chatWs } from '../core/ws'
+import {
+  getServerUrl,
+  isPackagedShell,
+  normalizeServerUrl,
+  probeServerHealth,
+  resetServerUrl,
+  setServerUrl,
+} from '../core/config'
+import { syncServerUrlToDesktop } from '../core/desktop'
 import { friendlyError } from '../core/errorMessages'
 import { validateNewPassword } from '../core/passwordRules'
 import { showToast } from '../core/toast'
@@ -32,8 +41,15 @@ const auth = useAuthStore()
 /** 致命关闭（被踢/登录失效）跳转登录页时携带的提示（M3-00）。 */
 const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.notice : '')
 
-/** 桌面/APK 打包态：页面以 file:// 加载；服务器地址统一在「设置 → 连接与关于」维护。 */
-const isFileShell = typeof window !== 'undefined' && window.location.protocol === 'file:'
+/** Electron/APK 打包态（file:// 或 Capacitor http://localhost）：登录页需提供首启服务器地址配置，Web 同源部署不显示。 */
+const packagedShell = isPackagedShell()
+/** 「服务器地址」区块：默认折叠，未配置时自动展开提示首次填写。 */
+const serverEntryOpen = ref(packagedShell && getServerUrl() === '')
+const serverUrlInput = ref(getServerUrl())
+const serverConfigured = ref(getServerUrl().length > 0)
+const serverEntryTone = ref<'info' | 'success' | 'error'>('info')
+const serverEntryStatus = ref(serverConfigured.value ? '' : '首次使用请先填写服务器地址')
+const serverSaving = ref(false)
 
 /** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
 const passwordVisible = ref(false)
@@ -69,11 +85,49 @@ const sendButtonLabel = computed(() => {
 })
 
 function toErrorMessage(error: unknown): string {
-  // 桌面/APK 以 file:// 加载时，网络失败需额外提示检查服务器地址配置（其余错误统一走 friendlyError）。
-  if (isFileShell && error instanceof TypeError) {
-    return '无法连接服务器：请检查网络，或到「设置 → 连接与关于」核对服务器地址后重试'
+  // 打包壳未配置/配错地址时网络失败：自动展开地址区块并引导检查（其余错误统一走 friendlyError）。
+  if (packagedShell && error instanceof TypeError) {
+    serverEntryOpen.value = true
+    return '无法连接服务器：请先确认服务器地址'
   }
   return friendlyError(error)
+}
+
+/** 保存并检测服务器地址（仅打包壳）：先探测可达性（失败不阻断保存），再同步 localStorage 与桌面壳设置。 */
+async function saveServerEntry(): Promise<void> {
+  if (serverSaving.value) return
+  const normalized = normalizeServerUrl(serverUrlInput.value)
+  if (!normalized) {
+    serverEntryTone.value = 'error'
+    serverEntryStatus.value = '请输入合法的 http(s) 地址，例如 https://chat.example.com'
+    return
+  }
+  serverSaving.value = true
+  serverEntryTone.value = 'info'
+  serverEntryStatus.value = '正在检测服务…'
+  const probe = await probeServerHealth(normalized)
+  const saved = setServerUrl(normalized)
+  await syncServerUrlToDesktop(normalized)
+  serverConfigured.value = saved
+  serverUrlInput.value = normalized
+  serverSaving.value = false
+  if (probe.ok) {
+    serverEntryTone.value = 'success'
+    serverEntryStatus.value = `服务可达${probe.version ? `（v${probe.version}）` : ''}，已保存，请登录`
+  } else {
+    serverEntryTone.value = 'error'
+    serverEntryStatus.value = `${probe.message}；地址已保存，可稍后重试`
+  }
+}
+
+/** 清除服务器地址（仅打包壳）：回退同源/构建期默认，并同步清空桌面壳设置。 */
+async function clearServerEntry(): Promise<void> {
+  resetServerUrl()
+  await syncServerUrlToDesktop('')
+  serverUrlInput.value = ''
+  serverConfigured.value = false
+  serverEntryTone.value = 'info'
+  serverEntryStatus.value = '首次使用请先填写服务器地址'
 }
 
 function startCooldown(seconds: number): void {
@@ -257,6 +311,61 @@ function applySession(response: LoginResponse): void {
         <h2 class="login-card__title">
           {{ mode === 'reset' ? '找回密码' : mode === 'register' ? '创建账号' : '欢迎回来' }}
         </h2>
+
+        <!-- 打包壳（桌面/APK）首启配置服务器地址；Web 同源部署不显示。 -->
+        <div v-if="packagedShell" class="login-server">
+          <button
+            class="login-server__toggle"
+            type="button"
+            :aria-expanded="serverEntryOpen"
+            @click="serverEntryOpen = !serverEntryOpen"
+          >
+            <span class="login-server__title">服务器地址</span>
+            <span class="login-server__current">{{ serverConfigured ? serverUrlInput : '未配置' }}</span>
+            <span class="login-server__action">{{ serverEntryOpen ? '收起' : '设置' }}</span>
+          </button>
+          <div v-if="serverEntryOpen" class="login-server__panel">
+            <label class="login-server__field" for="login-server-url">
+              <span class="login-form__label">服务器地址</span>
+              <input
+                id="login-server-url"
+                v-model="serverUrlInput"
+                type="url"
+                inputmode="url"
+                autocomplete="url"
+                placeholder="https://chat-server.xxx.ts.net"
+                @keydown.enter.prevent="saveServerEntry"
+              />
+            </label>
+            <p
+              v-if="serverEntryStatus"
+              class="login-server__status"
+              :class="`login-server__status--${serverEntryTone}`"
+              role="status"
+            >
+              {{ serverEntryStatus }}
+            </p>
+            <div class="login-server__actions">
+              <button
+                class="login-server__save"
+                type="button"
+                :disabled="serverSaving"
+                @click="saveServerEntry"
+              >
+                {{ serverSaving ? '检测中…' : '保存并检测' }}
+              </button>
+              <button
+                v-if="serverConfigured"
+                class="login-server__clear"
+                type="button"
+                @click="clearServerEntry"
+              >
+                清除
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div v-if="mode !== 'reset'" class="login-modes" role="tablist" aria-label="登录方式">
           <button
             v-for="item in modes"
@@ -471,6 +580,126 @@ function applySession(response: LoginResponse): void {
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-page-title);
   font-weight: var(--ec-font-weight-semibold);
+}
+
+/* 打包壳首启服务器地址区块（默认折叠；未配置时自动展开）。 */
+.login-server {
+  margin: var(--ec-space-3) 0 var(--ec-space-4);
+  overflow: hidden;
+  background: var(--ec-nav-bg);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+}
+
+.login-server__toggle {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  width: 100%;
+  padding: 8px var(--ec-space-3);
+  border: none;
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.login-server__title {
+  flex: none;
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.login-server__current {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ec-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-server__action {
+  flex: none;
+  color: var(--ec-brand-600);
+}
+
+.login-server__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  padding: 0 var(--ec-space-3) var(--ec-space-3);
+  border-top: 1px solid var(--ec-border);
+}
+
+.login-server__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: var(--ec-space-3);
+}
+
+.login-server__field input {
+  width: 100%;
+  padding: 10px var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  outline: none;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  box-sizing: border-box;
+  transition: border-color var(--ec-transition-fast) var(--ec-transition-ease);
+}
+
+.login-server__field input:focus {
+  border-color: var(--ec-brand-600);
+}
+
+.login-server__status {
+  margin: 0;
+  font-size: var(--ec-font-size-small);
+  line-height: 1.5;
+}
+
+.login-server__status--info {
+  color: var(--ec-text-secondary);
+}
+
+.login-server__status--success {
+  color: var(--ec-success);
+}
+
+.login-server__status--error {
+  color: var(--ec-danger);
+}
+
+.login-server__actions {
+  display: flex;
+  gap: var(--ec-space-2);
+}
+
+.login-server__save {
+  padding: 8px var(--ec-space-4);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.login-server__save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-server__clear {
+  padding: 8px var(--ec-space-4);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
 }
 
 .login-modes {

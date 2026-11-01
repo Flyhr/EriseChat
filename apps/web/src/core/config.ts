@@ -126,6 +126,51 @@ export function resetServerUrl(): void {
 }
 
 /**
+ * 是否运行在「打包壳」内（打包壳才需要登录页提供服务器地址入口）：
+ * - `file:`：Electron 桌面壳直接加载本地 index.html；
+ * - `localhost`：Android Capacitor `androidScheme: 'http'` 的页面 origin；
+ * - Vite 开发态（DEV=true）排除；Web 同源部署（域名 / 127.0.0.1 服务端静态页）返回 false。
+ */
+export function isPackagedShell(dev: boolean = Boolean(env.DEV)): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.location.protocol === 'file:') return true
+  return !dev && window.location.hostname === 'localhost'
+}
+
+export interface ServerProbeResult {
+  ok: boolean
+  /** 服务端 health 返回的版本号；失败或未返回时为空串。 */
+  version: string
+  /** 失败原因（中文，可直接展示）。 */
+  message: string
+}
+
+/**
+ * 探测服务器可达性：GET `<server>/api/health`，默认 5 秒超时。
+ * 只用于登录页提示，失败不阻断保存（允许先存后修）。
+ */
+export async function probeServerHealth(serverUrl: string, timeoutMs = 5000): Promise<ServerProbeResult> {
+  const normalized = normalizeServerUrl(serverUrl)
+  if (!normalized) return { ok: false, version: '', message: '地址格式不正确' }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(`${normalized}/api/health`, { signal: controller.signal })
+    if (!response.ok) return { ok: false, version: '', message: `服务返回 ${response.status}` }
+    const body = (await response.json()) as { version?: unknown }
+    return {
+      ok: true,
+      version: typeof body.version === 'string' ? body.version : '',
+      message: '',
+    }
+  } catch {
+    return { ok: false, version: '', message: '无法连接，请检查地址或网络' }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
  * 第 attempt 次重连的等待时间（毫秒）：退避基数 + 0~500ms 随机抖动（AGENTS.md §5.8）。
  * attempt 从 0 开始；超过数组长度后按最后一项（30s）重试。
  */

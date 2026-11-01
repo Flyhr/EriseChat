@@ -3,7 +3,9 @@ import { createMemoryStorage } from '../test/fixtures'
 import {
   config,
   getServerUrl,
+  isPackagedShell,
   normalizeServerUrl,
+  probeServerHealth,
   resetServerUrl,
   resolveApiBase,
   resolveWsUrl,
@@ -110,5 +112,69 @@ describe('resolveApiBase / resolveWsUrl', () => {
     expect(getServerUrl()).toBe('https://desktop.example.com')
     expect(resolveApiBase()).toBe('https://desktop.example.com/api')
     expect(resolveWsUrl()).toBe('wss://desktop.example.com/ws')
+  })
+})
+
+describe('isPackagedShell', () => {
+  function stubLocation(protocol: string, hostname: string): void {
+    vi.stubGlobal('window', { location: { protocol, hostname } } as unknown as Window)
+  }
+
+  it('无 window（测试/SSR 环境）时返回 false', () => {
+    expect(isPackagedShell(false)).toBe(false)
+  })
+
+  it('file: 协议视为 Electron 打包壳', () => {
+    stubLocation('file:', '')
+    expect(isPackagedShell(false)).toBe(true)
+  })
+
+  it('localhost 在非开发态视为 Android 打包壳，Vite 开发态不视为打包壳', () => {
+    stubLocation('http:', 'localhost')
+    expect(isPackagedShell(false)).toBe(true)
+    expect(isPackagedShell(true)).toBe(false)
+  })
+
+  it('Web 同源部署（域名 / 127.0.0.1）不视为打包壳', () => {
+    stubLocation('https:', 'chat.example.com')
+    expect(isPackagedShell(false)).toBe(false)
+    stubLocation('http:', '127.0.0.1')
+    expect(isPackagedShell(false)).toBe(false)
+  })
+})
+
+describe('probeServerHealth', () => {
+  it('探测成功时返回版本号，并请求归一化后的 /api/health', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', version: '1.1.0' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeServerHealth('https://chat.example.com/')
+    expect(result).toEqual({ ok: true, version: '1.1.0', message: '' })
+    expect(fetchMock).toHaveBeenCalledWith('https://chat.example.com/api/health', expect.anything())
+  })
+
+  it('服务返回非 2xx 时给出状态码提示', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+    const result = await probeServerHealth('http://127.0.0.1:6580')
+    expect(result.ok).toBe(false)
+    expect(result.message).toBe('服务返回 503')
+  })
+
+  it('网络失败时给出无法连接提示', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    const result = await probeServerHealth('http://127.0.0.1:6580')
+    expect(result.ok).toBe(false)
+    expect(result.message).toBe('无法连接，请检查地址或网络')
+  })
+
+  it('非法地址直接返回格式错误，不发请求', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await probeServerHealth('not-a-url')
+    expect(result).toEqual({ ok: false, version: '', message: '地址格式不正确' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

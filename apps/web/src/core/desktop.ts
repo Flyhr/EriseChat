@@ -10,6 +10,8 @@ interface DesktopBridge {
   setUnreadTotal?: (count: number) => void
   /** 订阅系统通知点击事件（F-01），返回取消订阅函数。 */
   onNotificationClick?: (callback: NotificationClickCallback) => () => void
+  /** 保存服务器地址到壳 settings.json（M4-02；登录页首启配置时与 localStorage 保持一致）。 */
+  setServerUrl?: (url: string) => Promise<{ ok: boolean; serverUrl: string }>
 }
 
 function getBridge(): DesktopBridge | null {
@@ -40,6 +42,21 @@ export function setDesktopUnreadTotal(count: number): void {
     bridge.setUnreadTotal(total)
   } catch {
     // 桌面桥不可用时静默降级，不影响 Web 内的未读展示。
+  }
+}
+
+/**
+ * 把服务器地址同步到桌面壳 settings.json（登录页首启配置 / 清除时调用）。
+ * 无桌面壳（Web/APK）或旧版壳未暴露接口时静默跳过；失败不阻断 Web 内的登录流程。
+ */
+export async function syncServerUrlToDesktop(url: string): Promise<boolean> {
+  const bridge = getBridge()
+  if (typeof bridge?.setServerUrl !== 'function') return false
+  try {
+    const result = await bridge.setServerUrl(url)
+    return result?.ok === true
+  } catch {
+    return false
   }
 }
 
