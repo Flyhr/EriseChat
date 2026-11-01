@@ -365,8 +365,8 @@ public sealed class WebSocketConnectionHandler
         await hub.HandleSyncAsync(connection, request, connectionAborted);
     }
 
-    /// <summary>read.update（M3-05）：只增不减更新自己的已读游标；单聊推 read.updated 给对方（不回显）。</summary>
-    private async Task HandleReadUpdateAsync(
+    /// <summary>read.update（M3-05/F-22）：只增不减更新自己的已读游标；单聊推 read.updated 给对方（不回显），并同步给本人其他在线连接。</summary>
+    internal async Task HandleReadUpdateAsync(
         WsConnection connection,
         ReadUpdateFrame request,
         CancellationToken connectionAborted)
@@ -382,19 +382,26 @@ public sealed class WebSocketConnectionHandler
             var reads = scope.ServiceProvider.GetRequiredService<ReadService>();
             var result = await reads.UpdateReadAsync(connection.UserId, request.ConversationId, request.LastReadSeq, connectionAborted);
 
-            // 只增不减：游标未推进（重复/更小的上报）不广播，避免对方收到无变化的 read.updated。
-            if (result.Changed && !string.IsNullOrEmpty(result.OtherUserId))
+            // 只增不减：游标未推进（重复/更小的上报）不广播，避免收到无变化的 read.updated。
+            if (result.Changed)
             {
                 var frame = new ReadUpdatedFrame(request.ConversationId, connection.UserId, result.LastReadSeq);
-                foreach (var peer in _connections.GetConnections(result.OtherUserId))
+
+                // 多端已读（F-22）：同步给本账号其他在线连接，排除上报来源、不回显给来源连接。
+                foreach (var ownConnection in _connections.GetConnections(connection.UserId))
                 {
-                    try
+                    if (!ReferenceEquals(ownConnection, connection))
                     {
-                        await peer.SendFrameAsync(frame, CancellationToken.None);
+                        await SendReadUpdatedSafeAsync(ownConnection, frame);
                     }
-                    catch (Exception exception)
+                }
+
+                // 单聊推给对方成员；群聊 v1 不做群已读详情，不向其他成员广播。
+                if (!string.IsNullOrEmpty(result.OtherUserId))
+                {
+                    foreach (var peer in _connections.GetConnections(result.OtherUserId))
                     {
-                        _logger.LogDebug(exception, "read.updated 推送失败：连接 {ConnectionId}", peer.ConnectionId);
+                        await SendReadUpdatedSafeAsync(peer, frame);
                     }
                 }
             }
@@ -489,7 +496,19 @@ public sealed class WebSocketConnectionHandler
         }
     }
 
-    private async Task KickOverLimitAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)
+    private async Task SendReadUpdatedSafeAsync(WsConnection target, ReadUpdatedFrame frame)
+    {
+        try
+        {
+            await target.SendFrameAsync(frame, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "read.updated 推送失败：连接 {ConnectionId}", target.ConnectionId);
+        }
+    }
+
+    internal async Task KickOverLimitAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)
     {
         // 注：newConnection 已登记，existing 包含它；只有总数超过上限时才踢，且按 ConnectedAt 升序取最早的超额连接。
         var existing = _connections.GetConnections(userId);
