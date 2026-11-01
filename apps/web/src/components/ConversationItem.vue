@@ -5,6 +5,7 @@ import { groupAvatarFileIdOf } from '../core/groupAvatar'
 import { systemMessageText } from '../core/groupChat'
 import { conversationTitle } from '../core/conversationTitle'
 import { truncateText } from '../core/text'
+import { isVoiceContent, voicePreviewText } from '../core/voice'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
@@ -56,6 +57,10 @@ const preview = computed(() => {
         'name' in message.content
         ? `[文件] ${String(message.content.name)}`
         : '[文件]'
+    case 'voice':
+      return isVoiceContent(message.content)
+        ? voicePreviewText(message.content.durationMs)
+        : '[语音]'
     case 'system':
       return truncate(systemMessageText(message.content))
     default:

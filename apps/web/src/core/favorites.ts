@@ -3,6 +3,7 @@
 // 收藏是「本设备快照」：内容在收藏那一刻固化，原消息之后被撤回/编辑不会影响已收藏副本。
 // 不落服务端、不做云端同步；存储层见 core/db.ts 的 favorites store 与 stores/favorites.ts。
 import type { Conversation, FileContent, Message, MessageType } from '../types/frames'
+import { isVoiceContent } from './voice'
 
 /** 单账号本地收藏上限（超过后拒绝新增并提示）。 */
 export const MAX_FAVORITES = 500
@@ -30,6 +31,8 @@ export interface FavoriteRecord {
   text?: string
   /** 图片/文件消息的附件快照（不含 blob，打开时仍走鉴权下载）。 */
   file?: FavoriteFileSnapshot
+  /** 语音消息的时长快照（F-28，毫秒）；非语音消息为 undefined。 */
+  durationMs?: number
   /** 原消息在会话内的 seq，用于「打开原会话」定位。 */
   sourceSeq: number
   /** 原消息创建时间（UTC 毫秒）。 */
@@ -43,17 +46,26 @@ export function makeFavoriteId(ownerId: string, messageId: string): string {
   return `${ownerId.trim()}:${messageId.trim()}`
 }
 
-/** 是否可收藏：文本/图片/文件消息，且未撤回、非 system。 */
+/** 是否可收藏：文本/图片/文件/语音消息，且未撤回、非 system。 */
 export function isFavoritable(message: Message | null | undefined): boolean {
   if (!message) return false
-  if (message.msgType !== 'text' && message.msgType !== 'image' && message.msgType !== 'file') return false
+  if (
+    message.msgType !== 'text' &&
+    message.msgType !== 'image' &&
+    message.msgType !== 'file' &&
+    message.msgType !== 'voice'
+  ) {
+    return false
+  }
   return typeof message.deletedAt !== 'number'
 }
 
 function fileSnapshotOf(message: Message): FavoriteFileSnapshot | undefined {
   const content = message.content
   if (typeof content === 'string') return undefined
-  if (!('fileId' in content)) return undefined
+  if (!('fileId' in content) || !('name' in content) || !('size' in content) || !('mime' in content)) {
+    return undefined
+  }
   const file: FileContent = content
   return { fileId: file.fileId, name: file.name, size: file.size, mime: file.mime }
 }
@@ -79,8 +91,12 @@ export function favoriteSnapshotOf(
   const isText = message.msgType === 'text'
   const text = isText && typeof message.content === 'string' ? message.content : undefined
   if (isText && (text === undefined || text.length === 0)) return null
-  const file = isText ? undefined : fileSnapshotOf(message)
-  if (!isText && !file) return null
+  const isVoice = message.msgType === 'voice'
+  const durationMs =
+    isVoice && isVoiceContent(message.content) ? message.content.durationMs : undefined
+  if (isVoice && durationMs === undefined) return null
+  const file = isText || isVoice ? undefined : fileSnapshotOf(message)
+  if (!isText && !isVoice && !file) return null
   const name = senderName.trim() || (message.senderId === ownerId ? '我' : '未知成员')
   return {
     favoriteId: makeFavoriteId(ownerId, message.messageId),
@@ -93,6 +109,7 @@ export function favoriteSnapshotOf(
     msgType: message.msgType,
     text,
     file,
+    durationMs,
     sourceSeq: message.seq,
     createdAt: message.createdAt,
     favoritedAt: now,

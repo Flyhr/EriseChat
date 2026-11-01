@@ -3,7 +3,7 @@
 
 import { config } from './config'
 import { sortCustomEmojis } from './customEmoji'
-import type { Conversation, FileContent, Message, MessageSendType } from '../types/frames'
+import type { Conversation, FileContent, Message, MessageSendType, VoiceContent } from '../types/frames'
 import type { FavoriteRecord } from './favorites'
 
 export const STORE_MESSAGES = 'messages'
@@ -32,10 +32,10 @@ export interface PendingRecord {
   clientMsgId: string
   conversationId: string
   senderId: string
-  /** text / image / file（system 仅服务端生成）。 */
+  /** text / image / file / voice（system 仅服务端生成）。 */
   msgType: MessageSendType
-  /** 文本为字符串；图片/文件为 FileContent。 */
-  content: string | FileContent
+  /** 文本为字符串；图片/文件为 FileContent；语音为 VoiceContent。 */
+  content: string | FileContent | VoiceContent
   createdAt: number
   status: PendingRecordStatus
   retries: number

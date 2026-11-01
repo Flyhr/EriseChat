@@ -31,9 +31,9 @@ export type FrameType =
   | 'kicked'
   | 'error'
 
-export type MessageType = 'text' | 'image' | 'file' | 'system'
+export type MessageType = 'text' | 'image' | 'file' | 'voice' | 'system'
 /** 客户端可发送的消息类型（system 仅服务端生成，见 protocol.md §4.3） */
-export type MessageSendType = 'text' | 'image' | 'file'
+export type MessageSendType = 'text' | 'image' | 'file' | 'voice'
 export type ConversationType = 'direct' | 'group'
 export type MemberRole = 'owner' | 'member'
 export type UserRole = 'user' | 'admin'
@@ -83,6 +83,13 @@ export interface FileContent {
   mime: string
 }
 
+/** 语音消息内容（F-28，protocol.md §7 第 9 条）：只传元数据，音频走 REST。 */
+export interface VoiceContent {
+  fileId: string
+  /** 时长（毫秒，1000~60000，客户端测量上报；服务端只做范围校验）。 */
+  durationMs: number
+}
+
 /** 系统消息内容（服务端生成，M3 使用；核心字段 event 必填） */
 export interface SystemContent {
   event: string
@@ -91,7 +98,7 @@ export interface SystemContent {
   text?: string
 }
 
-export type MessageContent = string | FileContent | SystemContent
+export type MessageContent = string | FileContent | VoiceContent | SystemContent
 
 /**
  * 回复引用摘要（F-09，protocol.md §4.3「Reply 对象」）：不落库，服务端随消息/ack 按需组装。
@@ -198,7 +205,7 @@ export interface MessageSendFrame extends FrameBase {
   clientMsgId: string
   conversationId: string
   msgType: MessageSendType
-  content: string | FileContent
+  content: string | FileContent | VoiceContent
   replyTo?: string
 }
 

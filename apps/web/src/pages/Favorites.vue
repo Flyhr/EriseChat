@@ -7,6 +7,7 @@ import Avatar from '../components/Avatar.vue'
 import EmptyState from '../components/EmptyState.vue'
 import { formatSessionTime } from '../core/sessionFormat'
 import { truncateText } from '../core/text'
+import { voicePreviewText } from '../core/voice'
 import { showToast } from '../core/toast'
 import type { FavoriteRecord } from '../core/favorites'
 import { useFavoritesStore } from '../stores/favorites'
@@ -19,18 +20,22 @@ const favorites = useFavoritesStore()
 const pendingDelete = ref<FavoriteRecord | null>(null)
 const deleting = ref(false)
 
-/** 类型标签：文本 / 图片 / 文件。 */
+/** 类型标签：文本 / 图片 / 文件 / 语音。 */
 function typeLabelOf(record: FavoriteRecord): string {
   if (record.msgType === 'image') return '图片'
   if (record.msgType === 'file') return '文件'
+  if (record.msgType === 'voice') return '语音'
   return '文本'
 }
 
-/** 一行摘要：文本截断，图片/文件给占位与文件名。 */
+/** 一行摘要：文本截断，图片/文件/语音给占位。 */
 function summaryOf(record: FavoriteRecord): string {
   if (record.msgType === 'image') return '[图片]'
   if (record.msgType === 'file') {
     return record.file ? `[文件] ${record.file.name}` : '[文件]'
+  }
+  if (record.msgType === 'voice') {
+    return record.durationMs !== undefined ? voicePreviewText(record.durationMs) : '[语音]'
   }
   const text = (record.text ?? '').replace(/\s+/g, ' ').trim()
   if (text.length === 0) return '[空文本]'

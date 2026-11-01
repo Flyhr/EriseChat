@@ -27,6 +27,9 @@ function summaryOf(msgType: MessageType, text: string | undefined, name: string 
   if (msgType === 'file') {
     return name ? `[文件] ${name}` : '[文件]'
   }
+  if (msgType === 'voice') {
+    return '[语音]'
+  }
   if (msgType === 'system') {
     const value = text?.trim()
     return value ? truncateReplyPreview(value) : '[系统消息]'

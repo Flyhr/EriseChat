@@ -58,7 +58,8 @@ const emit = defineEmits<{
 const contentText = computed(() => {
   const content = props.message.content
   if (typeof content === 'string') return content
-  if ('fileId' in content) return content.name
+  if ('name' in content) return content.name
+  if ('durationMs' in content) return '[语音]'
   return content.text ?? '[系统消息]'
 })
 

@@ -21,10 +21,12 @@ const emit = defineEmits<{
 }>()
 
 const content = computed<FileContent | null>(() => {
+  // 仅 image/file 有附件内容；voice 的 content 是 { fileId, durationMs }，由 MessageBubble 单独渲染。
+  if (props.message.msgType !== 'image' && props.message.msgType !== 'file') return null
   const raw = props.message.content
-  if (typeof raw === 'string') return null
-  if ('fileId' in raw) return raw
-  return null
+  if (typeof raw !== 'object' || raw === null) return null
+  if (!('name' in raw) || !('mime' in raw) || !('size' in raw)) return null
+  return raw
 })
 const isImage = computed(() => props.message.msgType === 'image' && content.value !== null)
 

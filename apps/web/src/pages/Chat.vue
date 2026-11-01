@@ -197,6 +197,7 @@ const JUMP_MAX_LOAD_PAGES = 8
 function replyPreviewOf(message: Message): ReplyPreviewLike {
   const content = message.content
   if (typeof content === 'string') return { msgType: 'text', text: content }
+  if ('durationMs' in content) return { msgType: 'voice' }
   if ('fileId' in content) {
     return { msgType: message.msgType === 'image' ? 'image' : 'file', name: content.name }
   }

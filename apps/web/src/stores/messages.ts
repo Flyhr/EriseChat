@@ -13,6 +13,7 @@ import type {
   ServerFrame,
   SyncRequestFrame,
   SyncResponseFrame,
+  VoiceContent,
 } from '../types/frames'
 import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
 import { messagesApi } from '../api/messages'
@@ -44,6 +45,7 @@ import {
   showWebNotification,
 } from '../core/notify'
 import type { ReplyPreviewLike } from '../core/replyPreview'
+import { buildVoiceContent, isVoiceContent, voicePreviewText } from '../core/voice'
 import { useConversationsStore } from './conversations'
 import { useAuthStore } from './auth'
 import { useSettingsStore } from './settings'
@@ -69,10 +71,10 @@ export interface PendingMessage {
   clientMsgId: string
   conversationId: string
   senderId: string
-  /** text / image / file（system 仅服务端生成）。 */
+  /** text / image / file / voice（system 仅服务端生成）。 */
   msgType: MessageSendType
-  /** 文本为字符串；图片/文件为 FileContent。 */
-  content: string | FileContent
+  /** 文本为字符串；图片/文件为 FileContent；语音为 VoiceContent。 */
+  content: string | FileContent | VoiceContent
   createdAt: number
   status: PendingStatus
   /** 已重试次数（0 = 首次发送，最多 RETRY_DELAYS_MS.length 次重试）。 */
@@ -629,11 +631,11 @@ export const useMessagesStore = defineStore('messages', () => {
     retryTimers.set(pending.clientMsgId, timer)
   }
 
-  /** 乐观发送通用入口（text / image / file）：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
+  /** 乐观发送通用入口（text / image / file / voice）：本地立即展示（sending），ack 到达后转为服务端事实消息。 */
   function sendContent(
     conversationId: string,
     msgType: MessageSendType,
-    content: string | FileContent,
+    content: string | FileContent | VoiceContent,
     senderId: string,
     replyTo?: string,
     replyPreview?: ReplyPreviewLike,
@@ -699,6 +701,21 @@ export const useMessagesStore = defineStore('messages', () => {
       return false
     }
     return sendContent(conversationId, msgType, { ...content }, senderId, replyTo, replyPreview)
+  }
+
+  /** 乐观发送语音消息（F-28）：fileId 必须来自已上传的 webm 文件，时长 1000~60000 毫秒。 */
+  function sendVoiceMessage(
+    conversationId: string,
+    fileId: string,
+    durationMs: number,
+    senderId: string,
+  ): boolean {
+    const content = buildVoiceContent(fileId, durationMs)
+    if (!content) {
+      console.warn('[messages] 语音消息参数不合法（fileId 或时长），已拦截')
+      return false
+    }
+    return sendContent(conversationId, 'voice', content, senderId)
   }
 
   /** 重发失败消息：复用同一 clientMsgId（服务端幂等，不会重复落库）。 */
@@ -805,6 +822,11 @@ export const useMessagesStore = defineStore('messages', () => {
 
   function previewOf(message: Message): string {
     if (message.msgType === 'image') return '[图片]'
+    if (message.msgType === 'voice') {
+      return isVoiceContent(message.content)
+        ? voicePreviewText(message.content.durationMs)
+        : '[语音]'
+    }
     if (message.msgType === 'file') {
       const content = message.content
       return typeof content === 'object' && content !== null && 'name' in content
@@ -1016,6 +1038,7 @@ export const useMessagesStore = defineStore('messages', () => {
     syncAll,
     sendText,
     sendFileMessage,
+    sendVoiceMessage,
     sendRecall,
     sendEdit,
     refreshRecent,

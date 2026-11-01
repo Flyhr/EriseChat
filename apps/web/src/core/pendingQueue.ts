@@ -1,8 +1,9 @@
 // F-03 待发消息队列的纯逻辑（无网络、无 IndexedDB 依赖，便于单测）。
 // 记录结构见 core/db.ts 的 PendingRecord；这里只做序列化校验、分组与「服务端已落库」的对账。
 
-import type { FileContent, Message, MessageSendType } from '../types/frames'
+import type { FileContent, Message, MessageSendType, VoiceContent } from '../types/frames'
 import type { PendingRecord } from './db'
+import { isVoiceContent } from './voice'
 
 /** 与 stores/messages.ts 的 PendingMessage 结构兼容的最小输入类型（避免 store ↔ core 反向依赖）。 */
 export interface PendingLike {
@@ -10,7 +11,7 @@ export interface PendingLike {
   conversationId: string
   senderId: string
   msgType: MessageSendType
-  content: string | FileContent
+  content: string | FileContent | VoiceContent
   createdAt: number
   status: 'sending' | 'failed'
   retries: number
@@ -18,7 +19,7 @@ export interface PendingLike {
   replyTo?: string
 }
 
-const MESSAGE_SEND_TYPES: readonly MessageSendType[] = ['text', 'image', 'file']
+const MESSAGE_SEND_TYPES: readonly MessageSendType[] = ['text', 'image', 'file', 'voice']
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
@@ -68,6 +69,9 @@ export function fromPendingRecord(record: unknown): PendingRecord | null {
   const content = value.content
   if (msgType === 'text') {
     if (!isNonEmptyString(content)) return null
+  } else if (msgType === 'voice') {
+    // F-28：语音 content 只有 fileId + durationMs（文件元数据以服务端 files 记录为准）。
+    if (!isVoiceContent(content) || content.fileId.length === 0) return null
   } else if (!isFileContent(content)) {
     return null
   }
