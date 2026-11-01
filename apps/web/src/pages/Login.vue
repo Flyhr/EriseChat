@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { chatWs } from '../core/ws'
-import { getServerUrl, normalizeServerUrl, resetServerUrl, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { validateNewPassword } from '../core/passwordRules'
 import { showToast } from '../core/toast'
@@ -33,24 +32,8 @@ const auth = useAuthStore()
 /** 致命关闭（被踢/登录失效）跳转登录页时携带的提示（M3-00）。 */
 const noticeMessage = ref(typeof route.query.notice === 'string' ? route.query.notice : '')
 
-/** 桌面/APK 打包态：页面以 file:// 加载，「同源」不可用，必须显式配置服务器地址（M4-08）。 */
+/** 桌面/APK 打包态：页面以 file:// 加载；服务器地址统一在「设置 → 连接与关于」维护。 */
 const isFileShell = typeof window !== 'undefined' && window.location.protocol === 'file:'
-const DEFAULT_DESKTOP_SERVER = 'http://127.0.0.1:6580'
-
-/** M4-01：服务器地址配置（桌面/APK 首次使用需填写；Web 同源可留空）。 */
-const serverUrlOpen = ref(false)
-const serverUrl = ref(getServerUrl())
-const serverUrlError = ref('')
-const serverUrlLabel = computed(
-  () => serverUrl.value.trim() || (isFileShell ? '未配置，请点此填写' : '与当前页面同源'),
-)
-
-/** UI-03 批次3：桌面壳注入的服务器地址存在时，地址由桌面端配置，页面只读展示。 */
-const injectedServerUrl = normalizeServerUrl(
-  typeof window !== 'undefined'
-    ? (window as Window & { eisechatDesktop?: { serverUrl?: string } }).eisechatDesktop?.serverUrl
-    : null,
-)
 
 /** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
 const passwordVisible = ref(false)
@@ -86,19 +69,11 @@ const sendButtonLabel = computed(() => {
 })
 
 function toErrorMessage(error: unknown): string {
-  // 桌面/APK 以 file:// 加载时，网络失败需额外提示先配置服务器地址（其余错误统一走 friendlyError）。
+  // 桌面/APK 以 file:// 加载时，网络失败需额外提示检查服务器地址配置（其余错误统一走 friendlyError）。
   if (isFileShell && error instanceof TypeError) {
-    return '无法连接服务器：请先在“服务器地址”填写服务端地址（如 http://127.0.0.1:6580）后重试'
+    return '无法连接服务器：请检查网络，或到「设置 → 连接与关于」核对服务器地址后重试'
   }
   return friendlyError(error)
-}
-
-/** 展开服务器地址编辑区：桌面端未配置时预填本机默认地址，点「保存」即可生效。 */
-function toggleServerEditor(): void {
-  serverUrlOpen.value = !serverUrlOpen.value
-  if (serverUrlOpen.value && serverUrl.value.trim().length === 0 && isFileShell) {
-    serverUrl.value = DEFAULT_DESKTOP_SERVER
-  }
 }
 
 function startCooldown(seconds: number): void {
@@ -261,28 +236,6 @@ function applySession(response: LoginResponse): void {
   chatWs.setAuth(response.accessToken, auth.deviceId)
   chatWs.connect()
 }
-
-/** M4-01：保存服务器地址（空字符串 = 同源默认）；Web 端校验 http(s) origin 后持久化。 */
-function saveServerUrl(): void {
-  const value = serverUrl.value.trim()
-  if (value.length > 0 && !setServerUrl(value)) {
-    serverUrlError.value = '地址无效：需以 http:// 或 https:// 开头'
-    return
-  }
-  if (value.length === 0) {
-    resetServerUrl()
-  }
-  serverUrl.value = getServerUrl()
-  serverUrlError.value = ''
-  serverUrlOpen.value = false
-}
-
-/** 恢复同源默认地址（清除 localStorage 配置）。 */
-function clearServerUrl(): void {
-  resetServerUrl()
-  serverUrl.value = ''
-  serverUrlError.value = ''
-}
 </script>
 
 <template>
@@ -304,34 +257,6 @@ function clearServerUrl(): void {
         <h2 class="login-card__title">
           {{ mode === 'reset' ? '找回密码' : mode === 'register' ? '创建账号' : '欢迎回来' }}
         </h2>
-        <div class="login-server">
-          <p v-if="injectedServerUrl" class="login-server__locked">
-            服务器地址：{{ injectedServerUrl }}（由桌面端配置）
-          </p>
-          <template v-else>
-            <button class="login-server__toggle" type="button" @click="toggleServerEditor">
-              服务器地址：{{ serverUrlLabel }}{{ serverUrlOpen ? '（收起）' : '（修改）' }}
-            </button>
-            <div v-if="serverUrlOpen" class="login-server__panel">
-              <input
-                v-model="serverUrl"
-                type="url"
-                aria-label="服务器地址"
-                :placeholder="
-                  isFileShell
-                    ? 'http://127.0.0.1:6580（本机）或 https://你的域名'
-                    : 'https://chat.example.com 或 http://127.0.0.1:6580（留空 = 同源）'
-                "
-              />
-              <div class="login-server__actions">
-                <button class="login-server__save" type="button" @click="saveServerUrl">保存</button>
-                <button class="login-server__reset" type="button" @click="clearServerUrl">恢复默认</button>
-              </div>
-              <p v-if="serverUrlError" class="login-server__error" role="alert">{{ serverUrlError }}</p>
-            </div>
-          </template>
-        </div>
-
         <div v-if="mode !== 'reset'" class="login-modes" role="tablist" aria-label="登录方式">
           <button
             v-for="item in modes"
@@ -546,97 +471,6 @@ function clearServerUrl(): void {
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-page-title);
   font-weight: var(--ec-font-weight-semibold);
-}
-
-.login-server {
-  margin-bottom: var(--ec-space-4);
-}
-
-.login-server__toggle {
-  display: block;
-  width: 100%;
-  padding: var(--ec-space-2) var(--ec-space-3);
-  overflow: hidden;
-  border: 1px dashed var(--ec-border);
-  border-radius: var(--ec-radius-input);
-  background: var(--ec-surface-hover);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.login-server__toggle:hover {
-  border-color: var(--ec-brand-500);
-  color: var(--ec-brand-600);
-}
-}
-
-.login-server__locked {
-  margin: 0;
-  padding: var(--ec-space-2) var(--ec-space-3);
-  border: 1px dashed var(--ec-border);
-  border-radius: var(--ec-radius-input);
-  background: var(--ec-surface-hover);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  word-break: break-all;
-}
-
-.login-server__panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ec-space-2);
-  margin-top: var(--ec-space-2);
-}
-
-.login-server__panel input {
-  width: 100%;
-  padding: 8px var(--ec-space-3);
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-input);
-  outline: none;
-  font-size: var(--ec-font-size-secondary);
-  box-sizing: border-box;
-}
-
-.login-server__panel input:focus {
-  border-color: var(--ec-brand-600);
-}
-
-.login-server__actions {
-  display: flex;
-  gap: var(--ec-space-2);
-}
-
-.login-server__save,
-.login-server__reset {
-  padding: 6px var(--ec-space-3);
-  border-radius: var(--ec-radius-sm);
-  font-size: var(--ec-font-size-small);
-  cursor: pointer;
-}
-
-.login-server__save {
-  border: 1px solid var(--ec-brand-600);
-  background: var(--ec-brand-050);
-  color: var(--ec-brand-600);
-}
-
-.login-server__reset {
-  border: 1px solid var(--ec-border);
-  background: transparent;
-  color: var(--ec-text-secondary);
-}
-
-.login-server__error {
-  margin: 0;
-  color: var(--ec-danger);
-  font-size: var(--ec-font-size-small);
 }
 
 .login-modes {
@@ -931,18 +765,6 @@ function clearServerUrl(): void {
     min-height: 48px;
     border-radius: var(--ec-radius-mobile-input);
     font-size: var(--ec-font-size-body);
-  }
-
-  .login-server__panel input {
-    min-height: var(--ec-touch-target);
-    border-radius: var(--ec-radius-mobile-input);
-  }
-
-  .login-server__save,
-  .login-server__reset {
-    min-height: 40px;
-    padding: 0 var(--ec-space-4);
-    border-radius: var(--ec-radius-mobile-input);
   }
 }
 </style>
