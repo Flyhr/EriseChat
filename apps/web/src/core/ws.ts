@@ -9,7 +9,7 @@ import type { ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types
 /** 连接状态：idle 未连接 / connecting 首次连接中 / authed 认证完成 / reconnecting 退避重连中 / closed 已关闭 */
 export type WsState = 'idle' | 'connecting' | 'authed' | 'reconnecting' | 'closed'
 
-/** 致命关闭码（protocol.md §1）：4001 被同账号新连接踢下线、4002 认证失败/超时/版本不兼容/帧格式错误。 */
+/** 致命关闭码（protocol.md §1）：4001 被服务端踢下线（连接数超上限/远程退出）、4002 认证失败/超时/版本不兼容/帧格式错误。 */
 export const TERMINAL_CLOSE_CODES: ReadonlySet<number> = new Set([4001, 4002])
 
 /** 致命关闭事件：连接不会再自动重连，调用方应清理登录态并回登录页（M3-00）。 */
@@ -248,7 +248,7 @@ export class ChatWsClient {
         // 被同账号新连接踢下线：不发重连、通知上层清理并回登录页（protocol.md §1）。
         this.manualClose = true
         this.emit('kicked', frame)
-        this.emitFatal(4001, frame.reason || '账号在其他设备登录')
+        this.emitFatal(4001, frame.reason || '账号连接数超出上限，已在该端保持登录')
         break
       case 'error':
         this.emit('error', frame)
@@ -274,7 +274,7 @@ export class ChatWsClient {
     if (TERMINAL_CLOSE_CODES.has(event.code)) {
       this.emitFatal(
         event.code,
-        event.reason || (event.code === 4001 ? '账号在其他设备登录' : '认证失败或已过期'),
+        event.reason || (event.code === 4001 ? '账号连接数超出上限，已在该端保持登录' : '认证失败或已过期'),
       )
       this.setState('closed')
       return

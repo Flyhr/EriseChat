@@ -185,7 +185,16 @@ export const useConversationsStore = defineStore('conversations', () => {
   /** 记录对端已读游标（单聊回执展示用）：忽略自己，只增不减。 */
   function handleReadUpdated(conversationId: string, userId: string, lastReadSeq: number): void {
     if (!conversationId || !userId || !Number.isFinite(lastReadSeq)) return
-    if (userId === useAuthStore().user?.userId) return
+    // 多端已读（F-22）：本人其他连接推进的已读游标同步到本端，只增不减并持久化（不再上报，避免循环）。
+    if (userId === useAuthStore().user?.userId) {
+      if (lastReadSeq <= (lastReadSeqByConversation.value[conversationId] ?? 0)) return
+      lastReadSeqByConversation.value = {
+        ...lastReadSeqByConversation.value,
+        [conversationId]: lastReadSeq,
+      }
+      persistReadSeq(lastReadSeqByConversation.value)
+      return
+    }
     const current = peerReadSeq.value[conversationId]?.[userId] ?? 0
     if (lastReadSeq <= current) return
     peerReadSeq.value = {
