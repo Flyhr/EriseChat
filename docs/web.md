@@ -42,8 +42,9 @@ npm run dev        # http://127.0.0.1:5173
 |---|---|---|
 | Web 生产（同域） | 默认同源 | `apiBase=/api`，`wsUrl=页面 origin+/ws` |
 | Web 手动指定 | 设置页「服务器地址」 | 存 `localStorage['eisechat.serverUrl']`；清空恢复同源 |
-| Windows 桌面壳 | preload 注入的已保存地址 | 见 `docs/desktop.md` |
-| Android | 设置页「服务器地址」/ 打包默认地址 | 见 `docs/mobile.md` |
+| 打包壳首启（exe/APK） | 登录页「服务器地址」区块（仅打包壳显示，未配置自动展开） | 保存后同步桌面壳 `settings.json`；Web 同源部署不显示该区块 |
+| Windows 桌面壳 | preload 注入的已保存地址；登录页首启填写 | 见 `docs/desktop.md` |
+| Android | 登录页首启 / 设置页「服务器地址」/ 打包默认地址 | 见 `docs/mobile.md` |
 
 可选构建期环境变量（见 `apps/web/.env.example`，默认值集中在 `src/core/config.ts`，业务代码不直接读 `import.meta.env`）：
 
@@ -151,7 +152,7 @@ npm run test:unit   # vitest run（503 个用例 / 38 个测试文件，约 2.3 
 |---|---|
 | `npm run dev` 打不开 5173 | `npm install` 是否完成；端口被占用（改端口或结束进程）；`vite.config.ts` 固定 host `127.0.0.1`，不要用 `localhost` 以外的地址访问 |
 | 页面能开但接口全 404 / Network 报错 | 服务端 6580 是否启动；代理目标是否被改；检查 `curl http://127.0.0.1:6580/api/health` |
-| 登录提示「无法连接服务器」 | 服务端未启动；默认服务器地址不可达（本机应为 `http://127.0.0.1:6580`；局域网/手机不能用 `127.0.0.1`）；登录前无法改地址，需先让默认地址可达，登录后在「设置 → 连接与关于」修改 |
+| 登录提示「无法连接服务器」 | 服务端未启动；打包态（exe/APK）先确认登录页「服务器地址」已填写且「保存并检测」成功；Web 同源部署默认不可改地址，需服务端在同一 origin 可达（本机 `http://127.0.0.1:6580`；局域网/手机不能用 `127.0.0.1`）；登录后可在「设置 → 连接与关于」修改 |
 | 收不到验证码 | 开发环境固定码 `123456`（不真的发邮件）；服务端控制台看 `[email][mock]`；Production 未配置 SMTP 会返回 500（`docs/deploy.md` §5） |
 | 生产环境白屏 / 404 | `dist` 是否已复制到 `server/Chat.Server/wwwroot/`；是否从根路径进入；F12 看静态资源 404 还是 JS 报错 |
 | 刷新深链接 404 | 已知限制（服务端无 SPA fallback）：从根路径进入；修复需服务端加 fallback |
