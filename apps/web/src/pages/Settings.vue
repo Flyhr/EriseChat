@@ -261,7 +261,11 @@ async function submitPasswordChange(): Promise<void> {
   }
 }
 
+/** 登录设备列表最多展示的条数（服务端已按最近活跃倒序）。 */
+const MAX_VISIBLE_SESSIONS = 5
+
 const sessions = ref<SessionInfo[]>([])
+const visibleSessions = computed(() => sessions.value.slice(0, MAX_VISIBLE_SESSIONS))
 const sessionsLoading = ref(false)
 const sessionsError = ref('')
 const sessionsLoaded = ref(false)
@@ -626,7 +630,7 @@ async function saveProfile(): Promise<void> {
           </SettingsGroup>
 
           <SettingsGroup title="账号信息">
-            <SettingsRow label="邮箱" hint="用于接收验证码登录">
+            <SettingsRow label="邮箱">
               <span class="settings-value">{{ auth.user?.email }}</span>
             </SettingsRow>
             <SettingsRow label="账号角色">
@@ -635,16 +639,7 @@ async function saveProfile(): Promise<void> {
           </SettingsGroup>
 
           <SettingsGroup title="密码">
-            <SettingsRow
-              label="登录密码"
-              :hint="
-                hasPassword === null
-                  ? '正在读取密码状态…'
-                  : hasPassword
-                    ? '已设置密码，可使用密码登录'
-                    : '未设置密码，当前只能通过验证码登录'
-              "
-            >
+            <SettingsRow label="登录密码">
               <button
                 type="button"
                 class="settings-btn settings-btn--secondary"
@@ -668,16 +663,12 @@ async function saveProfile(): Promise<void> {
                 重试
               </button>
             </SettingsRow>
-            <SettingsRow
-              v-else-if="sessions.length === 0"
-              label="暂无登录设备"
-              hint="当前账号没有其他有效会话"
-            >
+            <SettingsRow v-else-if="sessions.length === 0" label="暂无登录设备">
               <span class="settings-value">—</span>
             </SettingsRow>
             <template v-else>
               <SettingsRow
-                v-for="session in sessions"
+                v-for="session in visibleSessions"
                 :key="session.sessionId"
                 :label="shortDeviceLabel(session.deviceId)"
                 :hint="`登录：${formatSessionTime(session.createdAt)} · 最近活跃：${formatLastSeen(session.lastSeenAt)}`"
@@ -715,14 +706,7 @@ async function saveProfile(): Promise<void> {
         <!-- 通知与提醒 -->
         <div v-else-if="activeSectionId === 'notifications'" class="settings-content__body">
           <SettingsGroup title="消息提醒">
-            <SettingsRow
-              label="桌面通知"
-              :hint="
-                isDesktopShell()
-                  ? '窗口最小化或不在前台时，通过系统通知提醒新消息'
-                  : '需要在浏览器中允许通知权限'
-              "
-            >
+            <SettingsRow label="桌面通知">
               <SettingsSwitch
                 :model-value="settings.desktopNotificationsEnabled"
                 label="桌面通知"
@@ -730,7 +714,7 @@ async function saveProfile(): Promise<void> {
                 @update:model-value="toggleDesktopNotifications"
               />
             </SettingsRow>
-            <SettingsRow label="提示音" hint="收到新消息且当前不在该会话时播放短提示音">
+            <SettingsRow label="提示音">
               <button type="button" class="settings-text-btn" @click="previewSound">试听</button>
               <SettingsSwitch
                 :model-value="settings.soundEnabled"
@@ -760,7 +744,7 @@ async function saveProfile(): Promise<void> {
                 </span>
               </div>
             </div>
-            <SettingsRow label="消息字号与密度" hint="默认标准字号与行距" vertical>
+            <SettingsRow label="消息字号与密度" vertical>
               <ComingSoonHint label="消息字号与密度">标准</ComingSoonHint>
             </SettingsRow>
           </SettingsGroup>
@@ -769,7 +753,7 @@ async function saveProfile(): Promise<void> {
         <!-- 连接与关于 -->
         <div v-else class="settings-content__body">
           <SettingsGroup title="连接">
-            <SettingsRow label="连接状态" hint="消息通过 WebSocket 实时收发">
+            <SettingsRow label="连接状态">
               <span class="settings-conn" :class="`settings-conn--${wsState}`">
                 <span class="settings-conn__dot" aria-hidden="true" />
                 <span role="status">{{ WS_STATE_LABELS[wsState] }}</span>
@@ -783,11 +767,7 @@ async function saveProfile(): Promise<void> {
                 重新连接
               </button>
             </SettingsRow>
-            <SettingsRow
-              label="服务器地址"
-              hint="桌面端与 Android 端首次使用时需填写；Web 端留空表示与页面同源"
-              vertical
-            >
+            <SettingsRow label="服务器地址" vertical>
               <div class="settings-field">
                 <input
                   v-model="serverUrlInput"
@@ -814,7 +794,7 @@ async function saveProfile(): Promise<void> {
             <SettingsRow label="版本" :hint="isDesktopShell() ? 'Windows 桌面客户端' : 'Web 客户端'">
               <span class="settings-value">{{ APP_VERSION }}</span>
             </SettingsRow>
-            <SettingsRow label="下载客户端" hint="Windows 安装包与 Android APK">
+            <SettingsRow label="下载客户端">
               <RouterLink class="settings-link" to="/download">前往下载页</RouterLink>
             </SettingsRow>
           </SettingsGroup>
