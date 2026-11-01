@@ -2,16 +2,18 @@ using System.Net.WebSockets;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Common.Options;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Modules.Realtime;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Chat.Server.Realtime;
 
 /// <summary>
-/// WebSocket 连接处理器（M1-06）：10 秒内必须收到 auth 首帧；认证成功后回 hello、登记连接、
-/// 踢掉同账号旧连接，然后进入帧循环（客户端 ping → pong；其它已知但未实现的帧忽略并记 debug）。
+/// WebSocket 连接处理器（M1-06）：10 秒内必须收到 auth 首帧；认证成功后回 hello、登记连接；
+/// 同账号连接数超过上限（F-22，默认 3）时踢最早建立的连接，然后进入帧循环（客户端 ping → pong；其它已知但未实现的帧忽略并记 debug）。
 /// </summary>
 public sealed class WebSocketConnectionHandler
 {
@@ -23,17 +25,20 @@ public sealed class WebSocketConnectionHandler
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<WebSocketConnectionHandler> _logger;
+    private readonly int _maxConnectionsPerUser;
     private readonly TypingThrottle _typingThrottle = new();
     public WebSocketConnectionHandler(
         ConnectionManager connections,
         PresenceService presence,
         IServiceScopeFactory scopeFactory,
+        IOptions<AppOptions> appOptions,
         ILoggerFactory loggerFactory,
         ILogger<WebSocketConnectionHandler> logger)
     {
         _connections = connections;
         _presence = presence;
         _scopeFactory = scopeFactory;
+        _maxConnectionsPerUser = Math.Clamp(appOptions.Value.MaxConnectionsPerUser, 1, 10);
         _loggerFactory = loggerFactory;
         _logger = logger;
     }
@@ -87,8 +92,8 @@ public sealed class WebSocketConnectionHandler
             connection.MarkAuthenticated(userId, auth.DeviceId!.Trim(), authResult.SessionId);
             _connections.Register(connection);
 
-            // 单活动连接：把该账号已有连接先踢下线（先 kicked 再 close 4001）。
-            await KickExistingAsync(connection, userId, connectionAborted);
+            // 多端在线（F-22）：连接数超过上限时，只踢「最早建立」的超额连接（先 kicked 再 close 4001）。
+            await KickOverLimitAsync(connection, userId, connectionAborted);
 
             var hello = new HelloFrame(
                 userId,
@@ -484,23 +489,32 @@ public sealed class WebSocketConnectionHandler
         }
     }
 
-    private async Task KickExistingAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)
+    private async Task KickOverLimitAsync(WsConnection newConnection, string userId, CancellationToken connectionAborted)
     {
+        // 注：newConnection 已登记，existing 包含它；只有总数超过上限时才踢，且按 ConnectedAt 升序取最早的超额连接。
         var existing = _connections.GetConnections(userId);
-        foreach (var oldConnection in existing)
+        if (existing.Count <= _maxConnectionsPerUser)
         {
-            if (ReferenceEquals(oldConnection, newConnection))
-            {
-                continue;
-            }
+            return;
+        }
 
+        var overflow = existing
+            .Where(oldConnection => !ReferenceEquals(oldConnection, newConnection))
+            .OrderBy(oldConnection => oldConnection.ConnectedAt)
+            .ThenBy(oldConnection => oldConnection.ConnectionId, StringComparer.Ordinal)
+            .Take(existing.Count - _maxConnectionsPerUser)
+            .ToArray();
+
+        foreach (var oldConnection in overflow)
+        {
             _connections.Unregister(oldConnection);
             _logger.LogInformation(
-                "单活动连接：踢下线旧连接 {OldConnectionId}（用户 {UserId}，新连接 {NewConnectionId}）",
+                "多端在线：账号连接数超过上限 {Limit}，踢下线最早连接 {OldConnectionId}（用户 {UserId}，新连接 {NewConnectionId}）",
+                _maxConnectionsPerUser,
                 oldConnection.ConnectionId,
                 userId,
                 newConnection.ConnectionId);
-            await oldConnection.KickAsync("账号在其他设备登录", connectionAborted);
+            await oldConnection.KickAsync($"账号连接数超出上限（最多 {_maxConnectionsPerUser} 端同时在线）", connectionAborted);
         }
     }
 

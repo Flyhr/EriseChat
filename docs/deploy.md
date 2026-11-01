@@ -216,6 +216,7 @@ Docker 部署统一用 `/opt/eisechat/.env` 注入环境变量（该文件权限
 | `App__UploadMaxBytes` | 附件上限（默认 52428800 = 50MB） |
 | `App__RegistrationEnabled` / `App__AllowedEmailDomains` | 是否开放注册 / 允许邮箱域名白名单（空=不限） |
 | `App__ProtocolVersion` | 协议版本（保持 1） |
+| `App__MaxConnectionsPerUser` | 每账号最大同时在线连接数（默认 3，限制 1~10；超限踢最早连接，F-22） |
 
 修改后重新执行部署脚本生效（**不要用 `docker compose restart`**，它不会重读 `.env`）：
 

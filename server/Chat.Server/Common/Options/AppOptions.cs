@@ -38,6 +38,9 @@ public sealed class AppOptions
     /// <summary>是否仅群主可邀请成员，默认 false = 所有成员可邀请（M3-04）。</summary>
     public bool GroupOnlyOwnerCanInvite { get; set; }
 
+    /// <summary>每账号最大并发 WS 连接数，默认 3；使用时代码内限制 1~10（F-22）。</summary>
+    public int MaxConnectionsPerUser { get; set; } = 3;
+
     /// <summary>消息撤回窗口（秒），自消息 createdAt 起算，默认 120；使用时代码内限制 1~86400（F-18）。</summary>
     public int MessageRecallWindowSeconds { get; set; } = 120;
 
