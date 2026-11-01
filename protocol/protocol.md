@@ -134,8 +134,8 @@
 | `reqId` | string | 否 | 建议携带，`ack` 回传 |
 | `clientMsgId` | string | 是 | 客户端生成的 UUID；会话内唯一，幂等键 |
 | `conversationId` | string | 是 | 目标会话 ID |
-| `msgType` | string | 是 | `text` / `image` / `file`；`system` 仅服务端生成，客户端发送会被拒绝 |
-| `content` | string / object | 是 | `text` 为字符串；`image` / `file` 为 FileContent（见 §7）；大小受服务端配置限制（当前 v1 实现：纯文本 ≤ 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）） |
+| `msgType` | string | 是 | `text` / `image` / `file` / `voice`；`system` 仅服务端生成，客户端发送会被拒绝 |
+| `content` | string / object | 是 | `text` 为字符串；`image` / `file` 为 FileContent（见 §7）；`voice` 为 VoiceContent（见 §7）；大小受服务端配置限制（当前 v1 实现：纯文本 ≤ 4096 字符，超出回 `error`（`MESSAGE_TOO_LARGE`）） |
 | `replyTo` | string | 否 | 被回复消息的 `messageId`；必须为**同一会话内已存在**的消息，否则回 `error`（`VALIDATION_FAILED`），不落库 |
 
 `message.ack`（S→C，仅发送者连接收到）：
@@ -175,7 +175,7 @@
 | `senderId` | string | 是 | 发送者用户 ID |
 | `clientMsgId` | string | 否 | 发送者客户端幂等键；服务端广播时可不带 |
 | `seq` | integer | 是 | 会话内序号 |
-| `msgType` | string | 是 | `text` / `image` / `file` / `system` |
+| `msgType` | string | 是 | `text` / `image` / `file` / `voice` / `system` |
 | `content` | string / object | 是 | 按 `msgType` 解释，见下 |
 | `replyTo` | string | 否 | 被回复消息的 `messageId` |
 | `reply` | object | 否 | 回复引用摘要（见下「Reply 对象」）；不落库、按需组装，仅当 `replyTo` 指向的消息存在时返回；旧客户端忽略即可 |
@@ -190,10 +190,10 @@
 | `messageId` | string | 是 | 被引用消息 ID（= 发送时的 `replyTo`） |
 | `seq` | integer | 是 | 被引用消息在会话内的序号 |
 | `senderId` | string | 是 | 被引用消息的发送者用户 ID |
-| `msgType` | string | 是 | 被引用消息类型：`text` / `image` / `file` / `system` |
-| `text` | string | 否 | 文本摘要：`text` 取原文前 120 字符（超出截断并追加 `…`）；`system` 取系统文案；`image` / `file` 不返回 |
-| `fileId` | string | 否 | `image` / `file` 消息的文件 ID（§7 FileContent.fileId） |
-| `name` | string | 否 | `image` / `file` 消息的文件名 |
+| `msgType` | string | 是 | 被引用消息类型：`text` / `image` / `file` / `voice` / `system` |
+| `text` | string | 否 | 文本摘要：`text` 取原文前 120 字符（超出截断并追加 `…`）；`system` 取系统文案；`voice` 固定「[语音]」；`image` / `file` 不返回 |
+| `fileId` | string | 否 | `image` / `file` 消息的文件 ID（§7 FileContent.fileId）；`voice` 不返回 |
+| `name` | string | 否 | `image` / `file` 消息的文件名；`voice` 不返回 |
 
 规则：
 
@@ -206,6 +206,7 @@
 
 - `text`：字符串（纯文本，客户端渲染时必须转义，禁止注入 HTML）。
 - `image` / `file`：FileContent 对象，格式见 §7。
+- `voice`：VoiceContent 对象（`{ fileId, durationMs }`），格式与校验见 §7。
 - `system`：服务端生成的系统事件对象（M3 使用），核心字段为 `event`（事件名，必填）、`actorId`（触发者，可选）、`targetUserIds`（涉及成员，可选）、`text`（服务端生成的中文描述，可选）；后续新增可选字段属向后兼容增量。
 - 系统消息事件名（v1，M3）：`group.created`、`member.joined`、`member.left`、`member.removed`；`text` 为服务端生成的中文描述，客户端渲染为居中小字，不做 i18n。
 - F-24 追加系统消息事件 `owner.transferred`（群主转让）：`actorId` 为原群主、`targetUserIds` 为新群主 userId、`text` 形如「张三 将群主转让给 李四」；旧客户端按未知事件渲染为「系统消息」，符合向后兼容规则。
@@ -607,7 +608,11 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 6. **引用持久化**：服务端在 `messages.file_id` 保存 image/file 消息引用的文件 ID（可空支撑列，不属于帧字段），用于下载时的会话成员鉴权与孤儿文件清理；帧格式不变。
 7. **发送校验与内容归一（v1）**：服务端校验 image/file 消息的 `content.fileId` 必须存在于 `files` 表，且 `files.owner_id` 为发送者本人；不存在或不属于本人时回 `error`（`VALIDATION_FAILED`，语义为「文件不存在或无权使用该文件」，不区分两种情况，也不单独下发 403）。落库与广播时 `content` 的 `name`/`size`/`mime` 以 `files` 记录（`original_name`/`size`/`mime`）为准，客户端传入值不作为权威值；同时把文件 ID 写入支撑列 `messages.file_id`（仅 image/file 消息非空，不属于帧字段）。
 
-8. **共享文件汇总（REST，v1，F-15）**：`GET /api/conversations/{conversationId}/files?type=image|file&beforeSeq={seq}&limit={n}`，需登录且为会话成员；`type` 必填（`image` / `file`，其他 400），`limit` 1~100 默认 50，`beforeSeq` 可选正整数（排他，只取 seq 小于它的引用）。只统计 `messages.file_id` 非空的 image/file 消息，因此头像、未发送的上传文件天然排除；同一 `fileId` 被多次发送只返回一次，取**最新一条引用消息**（max seq），游标即该 seq；响应 `{ "items": [{ "fileId", "name", "size", "mime", "messageId", "messageSeq", "senderId", "createdAt" }], "hasMore": bool }`，items 按 `messageSeq` 降序。非成员 403、会话不存在 404、非法 type/limit/beforeSeq 400。不新增帧、不改 `protocolVersion`。
+8. **共享文件汇总（REST，v1，F-15）**：`GET /api/conversations/{conversationId}/files?type=image|file&beforeSeq={seq}&limit={n}`，需登录且为会话成员；`type` 必填（`image` / `file`，其他 400），`limit` 1~100 默认 50，`beforeSeq` 可选正整数（排他，只取 seq 小于它的引用）。只统计 `msg_type` 为 image/file（**不含 voice**）且 `messages.file_id` 非空的引用消息，因此头像、未发送的上传文件天然排除；同一 `fileId` 被多次发送只返回一次，取**最新一条引用消息**（max seq），游标即该 seq；响应 `{ "items": [{ "fileId", "name", "size", "mime", "messageId", "messageSeq", "senderId", "createdAt" }], "hasMore": bool }`，items 按 `messageSeq` 降序。非成员 403、会话不存在 404、非法 type/limit/beforeSeq 400。不新增帧、不改 `protocolVersion`。
+9. **语音消息（v1，F-28）**：`msgType` 新增 `voice`（向后兼容增量）。`content` 为 VoiceContent：
+   - `fileId`：string，必填，音频文件 `files.id`，归属与发送者校验规则同 image/file（必须为本人上传，否则 `VALIDATION_FAILED`）；
+   - `durationMs`：integer，必填，语音时长（毫秒），范围 **1000 ~ 60000**，由客户端测量上报，服务端只做范围校验、不作为可信计时。
+   上传仍走 `POST /api/files`（multipart）：允许扩展名 `.webm`、MIME `audio/webm`、魔数 `1A 45 DF A3`（EBML/WebM），单文件 ≤ **5MB**（语音大小上限在消息发送校验中执行；其它文件默认上限仍为 50MB）。落库时 `content` 的 `name`/`size`/`mime` 以 `files` 记录为准，`messages.file_id` 写入该文件 ID；撤回规则与 image/file 相同（发送者本人、2 分钟窗口），撤回后 `content` 为空文本、不再返回文件信息。广播、历史分页与 `sync.response` 原样返回 content_json，不新增帧字段。旧客户端收到 `voice` 时按未知 `msgType` 渲染兜底（建议显示「不支持的消息类型」），不影响其它消息。
 
 示例（图片消息）：
 
@@ -687,3 +692,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 | v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-22 多端在线） | 2026-11-01 | 连接策略由「单活动连接」改为「每账号最多 3 个连接」（`App:MaxConnectionsPerUser` 可配，裁到 1~10），超限踢「最早建立」的连接；`read.updated` 增加下发给本人其他连接（多端已读同步），群聊仍不向其他成员广播；`kicked` 帧结构与 `4001` 关闭码不变，仅语义/文案扩展；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（F-28 语音消息） | 2026-11-01 | `message.send` 的 `msgType` 新增 `voice`（向后兼容增量），content 为 VoiceContent `{fileId, durationMs}`（durationMs 1000~60000 整数、客户端上报）；新增音频文件规则：`.webm` / `audio/webm` / 魔数 `1A 45 DF A3`、单文件 ≤5MB，上传下载仍走现有 `/api/files`；voice 消息走现有 Message 路径（落库 messages.file_id、共享文件汇总排除 voice、撤回规则同 image/file）；无新帧、不改库表、`protocolVersion` 仍为 1 |
