@@ -430,7 +430,7 @@ namespace Chat.Server.Data.Migrations
 
                     b.ToTable("messages", null, t =>
                         {
-                            t.HasCheckConstraint("ck_messages_msg_type", "msg_type IN ('text', 'image', 'file', 'system')");
+                            t.HasCheckConstraint("ck_messages_msg_type", "msg_type IN ('text', 'image', 'file', 'voice', 'system')");
                         });
                 });
 

@@ -214,7 +214,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         modelBuilder.Entity<Message>(entity =>
         {
             entity.ToTable("messages", table =>
-                table.HasCheckConstraint("ck_messages_msg_type", "msg_type IN ('text', 'image', 'file', 'system')"));
+                table.HasCheckConstraint("ck_messages_msg_type", "msg_type IN ('text', 'image', 'file', 'voice', 'system')"));
 
             entity.HasKey(message => message.Id);
             entity.Property(message => message.Id).HasColumnName("id");

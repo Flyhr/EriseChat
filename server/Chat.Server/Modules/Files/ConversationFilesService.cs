@@ -25,6 +25,7 @@ public sealed record ConversationFilesPage(IReadOnlyList<ConversationFileItem> I
 /// 会话共享文件汇总（F-15）：只统计 messages.file_id 非空的 image/file 消息，
 /// 按文件去重取最新一条引用消息（max seq），以该 seq 作为 beforeSeq 游标倒序分页。
 /// 只读接口，不新增表/列/帧；头像与未发送的上传文件天然不在消息引用中，因此不会出现。
+/// 语音消息（F-28，voice）不进入汇总：type 仅接受 image/file，语音文件不会出现在共享文件列表。
 /// </summary>
 public sealed class ConversationFilesService
 {

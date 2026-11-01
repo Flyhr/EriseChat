@@ -148,8 +148,8 @@ CREATE INDEX idx_conversation_members_user_id ON conversation_members (user_id);
 -- messages：消息
 -- seq           : 会话内严格单调 +1，服务端在事务内分配，落库后不可变
 -- client_msg_id : 客户端 UUID 幂等键，(conversation_id, client_msg_id) 唯一
--- content_json  : 按 msg_type 解释的 JSON 文本（text 为 JSON 字符串，image/file/system 为 JSON 对象）
--- file_id       : image/file 消息引用的 files.id；text/system 为 NULL。v1 不建库级外键：
+-- content_json  : 按 msg_type 解释的 JSON 文本（text 为 JSON 字符串，image/file/voice/system 为 JSON 对象）
+-- file_id       : image/file/voice 消息引用的 files.id；text/system 为 NULL。v1 不建库级外键：
 --                 SQLite 对已有表加 FK 需整表重建，引用完整性由应用层（发送时校验文件存在与归属）保证，
 --                 孤儿清理兜底；下载鉴权与孤儿清理都依赖本列（M3-01）
 -- reply_to      : 被回复消息 ID（自引用）
@@ -161,7 +161,7 @@ CREATE TABLE messages (
     sender_id       TEXT NOT NULL,
     client_msg_id   TEXT NOT NULL,
     seq             INTEGER NOT NULL,
-    msg_type        TEXT NOT NULL CHECK (msg_type IN ('text', 'image', 'file', 'system')),
+    msg_type        TEXT NOT NULL CHECK (msg_type IN ('text', 'image', 'file', 'voice', 'system')),
     content_json    TEXT NOT NULL,
     file_id         TEXT,
     reply_to        TEXT,

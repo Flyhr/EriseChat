@@ -12,6 +12,9 @@ public enum MessageType
     /// <summary>文件（content 为 FileContent，二进制走 REST，不走 WS）。</summary>
     File,
 
+    /// <summary>语音（content 为 VoiceContent，音频文件走 REST；F-28）。</summary>
+    Voice,
+
     /// <summary>系统消息（仅服务端生成）。</summary>
     System,
 }

@@ -58,6 +58,18 @@ public sealed class MessageService
     /// <summary>REST 历史分页上限。</summary>
     public const int HistoryMaxLimit = 200;
 
+    /// <summary>语音消息大小上限（F-28，protocol §7）：5MB。</summary>
+    public const int VoiceMaxBytes = 5 * 1024 * 1024;
+
+    /// <summary>语音时长下限（毫秒，F-28）。</summary>
+    public const int VoiceMinDurationMs = 1_000;
+
+    /// <summary>语音时长上限（毫秒，F-28）。</summary>
+    public const int VoiceMaxDurationMs = 60_000;
+
+    /// <summary>语音文件 MIME（F-28）。</summary>
+    private const string VoiceMime = "audio/webm";
+
     // F-11 消息搜索（REST，非协议帧）：q 长 1~50、limit 1~50（默认 20）。
     public const int SearchDefaultLimit = 20;
     public const int SearchMaxLimit = 50;
@@ -754,6 +766,52 @@ public sealed class MessageService
                     storedFile.Id,
                     request.MsgType);
 
+            case MessageType.Voice:
+                if (!request.Content.IsObject)
+                {
+                    throw ApiException.ValidationFailed("voice 消息 content 必须是语音对象");
+                }
+
+                var voice = request.Content.As<VoiceContent>();
+                if (voice is null || string.IsNullOrWhiteSpace(voice.FileId))
+                {
+                    throw ApiException.ValidationFailed("语音对象字段不完整（fileId/durationMs）");
+                }
+
+                var voiceFileId = ValidateId(voice.FileId, "fileId");
+                var voiceFile = await _db.Files.AsNoTracking()
+                    .FirstOrDefaultAsync(file => file.Id == voiceFileId, cancellationToken);
+                if (voiceFile is null ||
+                    !string.Equals(voiceFile.OwnerId, senderId, StringComparison.Ordinal))
+                {
+                    throw ApiException.ValidationFailed("文件不存在或无权使用该文件");
+                }
+
+                if (!string.Equals(voiceFile.Mime, VoiceMime, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw ApiException.ValidationFailed("语音消息必须引用音频文件（audio/webm）");
+                }
+
+                if (voiceFile.Size > VoiceMaxBytes)
+                {
+                    throw new ApiException(
+                        ErrorCodes.MessageTooLarge,
+                        $"语音文件超过上限（最大 {VoiceMaxBytes / 1024 / 1024}MB）",
+                        StatusCodes.Status400BadRequest);
+                }
+
+                if (voice.DurationMs < VoiceMinDurationMs || voice.DurationMs > VoiceMaxDurationMs)
+                {
+                    throw ApiException.ValidationFailed(
+                        $"语音时长超出范围（{VoiceMinDurationMs}~{VoiceMaxDurationMs} 毫秒）");
+                }
+
+                // 时长由客户端上报，服务端只做范围校验；文件 ID 以 files 记录为准，落 messages.file_id。
+                return new NormalizedSendContent(
+                    MessageContent.FromObject(new VoiceContent(voiceFile.Id, voice.DurationMs)),
+                    voiceFile.Id,
+                    MessageType.Voice);
+
             default:
                 throw ApiException.ValidationFailed("不支持的 msgType");
         }
@@ -899,6 +957,10 @@ public sealed class MessageService
                     }
                 }
 
+                break;
+            case MessageType.Voice:
+                // 语音不返回 fileId/name，固定摘要（protocol §4.3 Reply 对象，F-28）。
+                text = "[语音]";
                 break;
         }
 

@@ -10,6 +10,11 @@ namespace Chat.Protocol.Frames;
 /// <param name="Mime">MIME 类型。</param>
 public sealed record FileContent(string FileId, string Name, long Size, string Mime);
 
+/// <summary>语音消息内容（protocol/protocol.md §7，F-28）。二进制走 REST，WS 只传元数据。</summary>
+/// <param name="FileId">音频文件 ID（files.id；.webm / audio/webm）。</param>
+/// <param name="DurationMs">语音时长（毫秒，1000~60000，由客户端测量上报，服务端仅做范围校验）。</param>
+public sealed record VoiceContent(string FileId, long DurationMs);
+
 /// <summary>
 /// 系统消息内容（服务端生成，M3 使用；protocol/protocol.md §4.3）。
 /// 后续新增可选字段属向后兼容增量。

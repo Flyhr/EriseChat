@@ -35,6 +35,7 @@ public sealed class FileService
             [".jpeg"] = "image/jpeg",
             [".gif"] = "image/gif",
             [".webp"] = "image/webp",
+            [".webm"] = "audio/webm",
             [".pdf"] = "application/pdf",
             [".txt"] = "text/plain",
             [".docx"] = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -50,6 +51,9 @@ public sealed class FileService
     private static readonly byte[] RiffSignature = "RIFF"u8.ToArray();
     private static readonly byte[] WebpSignature = "WEBP"u8.ToArray();
     private static readonly byte[] PdfSignature = "%PDF"u8.ToArray();
+
+    /// <summary>WebM/Matroska 容器的 EBML 头（语音消息 .webm 魔数，F-28）。</summary>
+    private static readonly byte[] WebmSignature = [0x1A, 0x45, 0xDF, 0xA3];
 
     private readonly ChatDbContext _db;
     private readonly FileStorage _storage;
@@ -229,6 +233,7 @@ public sealed class FileService
                    head[..4].SequenceEqual(RiffSignature) &&
                    head.Slice(8, 4).SequenceEqual(WebpSignature),
         ".pdf" => head.Length >= 4 && head[..4].SequenceEqual(PdfSignature),
+        ".webm" => head.Length >= 4 && head[..4].SequenceEqual(WebmSignature),
         ".zip" or ".docx" or ".xlsx" or ".pptx" =>
             head.Length >= 4 && head[0] == 0x50 && head[1] == 0x4B && head[2] == 0x03 && head[3] == 0x04,
         _ => true,
