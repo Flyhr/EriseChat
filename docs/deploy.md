@@ -353,7 +353,7 @@ sudo docker image rm eisechat-server:1.1.0
 ## 9. Windows 安装包与 Android APK 分发
 
 - 两个安装包放到 `/opt/eisechat/data/downloads/`，`GET /download`（及其 `/download/files/*` 直链）即可下载；
-- 客户端首次启动需在登录页配置服务器地址（内测用 `https://<host>.<tailnet>.ts.net`，公网用你的域名）；
+- 客户端安装后登录，在「设置 → 连接与关于」配置服务器地址（内测用 `https://<host>.<tailnet>.ts.net`，公网用你的域名）；登录页不再提供地址编辑入口，桌面端首次连接地址见 `docs/desktop.md`；
 - 客户端细节见 [docs/web.md](docs/web.md)、[docs/mobile.md](docs/mobile.md)。
 
 ---
