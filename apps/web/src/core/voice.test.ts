@@ -5,10 +5,13 @@ import {
   VOICE_MIN_DURATION_MS,
   VOICE_MIME,
   buildVoiceContent,
+  clampVoiceSeekMs,
   formatDuration,
   isVoiceContent,
   isValidVoiceDuration,
   voicePreviewText,
+  voiceProgressRatio,
+  voiceSeekTimeText,
 } from './voice'
 import { mapRecorderError } from './recorder'
 import type { FileContent } from '../types/frames'
@@ -104,5 +107,55 @@ describe('mapRecorderError', () => {
   it('未知错误回退通用文案', () => {
     expect(mapRecorderError(new Error('boom'))).toBe('无法开始录音')
     expect(mapRecorderError(null)).toBe('无法开始录音')
+  })
+})
+
+describe('clampVoiceSeekMs', () => {
+  it('将定位毫秒夹到 0~总时长', () => {
+    expect(clampVoiceSeekMs(0, 20_000)).toBe(0)
+    expect(clampVoiceSeekMs(11_000, 20_000)).toBe(11_000)
+    expect(clampVoiceSeekMs(20_000, 20_000)).toBe(20_000)
+  })
+
+  it('负值/NaN/超上限/小数按整数处理', () => {
+    expect(clampVoiceSeekMs(-1, 20_000)).toBe(0)
+    expect(clampVoiceSeekMs(Number.NaN, 20_000)).toBe(0)
+    expect(clampVoiceSeekMs(99_999, 20_000)).toBe(20_000)
+    expect(clampVoiceSeekMs(1_234.9, 20_000)).toBe(1_234)
+  })
+
+  it('时长非法时回退 0', () => {
+    expect(clampVoiceSeekMs(5_000, 0)).toBe(0)
+    expect(clampVoiceSeekMs(5_000, -1)).toBe(0)
+    expect(clampVoiceSeekMs(5_000, Number.NaN)).toBe(0)
+  })
+})
+
+describe('voiceProgressRatio', () => {
+  it('返回 0~1 的进度比例', () => {
+    expect(voiceProgressRatio(0, 20_000)).toBe(0)
+    expect(voiceProgressRatio(10_000, 20_000)).toBe(0.5)
+    expect(voiceProgressRatio(20_000, 20_000)).toBe(1)
+  })
+
+  it('越界/时长非法时收敛到 0~1 或 0', () => {
+    expect(voiceProgressRatio(99_999, 20_000)).toBe(1)
+    expect(voiceProgressRatio(-5, 20_000)).toBe(0)
+    expect(voiceProgressRatio(5_000, 0)).toBe(0)
+    expect(voiceProgressRatio(5_000, Number.NaN)).toBe(0)
+  })
+})
+
+describe('voiceSeekTimeText', () => {
+  it('生成「当前 / 总时长」文案', () => {
+    expect(voiceSeekTimeText(11_000, 20_000)).toBe('0:11 / 0:20')
+    expect(voiceSeekTimeText(0, 20_000)).toBe('0:00 / 0:20')
+    expect(voiceSeekTimeText(20_000, 20_000)).toBe('0:20 / 0:20')
+  })
+
+  it('非法值按 0 处理', () => {
+    expect(voiceSeekTimeText(Number.NaN, 20_000)).toBe('0:00 / 0:20')
+    expect(voiceSeekTimeText(-1, 20_000)).toBe('0:00 / 0:20')
+    expect(voiceSeekTimeText(5_000, Number.NaN)).toBe('0:00 / 0:00')
   })
 })

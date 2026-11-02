@@ -52,3 +52,24 @@ export function isVoiceContent(value: unknown): value is VoiceContent {
   const content = value as VoiceContent
   return typeof content.fileId === 'string' && Number.isFinite(content.durationMs)
 }
+
+/** 把定位毫秒夹到 0~durationMs（非法值/负值→0；时长非法时→0）。 */
+export function clampVoiceSeekMs(ms: number, durationMs: number): number {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return 0
+  if (!Number.isFinite(ms)) return 0
+  if (ms <= 0) return 0
+  return Math.min(Math.floor(ms), Math.floor(durationMs))
+}
+
+/** 进度比例 0~1（时长非法或 ≤0 时返回 0）。 */
+export function voiceProgressRatio(ms: number, durationMs: number): number {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return 0
+  const safeMs = clampVoiceSeekMs(ms, durationMs)
+  return Math.min(1, Math.max(0, safeMs / durationMs))
+}
+
+/** 拖动/悬停定位时的时间文案：`0:11 / 0:20`（非法值按 0 处理）。 */
+export function voiceSeekTimeText(seekMs: number, durationMs: number): string {
+  const total = Number.isFinite(durationMs) && durationMs > 0 ? Math.floor(durationMs) : 0
+  return `${formatDuration(clampVoiceSeekMs(seekMs, total))} / ${formatDuration(total)}`
+}

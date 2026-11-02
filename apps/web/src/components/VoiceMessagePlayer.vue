@@ -3,12 +3,18 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { filesApi } from '../api/files'
 import { getOrLoadBlobUrl } from '../core/blobCache'
-import { formatDuration } from '../core/voice'
+import {
+  clampVoiceSeekMs,
+  formatDuration,
+  voiceProgressRatio,
+  voiceSeekTimeText,
+} from '../core/voice'
 import { claimVoicePlayback, releaseVoicePlayback } from '../core/voicePlayer'
 
-// F-28：语音消息播放器（纯展示 + 按需鉴权下载）。
+// F-28：语音消息播放器（播放/暂停 + 进度条拖拽定位）。
 // 点击播放时才下载（走 filesApi.downloadBlob + blobCache），不在历史渲染时预取；
 // 同一时间只允许一条语音播放（core/voicePlayer 负责全局互斥），播放结束/出错自动复位。
+// 进度以 content.durationMs 为准（MediaRecorder 产出的 webm 可能缺时长元数据），不读 audio.duration。
 const props = defineProps<{
   fileId: string
   durationMs: number
@@ -17,12 +23,31 @@ const props = defineProps<{
 type PlayerState = 'idle' | 'loading' | 'playing' | 'error'
 
 const state = ref<PlayerState>('idle')
-const progress = ref(0)
+/** 当前播放位置（毫秒）。 */
+const progressMs = ref(0)
+/** 拖动中的位置；null 表示未拖动。 */
+const seekMs = ref<number | null>(null)
+/** 悬停预览位置；null 表示未悬停。 */
+const hoverMs = ref<number | null>(null)
 let audio: HTMLAudioElement | null = null
 let disposed = false
+/** audio 尚未创建时点进度条记下的位置，播放时从该处开始。 */
+let pendingSeekMs = 0
 
-const label = computed(() => (state.value === 'error' ? '语音加载失败' : formatDuration(props.durationMs)))
+const totalMs = computed(() =>
+  Number.isFinite(props.durationMs) && props.durationMs > 0 ? Math.floor(props.durationMs) : 0,
+)
+const displayMs = computed(() => seekMs.value ?? hoverMs.value ?? progressMs.value)
+const ratio = computed(() => voiceProgressRatio(displayMs.value, props.durationMs))
+const showSeekText = computed(() => seekMs.value !== null || hoverMs.value !== null)
+const timeText = computed(() => {
+  if (state.value === 'error') return '语音加载失败'
+  if (state.value === 'loading') return '加载中…'
+  if (showSeekText.value) return voiceSeekTimeText(displayMs.value, props.durationMs)
+  return formatDuration(totalMs.value)
+})
 const actionLabel = computed(() => (state.value === 'playing' ? '暂停语音' : '播放语音'))
+const trackDisabled = computed(() => state.value === 'loading' || state.value === 'error')
 
 /** 停止并复位（播放结束、被其它语音抢占或组件卸载时调用）。 */
 function stopPlayback(): void {
@@ -30,25 +55,127 @@ function stopPlayback(): void {
     audio.pause()
     audio.currentTime = 0
   }
-  progress.value = 0
+  progressMs.value = 0
+  seekMs.value = null
+  hoverMs.value = null
+  pendingSeekMs = 0
   if (state.value === 'playing') state.value = 'idle'
   releaseVoicePlayback(stopPlayback)
 }
 
 function onEnded(): void {
-  progress.value = 0
+  progressMs.value = 0
+  seekMs.value = null
+  pendingSeekMs = 0
   state.value = 'idle'
   releaseVoicePlayback(stopPlayback)
 }
 
 function onTimeUpdate(): void {
+  if (!audio || seekMs.value !== null) return
+  const currentMs = Math.round(audio.currentTime * 1000)
+  progressMs.value = totalMs.value > 0 ? Math.min(totalMs.value, Math.max(0, currentMs)) : Math.max(0, currentMs)
+}
+
+function onError(): void {
+  state.value = 'error'
+  progressMs.value = 0
+  seekMs.value = null
+  releaseVoicePlayback(stopPlayback)
+}
+
+/** 定位到指定毫秒（夹到 0~总时长；暂停状态下只改位置不播放）。 */
+function applySeek(ms: number): void {
+  const target = clampVoiceSeekMs(ms, props.durationMs)
+  progressMs.value = target
+  pendingSeekMs = target
   if (!audio) return
-  const total = audio.duration
-  progress.value = Number.isFinite(total) && total > 0 ? Math.min(1, audio.currentTime / total) : 0
+  if (target >= totalMs.value && totalMs.value > 0) {
+    // 拖到最右端：按播放结束处理（复位）
+    audio.pause()
+    onEnded()
+    return
+  }
+  audio.currentTime = target / 1000
+}
+
+function msFromPointer(event: PointerEvent): number {
+  const el = event.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  if (rect.width <= 0 || totalMs.value <= 0) return 0
+  const clicked = (event.clientX - rect.left) / rect.width
+  return clampVoiceSeekMs(Math.round(clicked * totalMs.value), props.durationMs)
+}
+
+function onTrackPointerDown(event: PointerEvent): void {
+  if (trackDisabled.value || event.button !== 0) return
+  event.preventDefault()
+  el(event).setPointerCapture?.(event.pointerId)
+  const ms = msFromPointer(event)
+  seekMs.value = ms
+  // 播放中拖动可先试听；暂停状态不动播放，松手才生效
+  if (state.value === 'playing' && audio && ms < totalMs.value) audio.currentTime = ms / 1000
+}
+
+function onTrackPointerMove(event: PointerEvent): void {
+  if (trackDisabled.value) return
+  const ms = msFromPointer(event)
+  if (seekMs.value !== null) {
+    seekMs.value = ms
+    if (state.value === 'playing' && audio && ms < totalMs.value) audio.currentTime = ms / 1000
+    return
+  }
+  hoverMs.value = ms
+}
+
+function onTrackPointerUp(event: PointerEvent): void {
+  if (seekMs.value === null) return
+  const ms = seekMs.value
+  el(event).releasePointerCapture?.(event.pointerId)
+  seekMs.value = null
+  hoverMs.value = null
+  applySeek(ms)
+}
+
+function onTrackPointerCancel(): void {
+  seekMs.value = null
+  hoverMs.value = null
+}
+
+function onTrackPointerLeave(): void {
+  if (seekMs.value === null) hoverMs.value = null
+}
+
+function onTrackKeydown(event: KeyboardEvent): void {
+  if (trackDisabled.value) return
+  const base = displayMs.value
+  let target: number | null = null
+  switch (event.key) {
+    case 'ArrowLeft':
+      target = base - (event.shiftKey ? 5_000 : 1_000)
+      break
+    case 'ArrowRight':
+      target = base + (event.shiftKey ? 5_000 : 1_000)
+      break
+    case 'Home':
+      target = 0
+      break
+    case 'End':
+      target = totalMs.value
+      break
+    default:
+      return
+  }
+  event.preventDefault()
+  applySeek(target)
+}
+
+function el(event: Event): HTMLElement {
+  return event.currentTarget as HTMLElement
 }
 
 async function togglePlayback(): Promise<void> {
-  if (state.value === 'loading') return
+  if (state.value === 'loading' || state.value === 'error') return
   if (state.value === 'playing') {
     audio?.pause()
     state.value = 'idle'
@@ -64,6 +191,9 @@ async function togglePlayback(): Promise<void> {
       audio.addEventListener('ended', onEnded)
       audio.addEventListener('timeupdate', onTimeUpdate)
       audio.addEventListener('error', onError)
+      if (pendingSeekMs > 0 && pendingSeekMs < totalMs.value) {
+        audio.currentTime = pendingSeekMs / 1000
+      }
     } catch {
       if (!disposed) state.value = 'error'
       return
@@ -79,12 +209,6 @@ async function togglePlayback(): Promise<void> {
   }
 }
 
-function onError(): void {
-  state.value = 'error'
-  progress.value = 0
-  releaseVoicePlayback(stopPlayback)
-}
-
 onBeforeUnmount(() => {
   disposed = true
   if (audio) {
@@ -98,22 +222,41 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <button
+  <div
     class="voice-player"
     :class="{ 'voice-player--playing': state === 'playing', 'voice-player--error': state === 'error' }"
-    type="button"
-    :aria-label="actionLabel"
-    :disabled="state === 'loading'"
-    @click="togglePlayback"
   >
-    <span class="voice-player__icon">
+    <button
+      class="voice-player__main"
+      type="button"
+      :aria-label="actionLabel"
+      :disabled="state === 'loading' || state === 'error'"
+      @click="togglePlayback"
+    >
       <AppIcon :name="state === 'playing' ? 'pause' : 'play'" :size="15" />
+    </button>
+    <span
+      class="voice-player__track"
+      role="slider"
+      :tabindex="trackDisabled ? -1 : 0"
+      :aria-valuemin="0"
+      :aria-valuemax="totalMs"
+      :aria-valuenow="Math.round(displayMs)"
+      :aria-valuetext="timeText"
+      aria-label="播放进度"
+      @pointerdown="onTrackPointerDown"
+      @pointermove="onTrackPointerMove"
+      @pointerup="onTrackPointerUp"
+      @pointercancel="onTrackPointerCancel"
+      @pointerleave="onTrackPointerLeave"
+      @keydown="onTrackKeydown"
+    >
+      <span class="voice-player__bar">
+        <span class="voice-player__fill" :style="{ width: `${Math.round(ratio * 100)}%` }" />
+      </span>
     </span>
-    <span class="voice-player__track" aria-hidden="true">
-      <span class="voice-player__fill" :style="{ width: `${Math.round(progress * 100)}%` }" />
-    </span>
-    <span class="voice-player__time">{{ state === 'loading' ? '加载中…' : label }}</span>
-  </button>
+    <span class="voice-player__time">{{ timeText }}</span>
+  </div>
 </template>
 
 <style scoped>
@@ -125,44 +268,62 @@ onBeforeUnmount(() => {
   max-width: min(260px, 60vw);
   height: 36px;
   padding: 0 var(--ec-space-2) 0 4px;
-  border: none;
   border-radius: var(--ec-radius-pill);
   background: var(--ec-surface-hover);
   color: var(--ec-text-primary);
-  cursor: pointer;
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
-.voice-player:disabled {
-  cursor: progress;
-}
-
 @media (hover: hover) and (pointer: fine) {
-  .voice-player:hover:not(:disabled) {
+  .voice-player:hover {
     background: var(--ec-brand-050);
   }
 }
 
-.voice-player:focus-visible {
-  outline: 2px solid var(--ec-focus);
-  outline-offset: 2px;
-}
-
-.voice-player__icon {
+.voice-player__main {
   display: grid;
   flex: none;
   width: 28px;
   height: 28px;
-  place-items: center;
+  padding: 0;
+  border: none;
   border-radius: 50%;
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
+  cursor: pointer;
 }
 
+.voice-player__main:disabled {
+  cursor: progress;
+}
+
+.voice-player__main:focus-visible {
+  outline: 2px solid var(--ec-focus);
+  outline-offset: 2px;
+}
+
+/* 命中区：视觉 3px、上下各 8px padding 撑到 19px，方便触屏拖动 */
 .voice-player__track {
-  position: relative;
+  display: flex;
   flex: 1;
+  align-items: center;
   min-width: 48px;
+  height: 20px;
+  padding: 8px 0;
+  cursor: pointer;
+  touch-action: none;
+  box-sizing: content-box;
+}
+
+.voice-player__track:focus-visible {
+  outline: 2px solid var(--ec-focus);
+  outline-offset: 2px;
+  border-radius: var(--ec-radius-pill);
+}
+
+.voice-player__bar {
+  position: relative;
+  width: 100%;
   height: 3px;
   overflow: hidden;
   border-radius: var(--ec-radius-pill);
@@ -188,7 +349,7 @@ onBeforeUnmount(() => {
   color: var(--ec-danger);
 }
 
-.voice-player--error .voice-player__icon {
+.voice-player--error .voice-player__main {
   background: var(--ec-danger);
 }
 
@@ -198,7 +359,7 @@ onBeforeUnmount(() => {
   color: var(--ec-text-inverse);
 }
 
-:global(.message-bubble--self) .voice-player__track {
+:global(.message-bubble--self) .voice-player__bar {
   background: rgb(255 255 255 / 35%);
 }
 
@@ -210,7 +371,7 @@ onBeforeUnmount(() => {
   color: var(--ec-text-inverse);
 }
 
-:global(.message-bubble--self) .voice-player__icon {
+:global(.message-bubble--self) .voice-player__main {
   background: var(--ec-text-inverse);
   color: var(--ec-brand-600);
 }
