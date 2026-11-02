@@ -5,7 +5,7 @@ import { authApi } from '../api/auth'
 import { filesApi } from '../api/files'
 import { sessionsApi, type SessionInfo } from '../api/sessions'
 import { usersApi } from '../api/users'
-import { fetchVersionManifest } from '../api/version'
+import { fetchVersionManifest, type VersionArtifact } from '../api/version'
 import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
@@ -13,7 +13,13 @@ import ComingSoonHint from '../components/ComingSoonHint.vue'
 import SettingsGroup from '../components/settings/SettingsGroup.vue'
 import SettingsRow from '../components/settings/SettingsRow.vue'
 import SettingsSwitch from '../components/settings/SettingsSwitch.vue'
-import { isDesktopShell } from '../core/desktop'
+import {
+  checkDesktopUpdate,
+  downloadDesktopUpdate,
+  installDesktopUpdate,
+  isDesktopShell,
+  subscribeDesktopUpdateProgress,
+} from '../core/desktop'
 import type { AppIconName } from '../core/icons'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
@@ -180,28 +186,53 @@ const updateChecking = ref(false)
 const latestVersion = ref('')
 const updateAvailable = ref(false)
 const updateMessage = ref('')
+const updateArtifact = ref<VersionArtifact | null>(null)
+const updateDownloading = ref(false)
+const updateProgress = ref(0)
+let stopUpdateProgress: (() => void) | null = null
+
+function clearUpdateProgressListener(): void {
+  stopUpdateProgress?.()
+  stopUpdateProgress = null
+}
 
 /**
- * 检查更新（F-29-03）：从当前服务器拉取更新清单并比较版本。
- * Web 浏览器只提示刷新页面；桌面/APK 壳的下载安装流程由 F-29-04/05 接入。
+ * 检查更新（F-29-03/04）：桌面壳交给主进程按当前服务器检查并可下载安装；
+ * Web 浏览器只提示刷新页面；Android 壳暂提示去下载页更新（App 内安装见 F-29-05）。
  */
 async function checkForUpdate(): Promise<void> {
-  if (updateChecking.value) return
+  if (updateChecking.value || updateDownloading.value) return
   updateChecking.value = true
   updateMessage.value = ''
+  updateArtifact.value = null
   try {
+    if (isDesktopShell()) {
+      const response = await checkDesktopUpdate()
+      if (!response.ok || !response.result) {
+        updateAvailable.value = false
+        updateMessage.value = response.message ?? '检查更新失败，请稍后重试'
+        return
+      }
+      latestVersion.value = response.result.latestVersion
+      updateAvailable.value = response.result.available
+      updateArtifact.value = response.result.available ? response.result.artifact : null
+      updateMessage.value = response.result.available
+        ? `发现新版本 v${response.result.latestVersion}，可下载并安装`
+        : '已是最新版本'
+      return
+    }
+
     const manifest = await fetchVersionManifest()
     latestVersion.value = manifest.version
-    const platform = isDesktopShell() ? 'desktop' : isPackagedShell() ? 'android' : null
+    const platform = isPackagedShell() ? 'android' : null
     if (platform === null) {
       updateAvailable.value = shouldOfferUpdate(APP_VERSION, manifest.version)
       updateMessage.value = updateAvailable.value ? '服务端已更新，刷新页面即可获取最新版' : '已是最新版本'
       return
     }
-
     const prompt = updatePromptOf(manifest, APP_VERSION, platform)
     updateAvailable.value = prompt.available
-    updateMessage.value = prompt.available ? `发现新版本 v${prompt.latest}` : '已是最新版本'
+    updateMessage.value = prompt.available ? `发现新版本 v${prompt.latest}，请到下载页更新` : '已是最新版本'
   } catch (error) {
     updateAvailable.value = false
     updateMessage.value = friendlyError(error)
@@ -209,6 +240,38 @@ async function checkForUpdate(): Promise<void> {
     updateChecking.value = false
   }
 }
+
+/** 下载并安装桌面端更新（F-29-04）：主进程下载 → sha256 校验 → 静默安装并退出。 */
+async function downloadAndInstallUpdate(): Promise<void> {
+  const artifact = updateArtifact.value
+  if (!artifact || updateDownloading.value) return
+  updateDownloading.value = true
+  updateProgress.value = 0
+  updateMessage.value = '正在下载更新…'
+  clearUpdateProgressListener()
+  stopUpdateProgress = subscribeDesktopUpdateProgress((progress) => {
+    updateProgress.value = progress.percent
+  })
+  try {
+    const downloaded = await downloadDesktopUpdate(artifact)
+    if (!downloaded.ok) {
+      updateMessage.value = downloaded.message ?? '下载更新失败，请稍后重试'
+      return
+    }
+    updateMessage.value = '下载完成，正在安装…'
+    const installed = await installDesktopUpdate()
+    if (!installed.ok) {
+      updateMessage.value = installed.message ?? '安装更新失败，请手动运行下载的安装包'
+    }
+  } finally {
+    updateDownloading.value = false
+    clearUpdateProgressListener()
+  }
+}
+
+onBeforeUnmount(() => {
+  clearUpdateProgressListener()
+})
 
 /** 退出登录：自绘弹窗二次确认 → 请求服务端注销（失败也继续）→ 断连清缓存回登录页。 */
 async function confirmLogout(): Promise<void> {
@@ -836,6 +899,20 @@ async function saveProfile(): Promise<void> {
               </button>
             </SettingsRow>
             <p v-if="updateMessage" class="settings-field__hint" role="status">{{ updateMessage }}</p>
+            <SettingsRow
+              v-if="isDesktopShell() && updateAvailable && updateArtifact"
+              label="安装更新"
+              :hint="updateDownloading ? `下载中 ${updateProgress}%` : '下载完成后将自动安装并重启'"
+            >
+              <button
+                type="button"
+                class="settings-btn settings-btn--primary"
+                :disabled="updateDownloading"
+                @click="downloadAndInstallUpdate"
+              >
+                {{ updateDownloading ? `下载中 ${updateProgress}%` : '下载并安装' }}
+              </button>
+            </SettingsRow>
             <SettingsRow label="下载客户端">
               <RouterLink class="settings-link" to="/download">前往下载页</RouterLink>
             </SettingsRow>

@@ -39,6 +39,33 @@ const desktopApi = {
       ipcRenderer.removeListener('notification:click', handler)
     }
   },
+  /** F-29：检查桌面端更新（主进程请求当前服务器 /api/version 并比较版本）。 */
+  checkUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:check'),
+  /** F-29：下载桌面安装包（主进程校验 sha256，进度通过 onUpdateProgress 推送）。 */
+  downloadUpdate: (artifact: unknown): Promise<unknown> => ipcRenderer.invoke('update:download', artifact),
+  /** F-29：安装已下载的安装包（静默安装后退出应用）。 */
+  installUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:install'),
+  /** F-29：订阅下载进度，返回取消订阅函数。 */
+  onUpdateProgress: (
+    callback: (progress: { downloaded: number; total: number; percent: number }) => void,
+  ): (() => void) => {
+    const handler = (_event: IpcRendererEvent, progress: unknown): void => {
+      if (!progress || typeof progress !== 'object') return
+      const record = progress as Record<string, unknown>
+      if (
+        typeof record.downloaded !== 'number' ||
+        typeof record.total !== 'number' ||
+        typeof record.percent !== 'number'
+      ) {
+        return
+      }
+      callback({ downloaded: record.downloaded, total: record.total, percent: record.percent })
+    }
+    ipcRenderer.on('update:progress', handler)
+    return () => {
+      ipcRenderer.removeListener('update:progress', handler)
+    }
+  },
 } as const
 
 contextBridge.exposeInMainWorld('eisechatDesktop', desktopApi)

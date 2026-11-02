@@ -16,7 +16,7 @@ interface DesktopBridge {
   /** 保存服务器地址到壳 settings.json（M4-02；登录页首启配置时与 localStorage 保持一致）。 */
   setServerUrl?: (url: string) => Promise<{ ok: boolean; serverUrl: string }>
   /** 检查更新（F-29-04）：主进程从当前服务器请求 /api/version 并比较版本。 */
-  checkUpdate?: () => Promise<DesktopUpdateCheckResult | null>
+  checkUpdate?: () => Promise<{ ok: boolean; message?: string; result?: DesktopUpdateCheckResult }>
   /** 下载更新包到临时目录并校验 sha256（F-29-04）。 */
   downloadUpdate?: (artifact: VersionArtifact) => Promise<{ ok: boolean; message?: string }>
   /** 静默安装已下载的更新包并退出（F-29-04）。 */
@@ -109,5 +109,58 @@ export function subscribeNotificationClick(callback: NotificationClickCallback):
         // 取消订阅失败不影响页面卸载。
       }
     }
+  }
+}
+
+/**
+ * 检查桌面端更新（F-29-04）：由主进程请求当前服务器 /api/version 并比较版本。
+ * 无桌面壳（Web/APK）或旧版壳未暴露接口时返回失败，调用方按提示降级。
+ */
+export async function checkDesktopUpdate(): Promise<{
+  ok: boolean
+  message?: string
+  result?: DesktopUpdateCheckResult
+}> {
+  const bridge = getBridge()
+  if (typeof bridge?.checkUpdate !== 'function') return { ok: false, message: '当前桌面端不支持更新检查' }
+  try {
+    return await bridge.checkUpdate()
+  } catch {
+    return { ok: false, message: '检查更新失败，请稍后重试' }
+  }
+}
+
+/** 下载桌面端安装包（F-29-04，主进程校验 sha256）；失败返回中文提示。 */
+export async function downloadDesktopUpdate(
+  artifact: VersionArtifact,
+): Promise<{ ok: boolean; message?: string }> {
+  const bridge = getBridge()
+  if (typeof bridge?.downloadUpdate !== 'function') return { ok: false, message: '当前桌面端不支持下载更新' }
+  try {
+    return await bridge.downloadUpdate(artifact)
+  } catch {
+    return { ok: false, message: '下载更新失败，请稍后重试' }
+  }
+}
+
+/** 安装已下载的桌面端更新（F-29-04，静默安装后应用退出）。 */
+export async function installDesktopUpdate(): Promise<{ ok: boolean; message?: string }> {
+  const bridge = getBridge()
+  if (typeof bridge?.installUpdate !== 'function') return { ok: false, message: '当前桌面端不支持安装更新' }
+  try {
+    return await bridge.installUpdate()
+  } catch {
+    return { ok: false, message: '安装更新失败，请手动运行下载的安装包' }
+  }
+}
+
+/** 订阅桌面端下载进度（F-29-04）；无桌面壳时返回空取消函数。 */
+export function subscribeDesktopUpdateProgress(listener: (progress: UpdateProgress) => void): () => void {
+  const bridge = getBridge()
+  if (typeof bridge?.onUpdateProgress !== 'function') return () => {}
+  try {
+    return bridge.onUpdateProgress(listener)
+  } catch {
+    return () => {}
   }
 }

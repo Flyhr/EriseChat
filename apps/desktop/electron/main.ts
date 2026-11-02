@@ -2,6 +2,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, session, shell, type Nativ
 import fs from 'node:fs'
 import path from 'node:path'
 import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc'
+import { disposeUpdateIpcHandlers, registerUpdateIpcHandlers } from './update'
 
 // EiseChat Windows 桌面壳（M0 骨架 → M4-02 托盘/系统通知/窗口记忆/关闭到托盘）。
 // 只负责窗口生命周期、托盘、通知与白名单 IPC，不写聊天业务逻辑（AGENTS.md §3 / project-overview §7.3、§10）。
@@ -312,6 +313,7 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     setupMediaPermissions()
     registerIpcHandlers()
+    registerUpdateIpcHandlers()
     applyAutoLaunch()
     mainWindow = createMainWindow()
     createTray()
@@ -329,6 +331,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     isQuitting = true
+    disposeUpdateIpcHandlers()
     if (mainWindow) {
       saveWindowState(mainWindow)
     }
