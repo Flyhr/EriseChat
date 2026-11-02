@@ -1,6 +1,9 @@
 // 桌面壳（Electron preload 注入的 window.eisechatDesktop）扩展能力桥：
-// 未读角标同步、系统通知点击回调；Web 版没有该对象，所有调用静默降级。
+// 未读角标同步、系统通知点击回调、服务器地址、客户端更新检查（F-29）；Web 版没有该对象，所有调用静默降级。
 // 只暴露白名单能力，不接触 Node/Electron 原始对象（apps/desktop/electron/preload.ts）。
+
+import type { VersionArtifact } from '../api/version'
+import type { DesktopUpdateCheckResult, UpdateProgress } from './update'
 
 /** 通知点击回调（主进程 → 渲染进程），参数为会话 ID（已由主进程校验过格式）。 */
 export type NotificationClickCallback = (conversationId: string) => void
@@ -12,6 +15,14 @@ interface DesktopBridge {
   onNotificationClick?: (callback: NotificationClickCallback) => () => void
   /** 保存服务器地址到壳 settings.json（M4-02；登录页首启配置时与 localStorage 保持一致）。 */
   setServerUrl?: (url: string) => Promise<{ ok: boolean; serverUrl: string }>
+  /** 检查更新（F-29-04）：主进程从当前服务器请求 /api/version 并比较版本。 */
+  checkUpdate?: () => Promise<DesktopUpdateCheckResult | null>
+  /** 下载更新包到临时目录并校验 sha256（F-29-04）。 */
+  downloadUpdate?: (artifact: VersionArtifact) => Promise<{ ok: boolean; message?: string }>
+  /** 静默安装已下载的更新包并退出（F-29-04）。 */
+  installUpdate?: () => Promise<{ ok: boolean; message?: string }>
+  /** 订阅下载进度（F-29-04），返回取消订阅函数。 */
+  onUpdateProgress?: (listener: (progress: UpdateProgress) => void) => () => void
 }
 
 function getBridge(): DesktopBridge | null {

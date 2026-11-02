@@ -5,6 +5,7 @@ import { authApi } from '../api/auth'
 import { filesApi } from '../api/files'
 import { sessionsApi, type SessionInfo } from '../api/sessions'
 import { usersApi } from '../api/users'
+import { fetchVersionManifest } from '../api/version'
 import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
@@ -16,12 +17,13 @@ import { isDesktopShell } from '../core/desktop'
 import type { AppIconName } from '../core/icons'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
-import { getServerUrl, resetServerUrl, setServerUrl } from '../core/config'
+import { getServerUrl, isPackagedShell, resetServerUrl, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { compressImageFile } from '../core/imageCompress'
 import { changePasswordFormError } from '../core/passwordRules'
 import { formatLastSeen, formatSessionTime, shortDeviceLabel } from '../core/sessionFormat'
 import { showToast } from '../core/toast'
+import { shouldOfferUpdate, updatePromptOf } from '../core/update'
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { useAuthStore } from '../stores/auth'
@@ -172,6 +174,40 @@ function saveServer(): void {
 /** 断线后手动重连（与全局 ConnectionBanner 的「重试」能力一致）。 */
 function reconnect(): void {
   chatWs.connect()
+}
+
+const updateChecking = ref(false)
+const latestVersion = ref('')
+const updateAvailable = ref(false)
+const updateMessage = ref('')
+
+/**
+ * 检查更新（F-29-03）：从当前服务器拉取更新清单并比较版本。
+ * Web 浏览器只提示刷新页面；桌面/APK 壳的下载安装流程由 F-29-04/05 接入。
+ */
+async function checkForUpdate(): Promise<void> {
+  if (updateChecking.value) return
+  updateChecking.value = true
+  updateMessage.value = ''
+  try {
+    const manifest = await fetchVersionManifest()
+    latestVersion.value = manifest.version
+    const platform = isDesktopShell() ? 'desktop' : isPackagedShell() ? 'android' : null
+    if (platform === null) {
+      updateAvailable.value = shouldOfferUpdate(APP_VERSION, manifest.version)
+      updateMessage.value = updateAvailable.value ? '服务端已更新，刷新页面即可获取最新版' : '已是最新版本'
+      return
+    }
+
+    const prompt = updatePromptOf(manifest, APP_VERSION, platform)
+    updateAvailable.value = prompt.available
+    updateMessage.value = prompt.available ? `发现新版本 v${prompt.latest}` : '已是最新版本'
+  } catch (error) {
+    updateAvailable.value = false
+    updateMessage.value = friendlyError(error)
+  } finally {
+    updateChecking.value = false
+  }
 }
 
 /** 退出登录：自绘弹窗二次确认 → 请求服务端注销（失败也继续）→ 断连清缓存回登录页。 */
@@ -791,9 +827,15 @@ async function saveProfile(): Promise<void> {
           </SettingsGroup>
 
           <SettingsGroup title="关于">
-            <SettingsRow label="版本" :hint="isDesktopShell() ? 'Windows 桌面客户端' : 'Web 客户端'">
+            <SettingsRow label="版本" :hint="isDesktopShell() ? 'Windows 桌面客户端' : isPackagedShell() ? 'Android 客户端' : 'Web 客户端'">
               <span class="settings-value">{{ APP_VERSION }}</span>
             </SettingsRow>
+            <SettingsRow label="检查更新" :hint="latestVersion ? `最新版本 v${latestVersion}` : '从当前服务器获取最新版本'">
+              <button type="button" class="settings-btn" :disabled="updateChecking" @click="checkForUpdate">
+                {{ updateChecking ? '检查中…' : '检查更新' }}
+              </button>
+            </SettingsRow>
+            <p v-if="updateMessage" class="settings-field__hint" role="status">{{ updateMessage }}</p>
             <SettingsRow label="下载客户端">
               <RouterLink class="settings-link" to="/download">前往下载页</RouterLink>
             </SettingsRow>
