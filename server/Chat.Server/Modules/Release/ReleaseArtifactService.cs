@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace Chat.Server.Modules.Release;
@@ -12,12 +13,16 @@ public sealed record ReleaseArtifact(
     string Sha256,
     long ModifiedAt);
 
+/// <summary>清单中的产物分组（F-29，protocol/protocol.md §7 第 10 条：artifacts.desktop / artifacts.android）。</summary>
+public sealed record ReleaseArtifacts(
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] ReleaseArtifact? Desktop,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] ReleaseArtifact? Android);
+
 /// <summary>客户端更新清单：GET /api/version 的响应体（字段见 protocol/protocol.md §7 第 10 条）。</summary>
 public sealed record ReleaseManifest(
     string Version,
     int ProtocolVersion,
-    ReleaseArtifact? Desktop,
-    ReleaseArtifact? Android);
+    ReleaseArtifacts Artifacts);
 
 /// <summary>
 /// 安装包产物清单（F-29）：扫描下载目录中最新的 Windows exe / Android apk，计算 sha256 并在进程内缓存。
@@ -61,7 +66,7 @@ public sealed class ReleaseArtifactService
             version,
             desktop?.FileName ?? "无",
             android?.FileName ?? "无");
-        return new ReleaseManifest(version, protocolVersion, desktop, android);
+        return new ReleaseManifest(version, protocolVersion, new ReleaseArtifacts(desktop, android));
     }
 
     /// <summary>服务端程序集版本（三段式），用于与安装包版本比较。</summary>

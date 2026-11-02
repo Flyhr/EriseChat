@@ -39,8 +39,8 @@ public sealed class VersionEndpointTests : IDisposable
 
         Assert.Equal(ReleaseArtifactService.ServerVersion(), manifest.Version);
         Assert.Equal(7, manifest.ProtocolVersion);
-        Assert.Null(manifest.Desktop);
-        Assert.Null(manifest.Android);
+        Assert.Null(manifest.Artifacts.Desktop);
+        Assert.Null(manifest.Artifacts.Android);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class VersionEndpointTests : IDisposable
 
         Assert.Equal("1.2.3", manifest.Version);
 
-        var desktop = Assert.IsType<ReleaseArtifact>(manifest.Desktop);
+        var desktop = Assert.IsType<ReleaseArtifact>(manifest.Artifacts.Desktop);
         Assert.Equal("1.2.3", desktop.Version);
         Assert.Equal("EiseChat-Setup-1.2.3.exe", desktop.FileName);
         Assert.Equal("/download/files/EiseChat-Setup-1.2.3.exe", desktop.Url);
@@ -63,7 +63,7 @@ public sealed class VersionEndpointTests : IDisposable
         Assert.Equal(Sha256Hex(desktopBytes), desktop.Sha256);
         Assert.True(desktop.ModifiedAt > 0);
 
-        var android = Assert.IsType<ReleaseArtifact>(manifest.Android);
+        var android = Assert.IsType<ReleaseArtifact>(manifest.Artifacts.Android);
         Assert.Equal("EiseChat-1.2.3.apk", android.FileName);
         Assert.Equal(Sha256Hex(androidBytes), android.Sha256);
     }
@@ -77,7 +77,7 @@ public sealed class VersionEndpointTests : IDisposable
         var manifest = await CreateService().GetManifestAsync(protocolVersion: 1);
 
         Assert.Equal("1.3.0", manifest.Version);
-        Assert.Equal("EiseChat-Setup-1.3.0.exe", manifest.Desktop?.FileName);
+        Assert.Equal("EiseChat-Setup-1.3.0.exe", manifest.Artifacts.Desktop?.FileName);
     }
 
     [Fact]
@@ -90,8 +90,8 @@ public sealed class VersionEndpointTests : IDisposable
         var manifest = await CreateService().GetManifestAsync(protocolVersion: 1);
 
         Assert.Equal(ReleaseArtifactService.ServerVersion(), manifest.Version);
-        Assert.Null(manifest.Desktop);
-        Assert.Null(manifest.Android);
+        Assert.Null(manifest.Artifacts.Desktop);
+        Assert.Null(manifest.Artifacts.Android);
     }
 
     [Fact]
@@ -101,14 +101,14 @@ public sealed class VersionEndpointTests : IDisposable
         var service = CreateService();
 
         var first = await service.GetManifestAsync(protocolVersion: 1);
-        Assert.Equal(Sha256Hex([1, 2, 3]), first.Desktop?.Sha256);
+        Assert.Equal(Sha256Hex([1, 2, 3]), first.Artifacts.Desktop?.Sha256);
 
         File.WriteAllBytes(path, [4, 5, 6, 7]);
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
 
         var second = await service.GetManifestAsync(protocolVersion: 1);
-        Assert.Equal(Sha256Hex([4, 5, 6, 7]), second.Desktop?.Sha256);
-        Assert.NotEqual(first.Desktop?.Sha256, second.Desktop?.Sha256);
+        Assert.Equal(Sha256Hex([4, 5, 6, 7]), second.Artifacts.Desktop?.Sha256);
+        Assert.NotEqual(first.Artifacts.Desktop?.Sha256, second.Artifacts.Desktop?.Sha256);
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class VersionEndpointTests : IDisposable
         var manifest = await CreateService().GetManifestAsync(protocolVersion: 1);
 
         Assert.Equal("9.9.9", manifest.Version);
-        Assert.Equal("9.9.9", manifest.Desktop?.Version);
+        Assert.Equal("9.9.9", manifest.Artifacts.Desktop?.Version);
     }
 
     private ReleaseArtifactService CreateService() => new(_root, NullLogger<ReleaseArtifactService>.Instance);
