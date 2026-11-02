@@ -178,6 +178,9 @@ function onContextMenu(event: MouseEvent): void {
 /** 移动端：长按 500ms 打开操作菜单；滚动/抬起/取消时清除计时器。 */
 function onPointerDown(event: PointerEvent): void {
   if (event.button !== 0 || isSystem.value || !repliableMessageId()) return
+  // F-28-06：语音播放器内的按下（播放键、进度条拖拽）不触发长按菜单，
+  // 否则长按拖拽进度条会弹出「回复/收藏」。
+  if (event.target instanceof Element && event.target.closest('.voice-player')) return
   clearLongPress()
   const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
   longPressTimer = window.setTimeout(() => {
