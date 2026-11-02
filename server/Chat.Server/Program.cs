@@ -13,6 +13,7 @@ using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
 using Chat.Server.Modules.Friends;
 using Chat.Server.Modules.Messages;
+using Chat.Server.Modules.Release;
 using Chat.Server.Modules.Realtime;
 using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -181,6 +182,10 @@ Directory.CreateDirectory(dataDirectory);
 Directory.CreateDirectory(fileDirectory);
 Directory.CreateDirectory(downloadDirectory);
 
+// 客户端更新检查（F-29）：扫描下载目录取最新安装包，sha256 按「路径+mtime+大小」缓存，文件变化自动失效。
+builder.Services.AddSingleton(sp =>
+    new ReleaseArtifactService(downloadDirectory, sp.GetRequiredService<ILogger<ReleaseArtifactService>>()));
+
 // 上传请求体上限：Kestrel 默认 30MB，若不显式放大，50MB 上传会被截断（M3-02）。
 // 表单整体上限同步放大到「上传上限 + 1MB」（留出 multipart 头部/边界余量）。
 var requestBodyLimit = appOptions.UploadMaxBytes + 1024 * 1024;
@@ -284,6 +289,9 @@ app.MapFileEndpoints();
 
 // 下载页与安装包分发（M4-04）：GET /download 静态页 + /download/files/{fileName} 白名单下载。
 app.MapDownloadEndpoints(downloadDirectory);
+
+// 客户端更新检查（F-29）：GET /api/version，匿名返回版本与安装包产物清单（含 sha256）。
+app.MapVersionEndpoints();
 
 // 健康检查：部署与发版检查使用（docs/project-overview.md §13.3）；db 探活执行 SELECT 1。
 app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options) =>
