@@ -42,7 +42,7 @@
 | 服务端 | ASP.NET Core（.NET 8/10 LTS）+ Kestrel，REST + WebSocket + 静态前端一体 |
 | 实时通信 | 自研 JSON-over-WebSocket（一行一帧，带 `type`，DTO 放 `Chat.Protocol`，可生成 TS 类型） |
 | 数据 | SQLite（WAL）+ EF Core，单文件 `/data/chat.db`；迁移放 `server/Chat.Server/Data/Migrations` |
-| 认证 | 邮箱验证码 + 可选密码；JWT HS256（默认 7 天）；密码 PBKDF2-SHA256 ≥100,000 次迭代或 Argon2id |
+| 认证 | 邮箱验证码 + 可选密码；JWT HS256（默认 3 天）；密码 PBKDF2-SHA256 ≥100,000 次迭代或 Argon2id |
 | 邮件 | 可配置 SMTP（企业邮箱/QQ 邮箱授权码）或免费邮件 API（Brevo/Resend 等）；`Development` 输出到控制台（不写日志文件）+ 固定测试码 |
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI；核心模块 `core/ws.ts`、`core/sync.ts`、`stores/` |
 | Windows 壳 | Electron + electron-builder（NSIS，`appId=com.eisechat.desktop`，安装包 `EiseChat-Setup-x.y.z.exe`，免签名） |

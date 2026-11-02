@@ -210,6 +210,7 @@ Docker 部署统一用 `/opt/eisechat/.env` 注入环境变量（该文件权限
 | 变量 | 说明 |
 |---|---|
 | `Jwt__Key` | JWT 签名密钥（HS256，≥32 字节随机值；deploy.sh 已自动生成） |
+| `Jwt__ExpireDays` | JWT 有效期（天），默认 3；到期后需重新登录，可按需覆盖（未设置时读 appsettings 默认值） |
 | `Email__SmtpHost` / `Email__SmtpPort` / `Email__SmtpUseSsl` | SMTP 服务器（推荐 `smtp.qq.com:587` + STARTTLS；465 隐式 TLS 不被 `System.Net.Mail` 支持，会超时） |
 | `Email__SmtpUser` / `Email__SmtpPassword` | SMTP 账号与授权码（密码只放 .env） |
 | `Email__FromAddress` / `Email__FromName` | 发件人地址/显示名 |

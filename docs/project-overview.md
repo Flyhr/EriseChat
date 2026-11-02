@@ -90,7 +90,7 @@
 | 服务端 | ASP.NET Core（.NET 8/10 LTS）+ Kestrel | 单进程同时托管 REST、WebSocket、静态前端 |
 | 实时 | 自研 JSON-over-WebSocket（一行一帧、带 `type`） | DTO 放 `Chat.Protocol`，可生成 TS 类型；不引 SignalR |
 | 数据 | SQLite（WAL）+ EF Core | `/data/chat.db`；迁移在 `server/Chat.Server/Data/Migrations` |
-| 认证 | 邮箱验证码 + 可选密码；JWT HS256（默认 7 天） | 验证码只存哈希；密码 PBKDF2-SHA256 ≥100,000 或 Argon2id |
+| 认证 | 邮箱验证码 + 可选密码；JWT HS256（默认 3 天） | 验证码只存哈希；密码 PBKDF2-SHA256 ≥100,000 或 Argon2id |
 | 邮件 | SMTP（企业邮箱/QQ 授权码）或免费邮件 API（Brevo/Resend 等） | `Development` 输出到控制台（不写日志文件）+ 固定测试码 |
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI | 核心 `core/ws.ts`、`core/sync.ts`；IndexedDB 缓存 |
 | Windows 壳 | Electron + electron-builder（NSIS） | `appId=com.eisechat.desktop`；免签名，SmartScreen 提示选"仍要运行" |
@@ -448,7 +448,7 @@ pages/ ──► components/ ──► stores/ ──► api/  (REST)
 ### 11.3 安全
 
 - 验证码只存哈希；密码 PBKDF2-SHA256（≥100,000 次、随机盐）或 Argon2id。
-- JWT HS256 默认 7 天；密钥首次启动生成写入 `secrets.json`。
+- JWT HS256 默认 3 天；密钥首次启动生成写入 `secrets.json`。
 - 文件下载只走 `GET /api/files/{id}`，校验请求者是引用该文件的会话成员；不暴露磁盘路径。
 - 日志禁止 token/密码/验证码/邮件明文；错误返回 `traceId` 便于排查。
 - 明确不做 E2EE（内部信任模型，使用说明写清楚）。

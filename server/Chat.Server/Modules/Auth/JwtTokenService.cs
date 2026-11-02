@@ -12,7 +12,7 @@ namespace Chat.Server.Modules.Auth;
 public sealed record IssuedToken(string AccessToken, string JwtId, long ExpiresAt);
 
 /// <summary>
-/// JWT 签发（HS256）：claims = sub(userId) / jti / role / email / exp（默认 7 天，可配置）。
+/// JWT 签发（HS256）：claims = sub(userId) / jti / role / email / exp（默认 3 天，可配置）。
 /// 撤销由 sessions 表（jwt_id + revoked_at）控制，见 Program.cs 的 JwtBearer OnTokenValidated。
 /// </summary>
 public sealed class JwtTokenService

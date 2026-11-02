@@ -111,7 +111,7 @@ public static class TestSupport
     {
         Issuer = "eisechat",
         Audience = "eisechat",
-        ExpireDays = 7,
+        ExpireDays = 3,
         ClockSkewSeconds = 30,
         Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
     };

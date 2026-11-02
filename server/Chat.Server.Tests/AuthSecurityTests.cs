@@ -166,4 +166,31 @@ public sealed class AuthSecurityTests
         limiter.Clear(email);
         Assert.Equal(0, limiter.GetRemainingLockMilliseconds(email, start + 6));
     }
+
+    [Fact]
+    public void JwtTokenService_IssuesTokenWithThreeDayLifetime()
+    {
+        var jwtOptions = TestSupport.CreateJwtOptions();
+        var service = new JwtTokenService(Microsoft.Extensions.Options.Options.Create(jwtOptions));
+        var user = new User
+        {
+            Id = "jwt-expiry-user",
+            Email = "jwt-expiry@example.com",
+            DisplayName = "JWT Expiry",
+            Role = UserRole.User,
+            Status = UserStatus.Active,
+            CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
+        var now = DateTimeOffset.UtcNow;
+        var issued = service.CreateToken(user, "jwt-expiry-jti", now);
+        var token = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(issued.AccessToken);
+
+        // exp - iat（无 iat 时以 nbf 为准）≈ 3 天，容差 ±5 分钟。
+        var lifetime = token.ValidTo - now.UtcDateTime;
+        Assert.InRange(lifetime.TotalSeconds, 3 * 24 * 3600 - 300, 3 * 24 * 3600 + 300);
+
+        // JWT 的 exp 为秒精度，返回给前端的 ExpiresAt 可与之相差不到 1 秒。
+        var expMilliseconds = new DateTimeOffset(token.ValidTo).ToUnixTimeMilliseconds();
+        Assert.InRange(Math.Abs(issued.ExpiresAt - expMilliseconds), 0, 1000);
+    }
 }

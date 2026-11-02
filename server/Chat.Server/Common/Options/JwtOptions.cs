@@ -13,8 +13,8 @@ public sealed class JwtOptions
     /// <summary>受众（aud）。</summary>
     public string Audience { get; set; } = "eisechat";
 
-    /// <summary>有效期（天），默认 7 天。</summary>
-    public int ExpireDays { get; set; } = 7;
+    /// <summary>有效期（天），默认 3 天。</summary>
+    public int ExpireDays { get; set; } = 3;
 
     /// <summary>
     /// HS256 签名密钥（Base64 32 字节）。首次启动由 SecretsBootstrapper 生成写入 secrets.json；
