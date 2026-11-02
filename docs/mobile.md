@@ -11,7 +11,7 @@
 | `EiseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
 | 下载地址 | 服务端 `GET /download` 下载页（`data/downloads/` 放安装包） |
 
-- 当前产物（F-27 统一发布，2026-10-28）：`data/downloads/EiseChat-1.1.0.apk`（3,351,022 B，SHA256 `703656cecd29c43c483546c706f5f3d277a20592858a36db33356c7e18180d5b`，versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
+- 当前产物（F-27 统一发布，2026-10-28）：`data/downloads/EiseChat-1.1.0.apk`（3,357,072 B，SHA256 `cba771aa92351ecdc20c6e35852e8a912284eb5c451fac294454157e1bff2f3d`（F-29 重打，含应用内更新插件；F-27 首次 1.1.0 为 3,351,022 B / `703656ce…180d5b`，已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
 - 历史基线（已保留，用于回滚）：`data/downloads/EiseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EiseChat-1.0.0.apk` 下载
 - 包名：`com.eisechat.mobile`（与 Windows 壳 `com.eisechat.desktop` 区分）
 - 版本：`versionName` 为 `1.1.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.1.0 → 10100）
@@ -226,6 +226,7 @@ ipconfig
 | 9 | 后台恢复 | 杀进程/切后台再打开，自动补拉期间新消息不丢 |
 | 10 | 退出登录 | 退出后回到登录页，无残留会话/未读角标 |
 | 11 | 语音消息 | 首次点麦克风弹出系统录音权限；允许后录音条计时，发送后双方气泡可播放；取消/Esc 不发送；拒绝权限时提示「未授权使用麦克风」且无崩溃 |
+| 12 | 客户端更新 | 设置「关于 → 检查更新」可请求服务端 `/api/version`；无更新提示「已是最新版本」；用临时 9.9.9 产物验证时显示「可下载并安装」，点「安装更新」下载 APK 并校验 sha256 后出现系统安装器（Android 11+ 首次需允许「安装未知应用」）；取消安装后应用仍可正常使用 |
 
 ### 5.8 一键流程速查（复制即用）
 

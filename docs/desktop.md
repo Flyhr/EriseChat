@@ -10,7 +10,7 @@
 |---|---|
 | 安装包 | `EiseChat-Setup-1.1.0.exe`（NSIS，当前用户安装、免代码签名） |
 | 产物位置 | `apps/desktop/dist/`（不入库）；分发时复制到服务端 `data/downloads/`，经 `GET /download` 提供下载 |
-| 本机当前文件 | `data/downloads/EiseChat-Setup-1.1.0.exe`，121,359,488 B，SHA256 `82fbd17c3861830d4e3686928f1c410530bd3a1fad7d938ff3a43e1e0813deec`；FileVersion/ProductVersion 均为 1.1.0（重新打包后会变，以文件/打包输出为准）。历史基线：`EiseChat-Setup-1.0.0.exe`（121,290,773 B）保留在 `data/downloads/` 供回滚 |
+| 本机当前文件 | `data/downloads/EiseChat-Setup-1.1.0.exe`，121,366,029 B，SHA256 `d075353eed43c67ab8a7d75bd5b427a48cf6b66dd3a9c6c46d8c1c3d418204b1`（F-29 重打，含客户端更新入口；F-27 首次 1.1.0 为 121,359,488 B / `82fbd17c…13deec`，已由本次取代）；FileVersion/ProductVersion 均为 1.1.0（重新打包后会变，以文件/打包输出为准）。历史基线：`EiseChat-Setup-1.0.0.exe`（121,290,773 B）保留在 `data/downloads/` 供回滚 |
 | 应用标识 | `appId=com.eisechat.desktop`，产品名 `EiseChat` |
 | 包内容 | Electron 主进程/预加载脚本 + `apps/web` 构建产物（以 `resources/web-dist/` 随安装包分发） |
 | 最低系统 | Windows 10/11 x64（Electron 45 运行时自带，无需安装 .NET/Node） |
@@ -114,7 +114,7 @@ ls -l data/downloads/EiseChat-Setup-1.1.0.exe
 Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 ```
 
-对照基线（1.1.0）：大小 121,359,488 B、SHA256 `82fbd17c…13deec`、FileVersion/ProductVersion 1.1.0；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.1.0。历史基线（1.0.0）：121,290,773 B、SHA256 `2ea45f7b…6f02f9e`。
+对照基线（1.1.0，F-29 重打）：大小 121,366,029 B、SHA256 `d075353e…204b1`、FileVersion/ProductVersion 1.1.0；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.1.0。历史基线（1.0.0）：121,290,773 B、SHA256 `2ea45f7b…6f02f9e`。
 
 ## 7. 验收清单（每次打包后建议过一遍）
 
@@ -132,6 +132,7 @@ Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 | 10 | 外链 | 消息内链接用系统浏览器打开，应用内不跳转 |
 | 11 | 覆盖安装 | 用同版本/新版本重新安装成功，服务端数据不受影响 |
 | 12 | 卸载 | 从「设置 → 应用」卸载干净；重装后登录态/设置按预期；服务端聊天数据保留 |
+| 13 | 客户端更新 | 「设置 → 关于 → 检查更新」可请求服务端 `/api/version`；无更新提示「已是最新版本」；用临时 9.9.9 产物验证时显示可更新，点「安装更新」出现下载进度，sha256 校验通过后拉起安装向导（可取消） |
 
 ## 8. 故障排查
 
@@ -151,7 +152,7 @@ Get-FileHash .\data\downloads\EiseChat-Setup-1.1.0.exe -Algorithm SHA256
 
 ## 9. 已知限制（v1）
 
-- 无自动更新：发新版本需重新下载安装包覆盖安装（不购买签名证书/不做更新服务，AGENTS §2.2）。
+- 更新入口（F-29）：设置「连接与关于 → 关于 → 检查更新」从当前服务器读取 `/api/version`，发现更高版本时下载安装包并校验 sha256 后静默安装并重启；本次版本号仍为 1.1.0，真实升级提示需下次提升版本并重打安装包后才出现（不购买签名证书/不做独立更新服务，AGENTS §2.2）。
 - 无离线推送：程序未运行或窗口关闭（关闭到托盘只是隐藏，进程仍在）时，重新打开后靠补拉同步；真正退出后新消息不提醒。
 - 免签名安装包：SmartScreen 会提示；杀毒软件偶发误报属正常现象。
 - 语音消息：录音依赖 Chromium 的 `MediaRecorder`（webm/opus），首次使用需在 Windows 设置中允许麦克风；时长由客户端上报；不做语音转文字/后台录音。
