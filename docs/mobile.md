@@ -152,7 +152,16 @@ cd /d D:\Code\EriseChat\server\Chat.Server
 dotnet run --urls http://0.0.0.0:6580
 ```
 
-开发模式默认只监听 `127.0.0.1`，手机访问不到，所以启动时必须加 `--urls http://0.0.0.0:6580`。
+开发模式默认只监听 `127.0.0.1`（`appsettings.json` 的 `Kestrel:Endpoints:Http:Url`），
+手机访问不到。注意：`dotnet run --urls ...` 会被 `appsettings.json` 里的端点配置覆盖，改用环境变量：
+
+```bat
+set Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580
+dotnet run
+```
+
+（Git Bash：`Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580 dotnet run --project server/Chat.Server`。）
+启动后用 `netstat -ano | findstr :6580` 应看到 `0.0.0.0:6580` 而不是 `127.0.0.1:6580`。
 
 另开一个终端查看本机 IP：
 
@@ -193,11 +202,19 @@ ipconfig
    App 首次打开在登录页填写 `http://127.0.0.1:6580` 并「保存并检测」，配合本映射即可连接；登录后也可在「设置 → 连接与关于」更换。
    **注意**：拔插 USB、重启 adb 或电脑后映射会失效，需要重新执行；手机端提示「无法连接服务器」时先查这一步。
 
-3. **局域网联调（不接 USB）**：服务端按 §5.5-C 用 `--urls http://0.0.0.0:6580` 启动、防火墙放行；在登录页或登录后「设置 → 连接与关于」把服务器地址改为 `http://<电脑IPv4>:6580`（不能填 `127.0.0.1`）。
+3. **局域网联调（不接 USB）**：服务端用 `Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580` 启动（见 §5.5-C）、防火墙放行；在登录页或登录后「设置 → 连接与关于」把服务器地址改为 `http://<电脑IPv4>:6580`（不能填 `127.0.0.1`）。
 
-4. **注册/登录**：登录页切「注册」→ 输入邮箱 →「发送验证码」→ 验证码 `123456`（服务端控制台会打印 `[email][mock] ... code=123456`，不写日志文件）→ 填昵称 → 注册并登录。
+4. **Tailscale 联调（手机与服务器不在同一局域网）**：服务器按 `docs/deploy.md` §3.4 用 `tailscale serve` 提供 HTTPS
+   （`https://chat-server.<tailnet>.ts.net`）；手机安装 Tailscale 并**确保已连接**（Android 通知栏/应用内显示 Connected，
+   设备需与服务器在同一 tailnet），然后在登录页/设置页把服务器地址填为该 HTTPS 地址。
+   - 不要填 `127.0.0.1`：它指向手机自身，只在本机或 USB 端口映射（`adb reverse`）时有效。
+   - MagicDNS 未开启时可用 `https://100.x.y.z` 形式访问（Tailscale 自带证书需域名，优先用 MagicDNS 域名）。
+   - 登录页若提示「当前是本机回环地址」，按提示改为服务器可达地址即可。
+   - 手机能打开 `https://chat-server.<tailnet>.ts.net` 但 App 提示无法连接时，先确认 Tailscale 处于连接状态且未被系统省电冻结。
 
-5. **启动 App（可选，免手动点图标）**：
+5. **注册/登录**：登录页切「注册」→ 输入邮箱 →「发送验证码」→ 验证码 `123456`（服务端控制台会打印 `[email][mock] ... code=123456`，不写日志文件）→ 填昵称 → 注册并登录。
+
+6. **启动 App（可选，免手动点图标）**：
 
    ```bat
    D:\softWare\android-sdk\platform-tools\adb.exe shell monkey -p com.eisechat.mobile -c android.intent.category.LAUNCHER 1
@@ -271,8 +288,8 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 | `adb devices` 为空 / `unauthorized` | 打开手机开发者选项与 USB 调试；换数据线（需支持数据传输）；手机上点「允许 USB 调试」；`adb kill-server && adb start-server` 后重试 |
 | `adb install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | 新旧 APK 签名不同（keystore 变化）→ 先 `adb uninstall com.eisechat.mobile` 再安装（服务端聊天数据不受影响） |
 | `adb install` 报 `INSTALL_FAILED_VERSION_DOWNGRADE` | 新包 `versionCode` 比已安装的小；按 `major*10000+minor*100+patch` 递增后重打包 |
-| App 登录提示「无法连接服务器」 | ① 服务端是否已启动（`curl http://127.0.0.1:6580/api/health`）；② 登录页「服务器地址」是否已填写且「保存并检测」成功（打包态仅登录页/设置页可改）；③ USB 联调是否执行过 `adb reverse tcp:6580 tcp:6580`（拔插 USB 后需重做，`adb reverse --list` 确认）；④ 局域网联调时服务器是否用 `--urls http://0.0.0.0:6580` 监听且防火墙放行 6580；⑤ 服务器地址不能填 `127.0.0.1`（局域网模式要填电脑 IPv4） |
-| 手机访问 `/download` 打不开 | 开发默认只监听 `127.0.0.1:6580`；按 §5.5-C 改用 `--urls http://0.0.0.0:6580` 并放行防火墙，手机与电脑需同一 Wi-Fi |
+| App 登录提示「无法连接服务器」 | ① 服务端是否已启动（`curl http://127.0.0.1:6580/api/health`）；② 登录页「服务器地址」是否已填写且「保存并检测」成功（打包态仅登录页/设置页可改）；③ USB 联调是否执行过 `adb reverse tcp:6580 tcp:6580`（拔插 USB 后需重做，`adb reverse --list` 确认）；④ 局域网/Tailscale 联调时服务器是否监听可达地址（`Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580` 或 `tailscale serve`）且防火墙放行；⑤ 服务器地址不能填 `127.0.0.1`（除本机/USB 映射外）；⑥ Tailscale 场景确认手机 Tailscale 已连接且与服务器同一 tailnet |
+| 手机访问 `/download` 打不开 | 开发默认只监听 `127.0.0.1:6580`；按 §5.5-C 用 `Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580` 启动并放行防火墙（同一 Wi-Fi），或走 Tailscale Serve 的 HTTPS 地址 |
 | 页面白屏 | 确认打包前 `apps/web` 已用 `base: './'` 构建（M4-07）；重新执行 `cap sync` 后打包 |
 | 安装被拦截 | 允许「安装未知应用」；确认 APK 完整（对比下载页/`sha256sum` 输出的 SHA256） |
 | 收不到新消息提醒 | v1 无系统推送，打开应用会自动补拉；后台被系统冻结属预期 |

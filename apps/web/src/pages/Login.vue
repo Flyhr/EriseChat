@@ -50,6 +50,19 @@ const serverUrlInput = ref(getServerUrl())
 const serverConfigured = ref(getServerUrl().length > 0)
 const serverEntryTone = ref<'info' | 'success' | 'error'>('info')
 const serverEntryStatus = ref(serverConfigured.value ? '' : '首次使用请先填写服务器地址')
+/**
+ * 已保存的是回环地址时提示不能用：127.0.0.1/localhost 只在本机或 USB 端口映射（adb reverse）时有效，
+ * 手机经 Tailscale/局域网访问必须填服务器的可达地址。
+ */
+const serverAddressIsLoopback = computed(() => {
+  if (!packagedShell || !serverConfigured.value) return false
+  try {
+    const host = new URL(serverUrlInput.value).hostname
+    return host === '127.0.0.1' || host === 'localhost' || host === '[::1]'
+  } catch {
+    return false
+  }
+})
 const serverSaving = ref(false)
 
 /** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
@@ -349,6 +362,11 @@ function applySession(response: LoginResponse): void {
             <span class="login-server__current">{{ serverConfigured ? serverUrlInput : '未配置' }}</span>
             <span class="login-server__action">{{ serverEntryOpen ? '收起' : '设置' }}</span>
           </button>
+          <p v-if="serverAddressIsLoopback" class="login-server__hint" role="note">
+            当前是本机回环地址，仅在本机 USB 调试（adb reverse）时可用；手机经 Tailscale/局域网访问时，
+            请改填服务器的可达地址（如 <code>https://chat-server.&lt;tailnet&gt;.ts.net</code> 或
+            <code>http://&lt;电脑IPv4&gt;:6580</code>）。
+          </p>
           <div v-if="serverEntryOpen" class="login-server__panel">
             <label class="login-server__field" for="login-server-url">
               <span class="login-form__label">服务器地址</span>
@@ -655,6 +673,19 @@ function applySession(response: LoginResponse): void {
 .login-server__action {
   flex: none;
   color: var(--ec-brand-600);
+}
+
+.login-server__hint {
+  margin: 0;
+  padding: 0 var(--ec-space-3) var(--ec-space-2);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  line-height: 1.5;
+}
+
+.login-server__hint code {
+  font-size: inherit;
+  word-break: break-all;
 }
 
 .login-server__panel {
