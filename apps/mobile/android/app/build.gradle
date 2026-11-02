@@ -67,6 +67,11 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// F-29：Java 源文件含中文提示，统一按 UTF-8 编译（Windows 默认 GBK 会导致乱码）。
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {

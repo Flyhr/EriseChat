@@ -23,15 +23,16 @@ import {
 import type { AppIconName } from '../core/icons'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
-import { getServerUrl, isPackagedShell, resetServerUrl, setServerUrl } from '../core/config'
+import { getServerUrl, isPackagedShell, resetServerUrl, resolveApiBase, setServerUrl } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { compressImageFile } from '../core/imageCompress'
 import { changePasswordFormError } from '../core/passwordRules'
 import { formatLastSeen, formatSessionTime, shortDeviceLabel } from '../core/sessionFormat'
 import { showToast } from '../core/toast'
-import { shouldOfferUpdate, updatePromptOf } from '../core/update'
+import { shouldOfferUpdate, platformArtifactOf, updatePromptOf } from '../core/update'
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
+import { downloadAndInstallApk, isAndroidUpdaterAvailable, subscribeApkUpdateProgress } from '../core/updateAndroid'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
@@ -224,15 +225,20 @@ async function checkForUpdate(): Promise<void> {
 
     const manifest = await fetchVersionManifest()
     latestVersion.value = manifest.version
-    const platform = isPackagedShell() ? 'android' : null
-    if (platform === null) {
+    if (!isPackagedShell()) {
       updateAvailable.value = shouldOfferUpdate(APP_VERSION, manifest.version)
       updateMessage.value = updateAvailable.value ? '服务端已更新，刷新页面即可获取最新版' : '已是最新版本'
       return
     }
-    const prompt = updatePromptOf(manifest, APP_VERSION, platform)
+    const prompt = updatePromptOf(manifest, APP_VERSION, 'android')
     updateAvailable.value = prompt.available
-    updateMessage.value = prompt.available ? `发现新版本 v${prompt.latest}，请到下载页更新` : '已是最新版本'
+    const artifact = platformArtifactOf(manifest, 'android')
+    if (prompt.available && artifact && isAndroidUpdaterAvailable()) {
+      updateArtifact.value = artifact
+      updateMessage.value = `发现新版本 v${prompt.latest}，可下载并安装`
+    } else {
+      updateMessage.value = prompt.available ? `发现新版本 v${prompt.latest}，请到下载页更新` : '已是最新版本'
+    }
   } catch (error) {
     updateAvailable.value = false
     updateMessage.value = friendlyError(error)
@@ -272,6 +278,38 @@ async function downloadAndInstallUpdate(): Promise<void> {
 onBeforeUnmount(() => {
   clearUpdateProgressListener()
 })
+
+/** 下载并安装 Android 更新（F-29-05）：插件下载校验后调起系统安装器。 */
+async function downloadAndInstallAndroidUpdate(): Promise<void> {
+  const artifact = updateArtifact.value
+  if (!artifact || updateDownloading.value) return
+  updateDownloading.value = true
+  updateProgress.value = 0
+  updateMessage.value = '正在下载更新，完成后将打开系统安装器…'
+  clearUpdateProgressListener()
+  stopUpdateProgress = subscribeApkUpdateProgress((progress) => {
+    updateProgress.value = progress.percent
+  })
+  try {
+    let absoluteUrl = artifact.url
+    try {
+      absoluteUrl = new URL(artifact.url, resolveApiBase()).toString()
+    } catch {
+      // 相对地址无法解析时保持原样，由插件报错。
+    }
+    const result = await downloadAndInstallApk({
+      url: absoluteUrl,
+      sha256: artifact.sha256,
+      size: artifact.size,
+    })
+    updateMessage.value = result.ok
+      ? '下载完成，请在系统安装器中确认安装（首次需允许「安装未知应用」）'
+      : (result.message ?? '下载更新失败，请稍后重试')
+  } finally {
+    updateDownloading.value = false
+    clearUpdateProgressListener()
+  }
+}
 
 /** 退出登录：自绘弹窗二次确认 → 请求服务端注销（失败也继续）→ 断连清缓存回登录页。 */
 async function confirmLogout(): Promise<void> {
@@ -909,6 +947,20 @@ async function saveProfile(): Promise<void> {
                 class="settings-btn settings-btn--primary"
                 :disabled="updateDownloading"
                 @click="downloadAndInstallUpdate"
+              >
+                {{ updateDownloading ? `下载中 ${updateProgress}%` : '下载并安装' }}
+              </button>
+            </SettingsRow>
+            <SettingsRow
+              v-if="!isDesktopShell() && isPackagedShell() && updateAvailable && updateArtifact"
+              label="安装更新"
+              :hint="updateDownloading ? `下载中 ${updateProgress}%` : '下载完成后将打开系统安装器'"
+            >
+              <button
+                type="button"
+                class="settings-btn settings-btn--primary"
+                :disabled="updateDownloading"
+                @click="downloadAndInstallAndroidUpdate"
               >
                 {{ updateDownloading ? `下载中 ${updateProgress}%` : '下载并安装' }}
               </button>
