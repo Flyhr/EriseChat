@@ -3,6 +3,7 @@
 // M4-01：服务器地址支持运行时配置（localStorage，桌面/APK 首次使用需填写）；Web 同源访问留空即用默认值。
 
 import { readStorage, removeStorage, writeStorage } from './safeStorage'
+import { findServerPreset, parseServerPresets, type ServerPreset } from './serverPresets'
 
 export interface AppConfig {
   /** REST 基础路径（默认 /api，开发期由 vite 代理到 127.0.0.1:6580） */
@@ -41,6 +42,14 @@ function defaultWsUrl(): string {
 }
 
 const env = import.meta.env
+
+/** F-31：打包壳登录页服务器地址下拉预设（VITE_SERVER_PRESETS 可覆盖，见 .env.example）。 */
+export const serverPresets: readonly ServerPreset[] = parseServerPresets(env.VITE_SERVER_PRESETS)
+
+/** 按地址匹配预设（登录页下拉回显当前选中项）。 */
+export function matchServerPreset(url: string): ServerPreset | undefined {
+  return findServerPreset(serverPresets, url)
+}
 
 /** 构建期/同源默认值；运行时服务器地址见 resolveApiBase()/resolveWsUrl()。 */
 export const config: AppConfig = {

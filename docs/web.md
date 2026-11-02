@@ -43,7 +43,7 @@ npm run dev        # http://127.0.0.1:5173
 |---|---|---|
 | Web 生产（同域） | 默认同源 | `apiBase=/api`，`wsUrl=页面 origin+/ws` |
 | Web 手动指定 | 设置页「服务器地址」 | 存 `localStorage['eisechat.serverUrl']`；清空恢复同源 |
-| 打包壳首启（exe/APK） | 登录页「服务器地址」区块（仅打包壳显示，未配置自动展开） | 保存后同步桌面壳 `settings.json`；Web 同源部署不显示该区块 |
+| 打包壳首启（exe/APK） | 登录页「服务器地址」区块（仅打包壳显示，未配置自动展开；含「服务器 / 本机调试」下拉快速选择，选中即保存并检测） | 保存后同步桌面壳 `settings.json`；预设可用 `VITE_SERVER_PRESETS` 覆盖；Web 同源部署不显示该区块 |
 | Windows 桌面壳 | preload 注入的已保存地址；登录页首启填写 | 见 `docs/desktop.md` |
 | Android | 登录页首启 / 设置页「服务器地址」/ 打包默认地址 | 见 `docs/mobile.md` |
 

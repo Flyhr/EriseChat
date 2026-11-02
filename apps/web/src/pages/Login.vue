@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authApi, type LoginResponse } from '../api/auth'
 import { chatWs } from '../core/ws'
 import {
   getServerUrl,
   isPackagedShell,
+  matchServerPreset,
   normalizeServerUrl,
   probeServerHealth,
   resetServerUrl,
+  serverPresets,
   setServerUrl,
 } from '../core/config'
 import { syncServerUrlToDesktop } from '../core/desktop'
@@ -64,6 +66,24 @@ const serverAddressIsLoopback = computed(() => {
   }
 })
 const serverSaving = ref(false)
+/**
+ * F-31：服务器地址下拉预设（仅打包壳）——选中后立即保存并检测，便于「服务器 / 本机调试」快速切换；
+ * 选「自定义」时保留手动输入，「保存并检测」按钮照旧可用。
+ */
+const serverPresetKey = ref('custom')
+
+function syncServerPresetKey(): void {
+  if (!packagedShell) return
+  serverPresetKey.value = matchServerPreset(serverUrlInput.value)?.url ?? 'custom'
+}
+
+watch(serverUrlInput, syncServerPresetKey, { immediate: true })
+
+async function onServerPresetChange(): Promise<void> {
+  if (serverPresetKey.value === 'custom') return
+  serverUrlInput.value = serverPresetKey.value
+  await saveServerEntry()
+}
 
 /** UI-03 批次3：密码显示/隐藏（只影响输入框 type，不记录任何日志）。 */
 const passwordVisible = ref(false)
@@ -368,6 +388,20 @@ function applySession(response: LoginResponse): void {
             <code>http://&lt;电脑IPv4&gt;:6580</code>）。
           </p>
           <div v-if="serverEntryOpen" class="login-server__panel">
+            <label class="login-server__field" for="login-server-preset">
+              <span class="login-form__label">快速选择</span>
+              <select
+                id="login-server-preset"
+                v-model="serverPresetKey"
+                class="login-server__select"
+                @change="onServerPresetChange"
+              >
+                <option v-for="preset in serverPresets" :key="preset.url" :value="preset.url">
+                  {{ preset.label }}
+                </option>
+                <option value="custom">自定义地址…</option>
+              </select>
+            </label>
             <label class="login-server__field" for="login-server-url">
               <span class="login-form__label">服务器地址</span>
               <input
@@ -716,6 +750,24 @@ function applySession(response: LoginResponse): void {
 }
 
 .login-server__field input:focus {
+  border-color: var(--ec-brand-600);
+}
+
+/* F-31：服务器地址下拉预设，外观与输入框一致。 */
+.login-server__select {
+  width: 100%;
+  padding: 10px var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  outline: none;
+  background: var(--ec-surface);
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.login-server__select:focus {
   border-color: var(--ec-brand-600);
 }
 
