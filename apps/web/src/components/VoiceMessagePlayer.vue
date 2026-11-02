@@ -27,8 +27,6 @@ const state = ref<PlayerState>('idle')
 const progressMs = ref(0)
 /** 拖动中的位置；null 表示未拖动。 */
 const seekMs = ref<number | null>(null)
-/** 悬停预览位置；null 表示未悬停。 */
-const hoverMs = ref<number | null>(null)
 let audio: HTMLAudioElement | null = null
 let disposed = false
 /** audio 尚未创建时点进度条记下的位置，播放时从该处开始。 */
@@ -37,13 +35,12 @@ let pendingSeekMs = 0
 const totalMs = computed(() =>
   Number.isFinite(props.durationMs) && props.durationMs > 0 ? Math.floor(props.durationMs) : 0,
 )
-const displayMs = computed(() => seekMs.value ?? hoverMs.value ?? progressMs.value)
+const displayMs = computed(() => seekMs.value ?? progressMs.value)
 const ratio = computed(() => voiceProgressRatio(displayMs.value, props.durationMs))
-const showSeekText = computed(() => seekMs.value !== null || hoverMs.value !== null)
 const timeText = computed(() => {
   if (state.value === 'error') return '语音加载失败'
   if (state.value === 'loading') return '加载中…'
-  if (showSeekText.value) return voiceSeekTimeText(displayMs.value, props.durationMs)
+  if (seekMs.value !== null) return voiceSeekTimeText(displayMs.value, props.durationMs)
   return formatDuration(totalMs.value)
 })
 const actionLabel = computed(() => (state.value === 'playing' ? '暂停语音' : '播放语音'))
@@ -57,7 +54,6 @@ function stopPlayback(): void {
   }
   progressMs.value = 0
   seekMs.value = null
-  hoverMs.value = null
   pendingSeekMs = 0
   if (state.value === 'playing') state.value = 'idle'
   releaseVoicePlayback(stopPlayback)
@@ -118,14 +114,10 @@ function onTrackPointerDown(event: PointerEvent): void {
 }
 
 function onTrackPointerMove(event: PointerEvent): void {
-  if (trackDisabled.value) return
+  if (trackDisabled.value || seekMs.value === null) return
   const ms = msFromPointer(event)
-  if (seekMs.value !== null) {
-    seekMs.value = ms
-    if (state.value === 'playing' && audio && ms < totalMs.value) audio.currentTime = ms / 1000
-    return
-  }
-  hoverMs.value = ms
+  seekMs.value = ms
+  if (state.value === 'playing' && audio && ms < totalMs.value) audio.currentTime = ms / 1000
 }
 
 function onTrackPointerUp(event: PointerEvent): void {
@@ -133,17 +125,11 @@ function onTrackPointerUp(event: PointerEvent): void {
   const ms = seekMs.value
   el(event).releasePointerCapture?.(event.pointerId)
   seekMs.value = null
-  hoverMs.value = null
   applySeek(ms)
 }
 
 function onTrackPointerCancel(): void {
   seekMs.value = null
-  hoverMs.value = null
-}
-
-function onTrackPointerLeave(): void {
-  if (seekMs.value === null) hoverMs.value = null
 }
 
 function onTrackKeydown(event: KeyboardEvent): void {
@@ -248,7 +234,6 @@ onBeforeUnmount(() => {
       @pointermove="onTrackPointerMove"
       @pointerup="onTrackPointerUp"
       @pointercancel="onTrackPointerCancel"
-      @pointerleave="onTrackPointerLeave"
       @keydown="onTrackKeydown"
     >
       <span class="voice-player__bar">
