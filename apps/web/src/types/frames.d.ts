@@ -260,6 +260,8 @@ export interface MessageEditedFrame extends FrameBase {
 export interface SyncCursor {
   conversationId: string
   lastSeq: number
+  /** F-34：上次状态同步的服务端时间（UTC 毫秒）；缺省/0 表示不补撤回编辑 */
+  updatedAfter?: number
 }
 
 export interface SyncRequestFrame extends FrameBase {
@@ -270,6 +272,10 @@ export interface SyncRequestFrame extends FrameBase {
 export interface SyncBatch {
   conversationId: string
   messages: Message[]
+  /** F-34：状态变化（撤回/编辑）消息；seq 不变，仅覆盖本地缓存 */
+  updates?: Message[]
+  /** F-34：下次请求可用的 updatedAfter（服务端时钟） */
+  updatedThrough?: number
 }
 
 export interface SyncResponseFrame extends FrameBase {

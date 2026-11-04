@@ -29,6 +29,8 @@ export const useSearchStore = defineStore('search', () => {
   const error = ref('')
   const results = ref<Message[]>([])
   const hasMore = ref(false)
+  /** F-34：全局搜索翻页游标（服务端返回，跨会话不重不漏）。 */
+  const nextCursor = ref<{ createdAt: number; messageId: string } | null>(null)
   /** F-19：会话内本地已加载消息的即时命中（0 延迟展示；全局搜索恒为空）。 */
   const localResults = ref<Message[]>([])
   /** F-19：本地结果对应的已提交关键词（用于高亮，避免与输入中间态不一致）。 */
@@ -81,6 +83,7 @@ export const useSearchStore = defineStore('search', () => {
     clearTimer()
     results.value = []
     hasMore.value = false
+    nextCursor.value = null
     error.value = ''
     loading.value = false
     loadingMore.value = false
@@ -109,13 +112,17 @@ export const useSearchStore = defineStore('search', () => {
     clearLocalResults()
   }
 
-  /** 立刻按当前 query 发起搜索（loadMore 复用）。 */
-  async function runSearch(keyword: string, beforeSeq?: number): Promise<void> {
+  /** 立刻按当前 query 发起搜索（loadMore 复用）；before 为翻页游标。 */
+  async function runSearch(
+    keyword: string,
+    before?: { beforeSeq?: number; beforeCreatedAt?: number; beforeMessageId?: string },
+  ): Promise<void> {
     const seq = ++requestSeq
-    if (beforeSeq === undefined) {
+    if (before === undefined) {
       loading.value = true
       results.value = []
       hasMore.value = false
+      nextCursor.value = null
     } else {
       loadingMore.value = true
     }
@@ -124,22 +131,25 @@ export const useSearchStore = defineStore('search', () => {
     try {
       const page = await messagesApi.search(keyword, {
         conversationId: scopeConversationId.value ?? undefined,
-        beforeSeq,
+        beforeSeq: before?.beforeSeq,
+        beforeCreatedAt: before?.beforeCreatedAt,
+        beforeMessageId: before?.beforeMessageId,
         limit: SEARCH_PAGE_SIZE,
       })
       if (seq !== requestSeq) return
 
-      if (beforeSeq === undefined) {
+      if (before === undefined) {
         results.value = page.messages
         searchedQuery.value = keyword
         offlineFallback.value = false
       } else {
         results.value = [...results.value, ...page.messages]
       }
+      nextCursor.value = page.nextCursor ?? null
       hasMore.value = page.hasMore
     } catch (cause) {
       if (seq === requestSeq) {
-        if (beforeSeq === undefined && localResults.value.length > 0) {
+        if (before === undefined && localResults.value.length > 0) {
           // F-19：服务端不可用（离线/失败）时保留本地即时结果并明确降级，不显示网络错误抢走结果。
           offlineFallback.value = true
           error.value = ''
@@ -147,7 +157,7 @@ export const useSearchStore = defineStore('search', () => {
           hasMore.value = false
         } else {
           error.value = friendlyError(cause)
-          if (beforeSeq === undefined) {
+          if (before === undefined) {
             results.value = []
             hasMore.value = false
           }
@@ -186,14 +196,25 @@ export const useSearchStore = defineStore('search', () => {
     }, SEARCH_DEBOUNCE_MS)
   }
 
-  /** 加载更早的命中（结果按 seq 降序，游标取最后一条的 seq）。 */
+  /**
+   * 加载更早的命中：全局搜索用服务端 (createdAt, messageId) 游标（seq 只在单会话内可比，
+   * 不能用最后一条的 seq 过滤所有会话）；会话内搜索保留原 seq 游标行为。
+   */
   async function loadMore(): Promise<void> {
     if (loading.value || loadingMore.value || !hasMore.value) return
     const keyword = searchedQuery.value
     if (!keyword) return
+    if (isGlobal.value && nextCursor.value) {
+      const cursor = nextCursor.value
+      await runSearch(keyword, {
+        beforeCreatedAt: cursor.createdAt,
+        beforeMessageId: cursor.messageId,
+      })
+      return
+    }
     const last = results.value[results.value.length - 1]
     if (!last) return
-    await runSearch(keyword, last.seq)
+    await runSearch(keyword, { beforeSeq: last.seq })
   }
 
   return {
@@ -207,6 +228,7 @@ export const useSearchStore = defineStore('search', () => {
     error,
     results,
     hasMore,
+    nextCursor,
     localResults,
     localQuery,
     localTotal,

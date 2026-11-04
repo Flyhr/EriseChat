@@ -35,7 +35,13 @@ public sealed record MessageHistoryPage(IReadOnlyList<ProtocolMessage> Messages,
 /// REST 消息搜索结果（F-11，不属于协议帧）：messages 按 seq 降序；hasMore 表示还能继续往后翻候选。
 /// 响应形状与 apps/web/src/api/messages.ts 的 MessageSearchPage 对齐。
 /// </summary>
-public sealed record MessageSearchPage(IReadOnlyList<ProtocolMessage> Messages, bool HasMore);
+public sealed record MessageSearchPage(
+    IReadOnlyList<ProtocolMessage> Messages,
+    bool HasMore,
+    MessageSearchCursor? NextCursor = null);
+
+/// <summary>全局搜索翻页游标：按发送时间倒序、消息 ID 作为同时间排序条件（F-34）。</summary>
+public sealed record MessageSearchCursor(long CreatedAt, string MessageId);
 
 /// <summary>
 /// 消息核心业务（M1-08，计划 §4.3/§4.4 + AGENTS §5）：
@@ -395,13 +401,25 @@ public sealed class MessageService
                     $"lastSeq 超出范围（会话 {cursor.ConversationId} 当前 lastSeq={conversation.LastSeq}）");
             }
 
+            if (cursor.UpdatedAfter is < 0)
+            {
+                throw ApiException.ValidationFailed(
+                    $"updatedAfter 不能为负数（会话 {cursor.ConversationId}）");
+            }
+
             lastSeqByConversation[cursor.ConversationId] = cursor.LastSeq;
         }
 
+        // 本次响应统一使用同一个服务端时间作为 updatedThrough 上界，保证下次请求不重不漏。
+        // 回退 1ms：与 cutoff 同毫秒内提交的编辑/撤回会在下次（> cutoff）被返回，
+        // 宁可重复一次（客户端按 messageId 幂等覆盖）也不丢状态变化。
+        var syncCutoff = Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1);
         var hasMore = false;
-        var pages = new List<(string ConversationId, List<MessageEntity> Rows)>();
-        foreach (var (conversationId, lastSeq) in lastSeqByConversation)
+        var pages = new List<SyncPage>();
+        foreach (var cursor in cursors)
         {
+            var conversationId = cursor.ConversationId;
+            var lastSeq = lastSeqByConversation[conversationId];
             var rows = await _db.Messages.AsNoTracking()
                 .Where(message => message.ConversationId == conversationId && message.Seq > lastSeq)
                 .OrderBy(message => message.Seq)
@@ -414,21 +432,50 @@ public sealed class MessageService
                 hasMore = true;
             }
 
-            if (rows.Count > 0)
+            // F-34：补齐断线期间对「已缓存消息」的撤回/编辑；seq 不变，只带最新状态。
+            // 状态变化数量远小于消息量，随批一次性返回（messages 仍按每批 200 条分页）。
+            var updates = new List<MessageEntity>();
+            long? updatedThrough = null;
+            if (cursor.UpdatedAfter is > 0)
             {
-                pages.Add((conversationId, rows));
+                updatedThrough = syncCutoff;
+                updates = await _db.Messages.AsNoTracking()
+                    .Where(message => message.ConversationId == conversationId
+                        && ((message.EditedAt != null && message.EditedAt > cursor.UpdatedAfter)
+                            || (message.DeletedAt != null && message.DeletedAt > cursor.UpdatedAfter)))
+                    .OrderBy(message => message.EditedAt ?? message.DeletedAt ?? 0)
+                    .ThenBy(message => message.Seq)
+                    .ToListAsync(cancellationToken);
+            }
+
+            if (rows.Count > 0 || updates.Count > 0)
+            {
+                pages.Add(new SyncPage(conversationId, rows, updates, updatedThrough));
             }
         }
 
-        // F-09：本批所有会话的 replyTo 合并为一次批量查询，禁止逐条 N+1。
-        var replies = await LoadRepliesAsync(pages.SelectMany(page => page.Rows), cancellationToken);
+        // F-09：本批所有会话（含状态变化消息）的 replyTo 合并为一次批量查询，禁止逐条 N+1。
+        var replies = await LoadRepliesAsync(
+            pages.SelectMany(page => page.Rows).Concat(pages.SelectMany(page => page.Updates)),
+            cancellationToken);
         var batches = pages
             .Select(page => new SyncBatch(
                 page.ConversationId,
-                page.Rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList()))
+                page.Rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
+                page.Updates.Count == 0
+                    ? null
+                    : page.Updates.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
+                page.UpdatedThrough))
             .ToList();
         return new SyncPullResult(batches, hasMore);
     }
+
+    /// <summary>sync 单会话结果：新消息 + 状态变化。</summary>
+    private sealed record SyncPage(
+        string ConversationId,
+        List<MessageEntity> Rows,
+        List<MessageEntity> Updates,
+        long? UpdatedThrough);
 
     /// <summary>
     /// REST 历史分页：beforeSeq 为空取最新一页；返回 messages 按 seq 升序与 hasMore（是否有更早消息）。
@@ -494,7 +541,9 @@ public sealed class MessageService
         string? conversationId,
         long? beforeSeq,
         int? limit,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? beforeCreatedAt = null,
+        string? beforeMessageId = null)
     {
         var keyword = (query ?? string.Empty).Trim();
         if (keyword.Length == 0)
@@ -519,17 +568,32 @@ public sealed class MessageService
         }
 
         string? scopeConversationId = null;
+        MessageSearchCursor? cursor = null;
         if (!string.IsNullOrWhiteSpace(conversationId))
         {
             scopeConversationId = ValidateId(conversationId, "conversationId");
             await EnsureMemberAsync(userId, scopeConversationId, cancellationToken);
+            if (beforeCreatedAt is not null || beforeMessageId is not null)
+            {
+                throw ApiException.ValidationFailed("会话内搜索只支持 beforeSeq 翻页");
+            }
+        }
+        else if (beforeCreatedAt is not null || beforeMessageId is not null)
+        {
+            if (beforeCreatedAt is null || string.IsNullOrWhiteSpace(beforeMessageId))
+            {
+                throw ApiException.ValidationFailed("beforeCreatedAt 与 beforeMessageId 必须同时提供");
+            }
+
+            cursor = new MessageSearchCursor(beforeCreatedAt.Value, beforeMessageId);
         }
 
         // LIKE 只做粗筛（%q%）；q 中的 % / _ 会被当通配符，内存复核会按字面 Contains 纠正误命中。
         var pattern = $"%{keyword}%";
         var collected = new List<MessageEntity>();
-        long? cursor = beforeSeq;
+        long? seqCursor = beforeSeq;
         var hasMore = false;
+        var lastExamined = (Id: string.Empty, Seq: 0L, CreatedAt: 0L);
 
         for (var round = 0; round < SearchMaxCandidateRounds && collected.Count < pageSize; round++)
         {
@@ -538,7 +602,8 @@ public sealed class MessageService
                 userId,
                 pattern,
                 scopeConversationId,
-                cursor,
+                scopeConversationId is null ? null : seqCursor,
+                scopeConversationId is null ? cursor : null,
                 windowSize + 1,
                 cancellationToken);
 
@@ -550,6 +615,7 @@ public sealed class MessageService
 
             if (candidates.Count == 0)
             {
+                hasMore = false;
                 break;
             }
 
@@ -561,6 +627,7 @@ public sealed class MessageService
 
             foreach (var candidate in candidates)
             {
+                lastExamined = candidate;
                 if (!byId.TryGetValue(candidate.Id, out var entity))
                 {
                     continue;
@@ -579,7 +646,16 @@ public sealed class MessageService
                 }
             }
 
-            cursor = candidates[^1].Seq;
+            // 游标只推进到「已实际复核过」的候选，避免跳过同窗口内未复核的命中。
+            if (scopeConversationId is null)
+            {
+                cursor = new MessageSearchCursor(lastExamined.CreatedAt, lastExamined.Id);
+            }
+            else
+            {
+                seqCursor = lastExamined.Seq;
+            }
+
             if (!hasMore)
             {
                 break;
@@ -590,7 +666,8 @@ public sealed class MessageService
         var replies = await LoadRepliesAsync(collected, cancellationToken);
         return new MessageSearchPage(
             collected.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
-            hasMore);
+            hasMore,
+            scopeConversationId is null ? cursor : null);
     }
 
     /// <summary>从 content_json 中取出文本原文；非文本（对象/非法 JSON）返回 null。</summary>
@@ -614,11 +691,12 @@ public sealed class MessageService
     /// （content_json 里中文被转义为 \uXXXX，直接 LIKE JSON 列会漏掉中文），
     /// 同时限定当前用户所在会话；返回 (id, seq) 供上层复核与游标推进。
     /// </summary>
-    private async Task<List<(string Id, long Seq)>> SearchCandidateIdsAsync(
+    private async Task<List<(string Id, long Seq, long CreatedAt)>> SearchCandidateIdsAsync(
         string userId,
         string pattern,
         string? conversationId,
         long? beforeSeq,
+        MessageSearchCursor? cursor,
         int take,
         CancellationToken cancellationToken)
     {
@@ -631,35 +709,57 @@ public sealed class MessageService
 
         try
         {
-            // GetDbConnection().CreateCommand() 返回 DbCommand，这里转成 SqliteCommand 以使用
-            // AddWithValue；连接由 EF Core 管理，打开/关闭按需处理。
+            // 会话内：按 seq 倒序、beforeSeq 游标（沿用 F-11 行为）；
+            // 全局：seq 只在单会话内可比，改用 (created_at, id) 复合游标，保证多会话翻页不重不漏。
+            var isGlobal = conversationId is null;
             await using var command = (SqliteCommand)connection.CreateCommand();
-            command.CommandText =
-                """
-                SELECT m.id, m.seq
-                FROM messages AS m
-                WHERE m.msg_type = 'text'
-                  AND m.deleted_at IS NULL
-                  AND json_extract(m.content_json, '$') LIKE @pattern
-                  AND EXISTS (
-                      SELECT 1 FROM conversation_members AS cm
-                      WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
-                  AND (@conversationId IS NULL OR m.conversation_id = @conversationId)
-                  AND (@beforeSeq IS NULL OR m.seq < @beforeSeq)
-                ORDER BY m.seq DESC
-                LIMIT @take
-                """;
+            command.CommandText = isGlobal
+                ? """
+                  SELECT m.id, m.seq, m.created_at
+                  FROM messages AS m
+                  WHERE m.msg_type = 'text'
+                    AND m.deleted_at IS NULL
+                    AND json_extract(m.content_json, '$') LIKE @pattern
+                    AND EXISTS (
+                        SELECT 1 FROM conversation_members AS cm
+                        WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
+                    AND (@beforeCreatedAt IS NULL
+                         OR m.created_at < @beforeCreatedAt
+                         OR (m.created_at = @beforeCreatedAt AND m.id < @beforeMessageId))
+                  ORDER BY m.created_at DESC, m.id DESC
+                  LIMIT @take
+                  """
+                : """
+                  SELECT m.id, m.seq, m.created_at
+                  FROM messages AS m
+                  WHERE m.msg_type = 'text'
+                    AND m.deleted_at IS NULL
+                    AND json_extract(m.content_json, '$') LIKE @pattern
+                    AND EXISTS (
+                        SELECT 1 FROM conversation_members AS cm
+                        WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
+                    AND m.conversation_id = @conversationId
+                    AND (@beforeSeq IS NULL OR m.seq < @beforeSeq)
+                  ORDER BY m.seq DESC
+                  LIMIT @take
+                  """;
             command.Parameters.AddWithValue("@pattern", pattern);
             command.Parameters.AddWithValue("@userId", userId);
+            command.Parameters.AddWithValue("@take", take);
             command.Parameters.AddWithValue("@conversationId", (object?)conversationId ?? DBNull.Value);
             command.Parameters.AddWithValue("@beforeSeq", (object?)beforeSeq ?? DBNull.Value);
-            command.Parameters.AddWithValue("@take", take);
+            command.Parameters.AddWithValue(
+                "@beforeCreatedAt",
+                (object?)cursor?.CreatedAt ?? DBNull.Value);
+            command.Parameters.AddWithValue(
+                "@beforeMessageId",
+                (object?)cursor?.MessageId ?? DBNull.Value);
 
-            var candidates = new List<(string Id, long Seq)>();
+            var candidates = new List<(string Id, long Seq, long CreatedAt)>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                candidates.Add((reader.GetString(0), reader.GetInt64(1)));
+                candidates.Add((reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)));
             }
 
             return candidates;

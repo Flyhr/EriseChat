@@ -51,6 +51,7 @@ export function detectGap(lastSeq: number, messages: readonly Message[]): GapChe
 export function buildSyncCursors(
   lastSeqByConversation: ReadonlyMap<string, number>,
   limit = 100,
+  updatedAfterByConversation: ReadonlyMap<string, number> = new Map(),
 ): SyncCursor[] {
   const cursors: SyncCursor[] = []
   const max = Math.min(Math.max(limit, 1), 100)
@@ -58,6 +59,11 @@ export function buildSyncCursors(
   for (const [conversationId, lastSeq] of lastSeqByConversation) {
     if (cursors.length >= max) break
     if (!conversationId || !Number.isInteger(lastSeq) || lastSeq < 0) continue
+    const updatedAfter = updatedAfterByConversation.get(conversationId)
+    if (updatedAfter !== undefined && Number.isInteger(updatedAfter) && updatedAfter > 0) {
+      cursors.push({ conversationId, lastSeq, updatedAfter })
+      continue
+    }
     cursors.push({ conversationId, lastSeq })
   }
 

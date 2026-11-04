@@ -23,6 +23,7 @@ public static class MessageEndpoints
 
         // F-11：GET /api/messages/search?q=&conversationId?=&beforeSeq?=&limit=
         // 仅搜索本人会话内 text 消息；q 1~50、limit 1~50（默认 20）；按 seq 降序返回。
+        // F-34：全局搜索增加 (beforeCreatedAt, beforeMessageId) 复合游标；会话内仍用 beforeSeq。
         app.MapGet("/api/messages/search", SearchAsync)
             .WithName("SearchMessages")
             .RequireAuthorization()
@@ -51,16 +52,33 @@ public static class MessageEndpoints
         string? q,
         string? conversationId,
         long? beforeSeq,
+        long? beforeCreatedAt,
+        string? beforeMessageId,
         int? limit,
         ClaimsPrincipal principal,
         MessageService messages,
         CancellationToken cancellationToken)
     {
         var userId = principal.UserId();
-        var page = await messages.SearchAsync(userId, q, conversationId, beforeSeq, limit, cancellationToken);
-        return Results.Json(new MessageSearchPageResponse(page.Messages, page.HasMore));
+        var page = await messages.SearchAsync(
+            userId, q, conversationId, beforeSeq, limit, cancellationToken, beforeCreatedAt, beforeMessageId);
+        return Results.Json(new MessageSearchPageResponse(
+            page.Messages,
+            page.HasMore,
+            page.NextCursor is null
+                ? null
+                : new MessageSearchCursorResponse(page.NextCursor.CreatedAt, page.NextCursor.MessageId)));
     }
 
-    /// <summary>搜索响应（F-11，非协议帧）：messages 按 seq 降序；hasMore 表示可继续翻候选。</summary>
-    public sealed record MessageSearchPageResponse(IReadOnlyList<Message> Messages, bool HasMore);
+    /// <summary>
+    /// 搜索响应（F-11/F-34，非协议帧）：会话内按 seq 降序，全局按 createdAt/id 倒序；
+    /// hasMore 表示可继续翻页；nextCursor 仅全局搜索返回（下次请求的 beforeCreatedAt/beforeMessageId）。
+    /// </summary>
+    public sealed record MessageSearchPageResponse(
+        IReadOnlyList<Message> Messages,
+        bool HasMore,
+        MessageSearchCursorResponse? NextCursor);
+
+    /// <summary>全局搜索翻页游标（F-34）。</summary>
+    public sealed record MessageSearchCursorResponse(long CreatedAt, string MessageId);
 }

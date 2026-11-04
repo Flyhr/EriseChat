@@ -59,6 +59,8 @@ const ACK_TIMEOUT_MS = 8000
 const RETRY_DELAYS_MS = [2000, 5000, 10000] as const
 /** 本会话已知最大 seq 的 IndexedDB 持久化 key（补拉游标）。 */
 const META_LAST_SEQ_KEY = 'lastSeqByConversation'
+/** F-34：各会话状态同步水位（撤回/编辑补齐游标）的 IndexedDB 持久化 key。 */
+const META_SYNC_STATE_KEY = 'stateSyncedAtByConversation'
 /** 一次 syncAll 最多发多少轮 sync.request（防止服务端异常时死循环）。 */
 const SYNC_MAX_ROUNDS = 20
 /** 同一会话检测到 seq 缺口时，最多用同一游标重试补拉的次数。 */
@@ -96,6 +98,8 @@ function reqIdOf(clientMsgId: string): string {
 export const useMessagesStore = defineStore('messages', () => {
   const byConversation = ref<Record<string, Message[]>>({})
   const lastSeqByConversation = ref<Record<string, number>>({})
+  /** F-34：各会话已同步到的服务端时间（撤回/编辑补齐游标）。 */
+  const stateSyncedAtByConversation = ref<Record<string, number>>({})
   const pendingByConversation = ref<Record<string, PendingMessage[]>>({})
   const hasMoreByConversation = ref<Record<string, boolean>>({})
   const loadedConversations = ref<Record<string, boolean>>({})
@@ -150,6 +154,46 @@ export const useMessagesStore = defineStore('messages', () => {
     void setMeta(META_LAST_SEQ_KEY, { ...lastSeqByConversation.value }).catch(() => {
       // 缓存写入失败不影响主流程。
     })
+  }
+
+  /** F-34：持久化各会话状态同步水位。 */
+  function persistStateSyncMap(): void {
+    void setMeta(META_SYNC_STATE_KEY, { ...stateSyncedAtByConversation.value }).catch(() => {
+      // 缓存写入失败不影响主流程。
+    })
+  }
+
+  /**
+   * F-34：把 sync.response 的 updates 覆盖到已缓存消息（仅按 messageId 定位，不新增/重排）。
+   * 未缓存的消息（更早历史或已被淘汰）忽略，等用户加载历史时自然拿到最新状态。
+   */
+  function applySyncUpdates(conversationId: string, updates: readonly Message[]): void {
+    if (updates.length === 0) return
+    const list = messagesOf(conversationId)
+    if (list.length === 0) return
+    const byId = new Map(updates.map((message) => [message.messageId, message]))
+    const changed: Message[] = []
+    const next = list.map((message) => {
+      const fresh = byId.get(message.messageId)
+      if (!fresh) return message
+      if (
+        fresh.deletedAt === message.deletedAt &&
+        fresh.editedAt === message.editedAt &&
+        fresh.content === message.content
+      ) {
+        return message
+      }
+      const updated: Message = { ...message, content: fresh.content }
+      if (fresh.deletedAt === undefined) delete updated.deletedAt
+      else updated.deletedAt = fresh.deletedAt
+      if (fresh.editedAt === undefined) delete updated.editedAt
+      else updated.editedAt = fresh.editedAt
+      changed.push(updated)
+      return updated
+    })
+    if (changed.length === 0) return
+    byConversation.value = { ...byConversation.value, [conversationId]: next }
+    persistMessages(changed)
   }
 
   /** 把服务端事实消息写入 IndexedDB（按 messageId 覆盖，天然幂等）。 */
@@ -238,6 +282,20 @@ export const useMessagesStore = defineStore('messages', () => {
           }
         }
         lastSeqByConversation.value = { ...lastSeqByConversation.value, ...restored }
+      }
+
+      const storedState = await getMeta<Record<string, number>>(META_SYNC_STATE_KEY)
+      if (storedState && typeof storedState === 'object') {
+        const restoredState: Record<string, number> = {}
+        for (const [conversationId, syncedAt] of Object.entries(storedState)) {
+          if (typeof syncedAt === 'number' && Number.isInteger(syncedAt) && syncedAt > 0) {
+            restoredState[conversationId] = syncedAt
+          }
+        }
+        stateSyncedAtByConversation.value = {
+          ...stateSyncedAtByConversation.value,
+          ...restoredState,
+        }
       }
 
       const conversations = useConversationsStore()
@@ -473,7 +531,14 @@ export const useMessagesStore = defineStore('messages', () => {
 
       while (rounds < SYNC_MAX_ROUNDS) {
         rounds += 1
-        const cursors = buildSyncCursors(pending, 100)
+        const updatedAfterByConversation = new Map<string, number>()
+        for (const conversationId of pending.keys()) {
+          const syncedAt = stateSyncedAtByConversation.value[conversationId]
+          if (syncedAt !== undefined && syncedAt > 0) {
+            updatedAfterByConversation.set(conversationId, syncedAt)
+          }
+        }
+        const cursors = buildSyncCursors(pending, 100, updatedAfterByConversation)
         if (cursors.length === 0) break
 
         const sentSeq = new Map(cursors.map((cursor) => [cursor.conversationId, cursor.lastSeq]))
@@ -489,24 +554,40 @@ export const useMessagesStore = defineStore('messages', () => {
         const next = new Map<string, number>()
         for (const batch of response.batches ?? []) {
           if (!sentSeq.has(batch.conversationId)) continue
+          const conversationId = batch.conversationId
           const messages = batch.messages ?? []
-          if (messages.length === 0) continue
-          const cursor = sentSeq.get(batch.conversationId) ?? lastSeqOf(batch.conversationId)
-          const gap = detectGap(cursor, messages)
-          merge(batch.conversationId, messages)
-          conversations.applyMessage(batch.conversationId, messages[messages.length - 1])
+          // F-34：updates 可能在没有新消息时单独出现（断线期间仅发生撤回/编辑）。
+          const updates = batch.updates ?? []
+          const cursor = sentSeq.get(conversationId) ?? lastSeqOf(conversationId)
+          const gap = messages.length > 0 ? detectGap(cursor, messages) : { hasGap: false, lastSeq: cursor }
+          if (messages.length > 0) {
+            merge(conversationId, messages)
+            conversations.applyMessage(conversationId, messages[messages.length - 1])
+          }
+          applySyncUpdates(conversationId, updates)
+
+          if (batch.updatedThrough !== undefined) {
+            stateSyncedAtByConversation.value = {
+              ...stateSyncedAtByConversation.value,
+              [conversationId]: batch.updatedThrough,
+            }
+            persistStateSyncMap()
+          } else if (updates.length === 0 && messages.length === 0) {
+            // 空批次（理论上服务端不返回）不占用游标。
+            continue
+          }
 
           if (gap.hasGap) {
-            const retried = gapRetries.get(batch.conversationId) ?? 0
+            const retried = gapRetries.get(conversationId) ?? 0
             if (retried < SYNC_GAP_RETRIES) {
-              gapRetries.set(batch.conversationId, retried + 1)
-              next.set(batch.conversationId, cursor)
+              gapRetries.set(conversationId, retried + 1)
+              next.set(conversationId, cursor)
             }
             continue
           }
 
           if (messages.length >= config.syncBatchSize) {
-            next.set(batch.conversationId, lastSeqOf(batch.conversationId))
+            next.set(conversationId, lastSeqOf(conversationId))
           }
         }
 
@@ -970,6 +1051,7 @@ export const useMessagesStore = defineStore('messages', () => {
 
     byConversation.value = omitKey(byConversation.value, conversationId)
     lastSeqByConversation.value = omitKey(lastSeqByConversation.value, conversationId)
+    stateSyncedAtByConversation.value = omitKey(stateSyncedAtByConversation.value, conversationId)
     pendingByConversation.value = omitKey(pendingByConversation.value, conversationId)
     hasMoreByConversation.value = omitKey(hasMoreByConversation.value, conversationId)
     loadedConversations.value = omitKey(loadedConversations.value, conversationId)
@@ -985,6 +1067,10 @@ export const useMessagesStore = defineStore('messages', () => {
         const lastSeqMap = (await getMeta<Record<string, number>>(META_LAST_SEQ_KEY)) ?? {}
         if (conversationId in lastSeqMap) {
           await setMeta(META_LAST_SEQ_KEY, omitKey(lastSeqMap, conversationId))
+        }
+        const stateMap = (await getMeta<Record<string, number>>(META_SYNC_STATE_KEY)) ?? {}
+        if (conversationId in stateMap) {
+          await setMeta(META_SYNC_STATE_KEY, omitKey(stateMap, conversationId))
         }
         await deleteRecord(STORE_CONVERSATIONS, conversationId)
       } catch (error) {
@@ -1005,6 +1091,7 @@ export const useMessagesStore = defineStore('messages', () => {
     void clearPending()
     byConversation.value = {}
     lastSeqByConversation.value = {}
+    stateSyncedAtByConversation.value = {}
     pendingByConversation.value = {}
     hasMoreByConversation.value = {}
     loadedConversations.value = {}

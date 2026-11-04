@@ -203,6 +203,89 @@ public sealed class MessageCoreTests
         Assert.Empty(oldest.Messages);
     }
 
+    /// <summary>
+    /// F-34：断线期间只有撤回/编辑、没有新消息时，sync 通过 updates 补齐已缓存消息的状态变化，
+    /// 并用 updatedThrough 推进水位；水位之后无变化时不再返回 batch（不靠扩大历史页兜底）。
+    /// </summary>
+    [Fact]
+    public async Task SyncAsync_UpdatedAfter_ReturnsEditAndRecallWithoutNewMessages()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.CreateContext();
+        var sender = await TestSupport.SeedUserAsync(db, "sync-updates-a@example.com");
+        var other = await TestSupport.SeedUserAsync(db, "sync-updates-b@example.com");
+        var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
+        var service = TestSupport.CreateMessageService(db);
+
+        var first = await service.SendAsync(sender.Id, NewSend(conversation.Id, "原始内容"), CancellationToken.None);
+        var second = await service.SendAsync(sender.Id, NewSend(conversation.Id, "将被撤回"), CancellationToken.None);
+
+        // 模拟断线前已完成一次同步，从这里之后的变化需要被补齐。
+        var updatedAfter = Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1);
+        await service.EditAsync(sender.Id, conversation.Id, first.Message.MessageId, "编辑后的内容", CancellationToken.None);
+        await service.RecallAsync(sender.Id, conversation.Id, second.Message.MessageId, CancellationToken.None);
+
+        var sync = await service.SyncAsync(
+            sender.Id,
+            new SyncRequestFrame(new[] { new SyncCursor(conversation.Id, second.Message.Seq, updatedAfter) }),
+            CancellationToken.None);
+
+        Assert.False(sync.HasMore);
+        var batch = Assert.Single(sync.Batches);
+        Assert.Empty(batch.Messages);
+        Assert.NotNull(batch.Updates);
+        Assert.NotNull(batch.UpdatedThrough);
+
+        var edited = Assert.Single(batch.Updates!, item => item.MessageId == first.Message.MessageId);
+        Assert.Equal("编辑后的内容", edited.Content.GetString());
+        Assert.NotNull(edited.EditedAt);
+
+        var recalled = Assert.Single(batch.Updates!, item => item.MessageId == second.Message.MessageId);
+        Assert.Equal(string.Empty, recalled.Content.GetString());
+        Assert.NotNull(recalled.DeletedAt);
+
+        // 用服务端返回的水位继续同步：没有新消息、也没有新状态变化 → 无 batch。
+        var caughtUp = await service.SyncAsync(
+            sender.Id,
+            new SyncRequestFrame(new[] { new SyncCursor(conversation.Id, second.Message.Seq, batch.UpdatedThrough) }),
+            CancellationToken.None);
+        Assert.False(caughtUp.HasMore);
+        Assert.Empty(caughtUp.Batches);
+    }
+
+    /// <summary>F-34：状态变化量随批一次返回，不因消息 200 条分页上限而截断（避免断线积压丢失）。</summary>
+    [Fact]
+    public async Task SyncAsync_UpdatedAfter_ReturnsAllBacklogChanges()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.CreateContext();
+        var sender = await TestSupport.SeedUserAsync(db, "sync-backlog-a@example.com");
+        var other = await TestSupport.SeedUserAsync(db, "sync-backlog-b@example.com");
+        var conversation = await TestSupport.SeedDirectConversationAsync(db, sender, other);
+        await TestSupport.SeedMessagesAsync(db, conversation.Id, sender.Id, count: 205);
+        var service = TestSupport.CreateMessageService(db);
+
+        var baseline = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 10_000;
+        var rows = await db.Messages.Where(item => item.ConversationId == conversation.Id).ToListAsync();
+        for (var index = 0; index < rows.Count; index++)
+        {
+            rows[index].EditedAt = baseline + index + 1;
+        }
+        await db.SaveChangesAsync();
+
+        var sync = await service.SyncAsync(
+            sender.Id,
+            new SyncRequestFrame(new[] { new SyncCursor(conversation.Id, 205, baseline) }),
+            CancellationToken.None);
+
+        Assert.False(sync.HasMore);
+        var batch = Assert.Single(sync.Batches);
+        Assert.Empty(batch.Messages);
+        Assert.NotNull(batch.Updates);
+        Assert.Equal(205, batch.Updates!.Count);
+        Assert.NotNull(batch.UpdatedThrough);
+    }
+
     private static MessageSendFrame NewSend(string conversationId, string text) => new(
         ClientMsgId: Guid.NewGuid().ToString("N"),
         ConversationId: conversationId,

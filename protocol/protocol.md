@@ -263,7 +263,7 @@
 4. 撤回后服务端返回的 Message：`content` 为空文本、不再携带 `fileId` / `name` 等文件信息；`messages.file_id` 保留供孤儿清理引用，文件不立即删除。
 5. 编辑内容 trim 后必须 1..4096 字符（按 Unicode 码点计），否则 `VALIDATION_FAILED`；窗口内可多次编辑，每次刷新 `editedAt`；`seq` / `clientMsgId` / 幂等语义不变。
 6. 广播：`message.recalled` / `message.edited` 发送给该会话**全部在线连接（含操作者自己的连接）**，用于发送方确认与多端一致；离线成员不推送，重连后以历史/同步数据为准。
-7. 历史分页与 `sync.response` 返回最新 `deletedAt` / `editedAt` / `content`；`sync` 只补新 `seq`，客户端需在进入会话时拉取最新一页并覆盖本地缓存，以补上离线期间的撤回/编辑（已知限制：离线期间、最近一页之外的修改需向上加载历史或刷新后才会更新）。
+7. 历史分页与 `sync.response` 返回最新 `deletedAt` / `editedAt` / `content`；`sync.response` 另通过 `updates` 补齐 `updatedAfter` 之后的状态变化（撤回/编辑），见 §4.4。客户端进入会话时仍会拉取最新一页作为兜底，但不再依赖它补齐离线变更。
 8. `reply` 摘要：被引用消息已撤回时 `reply.text` 固定为「[已撤回]」、`messageId` 保留（点击可定位到占位行）。
 
 
@@ -284,6 +284,7 @@ cursor 对象：
 |---|---|---|---|
 | `conversationId` | string | 是 | 会话 ID |
 | `lastSeq` | integer | 是 | 客户端本地已收到的最大序号；`0` 表示从最早开始 |
+| `updatedAfter` | integer | 否 | 客户端上次完成状态同步的服务端时间（UTC 毫秒）；缺省或 `0` 表示不补状态变化 |
 
 `sync.response`（S→C）：
 
@@ -300,6 +301,8 @@ batch 对象：
 |---|---|---|---|
 | `conversationId` | string | 是 | 会话 ID |
 | `messages` | array | 是 | Message 数组，按 `seq` **升序**；每条 `seq > lastSeq` |
+| `updates` | array | 否 | 状态变化消息：该会话中 `edited_at`/`deleted_at` 晚于 `updatedAfter` 的消息；`seq` 不变，仅用于覆盖本地缓存；缺省表示没有 |
+| `updatedThrough` | integer | 否 | 下次请求可用的 `updatedAfter`（服务端时钟，UTC 毫秒） |
 
 规则：
 
@@ -308,6 +311,9 @@ batch 对象：
 3. `lastSeq` 必须满足 `0 ≤ lastSeq ≤ 会话当前 lastSeq`，否则回 `error`（`VALIDATION_FAILED`）。
 4. `sync.request` 是只读操作，可重复调用；客户端仍需按 `messageId` 去重、按 `seq` 排序。
 5. 补拉只返回消息，不返回会话元数据；会话元数据由 `conv.list` / `conv.updated` 维护。
+6. `cursors[].updatedAfter`（F-34）用于补齐已缓存消息的撤回/编辑：服务端把 `edited_at` 或 `deleted_at` 晚于该时间的消息放入对应 batch 的 `updates`，按状态变更时间升序，随批一次性返回（状态变化量远小于消息量，不参与 `messages` 的每批 ≤200 条分页）。`updates` 中的消息 `seq` 不变，客户端只能按 `messageId` 覆盖已缓存消息，不得据此新增或重排消息。
+7. 客户端收到 batch 后把本会话 `updatedAfter` 更新为 `updatedThrough`（即使 `updates` 为空；缺省表示未请求状态同步）。`updatedThrough` 由服务端时钟产生，客户端不得使用本地时钟。
+8. 只有 `messages` 与 `updates` 都为空的会话不返回 batch；`hasMore` 仍只描述 `messages`（seq 补拉）是否还有更早未返回消息。
 
 ### 4.5 `conv.list` / `conv.updated`（会话列表）
 

@@ -241,12 +241,117 @@ public sealed class MessageSearchTests
         Assert.Equal(sent.Message.MessageId, Assert.Single(byBackslash.Messages).MessageId);
     }
 
+    /// <summary>
+    /// F-34 回归：全局搜索跨会话翻页不能用上页最后一条的 seq（seq 只在单会话内可比）。
+    /// 多个会话存在相同 seq、相同发送时间的关键词命中时，按 (createdAt, messageId) 游标翻页，
+    /// 命中应恰好出现一次，最后一页 hasMore=false。
+    /// </summary>
+    [Fact]
+    public async Task SearchAsync_GlobalPagination_AcrossConversations_ReturnsEachHitOnce()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.CreateContext();
+        var alice = await TestSupport.SeedUserAsync(db, "search-global-a@example.com");
+        var bob = await TestSupport.SeedUserAsync(db, "search-global-b@example.com");
+        var carol = await TestSupport.SeedUserAsync(db, "search-global-c@example.com");
+        var first = await TestSupport.SeedDirectConversationAsync(db, alice, bob);
+        var second = await TestSupport.SeedDirectConversationAsync(db, alice, carol);
+        var service = TestSupport.CreateMessageService(db);
+
+        const long createdAt = 1_760_000_000_000;
+        var ids = new List<string>();
+        for (var seq = 1; seq <= 3; seq++)
+        {
+            ids.Add(SeedTextMessage(db, first.Id, alice.Id, seq, "跨会话翻页命中", createdAt));
+            ids.Add(SeedTextMessage(db, second.Id, alice.Id, seq, "跨会话翻页命中", createdAt));
+        }
+        await db.SaveChangesAsync();
+
+        // 全局排序：created_at DESC, id DESC；同时间命中按 messageId 稳定排序。
+        var expected = ids.OrderByDescending(id => id, StringComparer.Ordinal).ToList();
+        var collected = new List<string>();
+        var page = await service.SearchAsync(alice.Id, "跨会话", null, null, 2, CancellationToken.None);
+        for (var guard = 0; guard < 10; guard++)
+        {
+            collected.AddRange(page.Messages.Select(item => item.MessageId));
+            if (!page.HasMore)
+            {
+                break;
+            }
+
+            Assert.NotNull(page.NextCursor);
+            page = await service.SearchAsync(
+                alice.Id,
+                "跨会话",
+                null,
+                null,
+                2,
+                CancellationToken.None,
+                page.NextCursor!.CreatedAt,
+                page.NextCursor.MessageId);
+        }
+
+        Assert.False(page.HasMore);
+        Assert.Equal(expected.Count, collected.Count);
+        Assert.Equal(expected.Count, collected.Distinct().Count());
+        Assert.Equal(expected, collected);
+    }
+
+    /// <summary>F-34：会话内搜索仍只接受 beforeSeq，新游标仅用于全局搜索（向后兼容）。</summary>
+    [Fact]
+    public async Task SearchAsync_ConversationScope_RejectsGlobalCursor()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.CreateContext();
+        var alice = await TestSupport.SeedUserAsync(db, "search-scope-a@example.com");
+        var bob = await TestSupport.SeedUserAsync(db, "search-scope-b@example.com");
+        var conversation = await TestSupport.SeedDirectConversationAsync(db, alice, bob);
+        var service = TestSupport.CreateMessageService(db);
+        var sent = await service.SendAsync(alice.Id, NewText(conversation.Id, "会话内翻页"), CancellationToken.None);
+
+        await TestSupport.AssertApiExceptionAsync(
+            ErrorCodes.ValidationFailed,
+            () => service.SearchAsync(
+                alice.Id,
+                "会话内翻页",
+                conversation.Id,
+                null,
+                10,
+                CancellationToken.None,
+                sent.Message.CreatedAt,
+                sent.Message.MessageId));
+    }
+
     private static MessageSendFrame NewText(string conversationId, string text) =>
         new(
             Guid.NewGuid().ToString("N"),
             conversationId,
             MessageType.Text,
             MessageContent.FromString(text));
+
+    /// <summary>直接落库一条文本消息（可指定 seq/created_at，用于构造跨会话翻页回归数据）。</summary>
+    private static string SeedTextMessage(
+        ChatDbContext db,
+        string conversationId,
+        string senderId,
+        long seq,
+        string text,
+        long createdAt)
+    {
+        var id = Guid.NewGuid().ToString("D");
+        db.Messages.Add(new MessageEntity
+        {
+            Id = id,
+            ConversationId = conversationId,
+            SenderId = senderId,
+            ClientMsgId = Guid.NewGuid().ToString("N"),
+            Seq = seq,
+            MsgType = MessageType.Text,
+            ContentJson = System.Text.Json.JsonSerializer.Serialize(text),
+            CreatedAt = createdAt,
+        });
+        return id;
+    }
 
     /// <summary>直接落库一条非文本消息（绕过发送校验，用于验证搜索只返回 text）。</summary>
     private static void SeedNonTextMessage(

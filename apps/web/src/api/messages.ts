@@ -10,17 +10,24 @@ export interface MessagePage {
   hasMore: boolean
 }
 
-/** F-11：搜索结果按 seq 降序（时间从新到旧），hasMore 表示还有更早的命中可继续翻页。 */
+/**
+ * F-11/F-34：会话内结果按 seq 降序，全局结果按 createdAt/id 倒序；
+ * hasMore 表示还有更早命中；nextCursor 仅全局搜索返回（与排序一致、跨会话不重不漏）。
+ */
 export interface MessageSearchPage {
   messages: Message[]
   hasMore: boolean
+  nextCursor?: { createdAt: number; messageId: string }
 }
 
 export interface MessageSearchOptions {
   /** 传入即只搜该会话；不传则跨当前用户全部会话。 */
   conversationId?: string
-  /** 翻页游标：返回 seq < beforeSeq 的命中。 */
+  /** 会话内翻页游标：返回 seq < beforeSeq 的命中（保留 F-11 行为）。 */
   beforeSeq?: number
+  /** 全局翻页游标：返回发送时间早于 beforeCreatedAt，或同时间且 id < beforeMessageId 的命中。 */
+  beforeCreatedAt?: number
+  beforeMessageId?: string
   /** 每页条数 1~50，默认 20。 */
   limit?: number
 }
@@ -37,6 +44,8 @@ export const messagesApi = {
         q,
         conversationId: options.conversationId,
         beforeSeq: options.beforeSeq,
+        beforeCreatedAt: options.beforeCreatedAt,
+        beforeMessageId: options.beforeMessageId,
         limit: options.limit,
       },
     }),
