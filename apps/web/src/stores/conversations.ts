@@ -69,6 +69,8 @@ export const useConversationsStore = defineStore('conversations', () => {
   let unsubscribeFrame: (() => void) | null = null
   let unsubscribeState: (() => void) | null = null
   let cacheRestored = false
+  /** 已收到服务端数据的会话 id（REST 列表或 conv.updated）；IndexedDB 缓存快照不算，冷启动清标记需以服务端结果为准。 */
+  const serverSyncedIds = ref<Record<string, true>>({})
 
   /** 展示顺序（F-10）：置顶优先，组内按最近消息时间倒序（core/conversationSort 纯函数）。 */
   const sorted = computed(() => sortConversations(items.value))
@@ -79,6 +81,18 @@ export const useConversationsStore = defineStore('conversations', () => {
     for (const conversation of conversations) byId.set(conversation.conversationId, conversation)
     items.value = [...byId.values()]
     persistConversations(conversations)
+  }
+
+  function markServerSynced(conversations: readonly Conversation[]): void {
+    if (conversations.length === 0) return
+    const next = { ...serverSyncedIds.value }
+    for (const conversation of conversations) next[conversation.conversationId] = true
+    serverSyncedIds.value = next
+  }
+
+  /** 冷启动缓存快照不代表服务端事实；进入会话清除「标为未读」需等该会话收到首个服务端结果。 */
+  function isServerSynced(conversationId: string): boolean {
+    return serverSyncedIds.value[conversationId] === true
   }
 
   function getById(conversationId: string): Conversation | undefined {
@@ -317,6 +331,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     try {
       const list = await conversationsApi.list()
       items.value = [...list]
+      markServerSynced(list)
       loaded.value = true
       persistConversations(list)
     } finally {
@@ -357,6 +372,7 @@ export const useConversationsStore = defineStore('conversations', () => {
       if (frame.removedConversationIds && frame.removedConversationIds.length > 0) {
         handleRemovedConversations(frame.removedConversationIds)
       }
+      markServerSynced(frame.conversations)
       upsert(frame.conversations)
     })
     // 认证成功（首次/重连）后补报已读游标，避免服务端 last_read_seq 长期滞后导致重新登录误报未读。
@@ -370,6 +386,7 @@ export const useConversationsStore = defineStore('conversations', () => {
     items.value = []
     loaded.value = false
     cacheRestored = false
+    serverSyncedIds.value = {}
     // 清除本地已读游标（含 localStorage），避免账号切换后沿用上一位用户的已读状态（M3-00）。
     lastReadSeqByConversation.value = {}
     peerReadSeq.value = {}
@@ -398,11 +415,28 @@ export const useConversationsStore = defineStore('conversations', () => {
    */
   async function setMemberSettings(
     conversationId: string,
-    settings: { pinned?: boolean; muted?: boolean },
+    settings: { pinned?: boolean; muted?: boolean; markedUnread?: boolean },
   ): Promise<Conversation> {
     const updated = await conversationsApi.updateMemberSettings(conversationId, settings)
     upsert([updated])
     return updated
+  }
+
+  /**
+   * 打开会话时自动清除「标为未读」个人标记（F-10 扩展）：只 PATCH markedUnread=false，
+   * 不推进 last_read_seq、不撤销对端已读回执；失败静默（下次打开仍可清除）。
+   */
+  async function clearMarkedUnread(conversationId: string): Promise<void> {
+    const conversation = getById(conversationId)
+    if (!conversation?.markedUnread) return
+    try {
+      const updated = await conversationsApi.updateMemberSettings(conversationId, {
+        markedUnread: false,
+      })
+      upsert([updated])
+    } catch {
+      // 打开会话属于被动清理：失败不阻塞阅读，保留标记等待下次重试。
+    }
   }
 
   /** Chat 页监听路由变化时写入，供 messages store 判断提示音/通知是否需要提醒。 */
@@ -421,10 +455,12 @@ export const useConversationsStore = defineStore('conversations', () => {
     upsert,
     applyMessage,
     getById,
+    isServerSynced,
     patchSelfProfile,
     unreadOf,
     isMuted,
     setMemberSettings,
+    clearMarkedUnread,
     totalUnread,
     markRead,
     readSeqOf,

@@ -128,6 +128,8 @@ CREATE INDEX idx_conversations_created_by ON conversations (created_by);
 -- last_read_seq : 已读游标，只增不减（未读 = 会话 last_seq − last_read_seq）
 -- pinned        : 当前用户是否置顶该会话（成员级设置，0/1，默认 0；F-10）
 -- muted         : 当前用户是否对该会话免打扰（成员级设置，0/1，默认 0；F-10）
+-- marked_unread : 当前用户是否手动标为未读（成员级设置，0/1，默认 0；独立于真实未读，
+--                 不回退 last_read_seq、不撤销对端已读回执、不增加真实未读数；跨端同步）
 -- ------------------------------------------------------------
 CREATE TABLE conversation_members (
     conversation_id TEXT NOT NULL,
@@ -137,6 +139,7 @@ CREATE TABLE conversation_members (
     last_read_seq   INTEGER NOT NULL DEFAULT 0,
     pinned          INTEGER NOT NULL DEFAULT 0,
     muted           INTEGER NOT NULL DEFAULT 0,
+    marked_unread   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (conversation_id, user_id),
     FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE

@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { MAX_TEXT_LENGTH } from '../core/config'
-import { ALLOWED_EXTENSIONS } from '../core/attachments'
+import { ALLOWED_EXTENSIONS, formatFileSize } from '../core/attachments'
+import { uploadStatusText, type UploadItem } from '../core/uploadQueue'
 import { insertAtCursor } from '../core/emoji'
 import { filterMentionCandidates, findMentionToken, insertMention } from '../core/mentions'
 import type { MentionCandidateMember, MentionToken } from '../core/mentions'
@@ -33,6 +34,12 @@ const emit = defineEmits<{
   'send-voice': [payload: { blob: Blob; durationMs: number }]
   /** F-28：录音失败/过短等提示，由父组件用 toast 展示。 */
   'voice-error': [message: string]
+  /** F-35：附件上传队列——取消上传中项。 */
+  'cancel-upload': [id: string]
+  /** F-35：附件上传队列——单项重试失败项。 */
+  'retry-upload': [id: string]
+  /** F-35：附件上传队列——移出等待项。 */
+  'dismiss-upload': [id: string]
 }>()
 
 const props = withDefaults(
@@ -51,6 +58,8 @@ const props = withDefaults(
     replyTo?: ReplyPreviewLike | null
     /** F-25：群聊 @ 成员候选（空数组 = 单聊/不启用，不弹候选面板）。 */
     mentionCandidates?: MentionCandidateMember[]
+    /** F-35：附件上传队列（等待/上传中/已发送/失败/已取消逐项展示）。 */
+    uploadItems?: UploadItem[]
   }>(),
   {
     uploading: false,
@@ -60,6 +69,7 @@ const props = withDefaults(
     initialDraft: '',
     replyTo: null,
     mentionCandidates: () => [],
+    uploadItems: () => [],
   },
 )
 
@@ -396,6 +406,63 @@ function onInput(): void {
 <template>
   <form class="send-box" @submit.prevent="submit">
     <div ref="field" class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
+      <!-- F-35：附件上传队列；逐项真实进度，等待可移除、上传中可取消、失败可单项重试。 -->
+      <div v-if="uploadItems.length > 0" class="send-box__uploads" role="list" aria-label="附件上传队列">
+        <div
+          v-for="item in uploadItems"
+          :key="item.id"
+          class="send-box__upload"
+          :class="`send-box__upload--${item.status}`"
+          role="listitem"
+        >
+          <div class="send-box__upload-main">
+            <span class="send-box__upload-name" :title="item.fileName">{{ item.fileName }}</span>
+            <span class="send-box__upload-meta">
+              {{ formatFileSize(item.size) }} · {{ uploadStatusText(item) }}
+            </span>
+          </div>
+          <div
+            v-if="item.status === 'uploading'"
+            class="send-box__upload-track"
+            role="progressbar"
+            :aria-valuemin="0"
+            :aria-valuemax="100"
+            :aria-valuenow="item.progress"
+            :aria-label="`${item.fileName} 上传进度`"
+          >
+            <span class="send-box__upload-bar" :style="{ width: `${item.progress}%` }" />
+          </div>
+          <div class="send-box__upload-actions">
+            <button
+              v-if="item.status === 'pending'"
+              class="send-box__upload-action"
+              type="button"
+              @click="emit('dismiss-upload', item.id)"
+            >
+              移除
+            </button>
+            <button
+              v-else-if="item.status === 'uploading'"
+              class="send-box__upload-action"
+              type="button"
+              @click="emit('cancel-upload', item.id)"
+            >
+              取消
+            </button>
+            <button
+              v-else-if="item.status === 'failed'"
+              class="send-box__upload-action send-box__upload-action--retry"
+              type="button"
+              @click="emit('retry-upload', item.id)"
+            >
+              重试
+            </button>
+          </div>
+          <p v-if="item.status === 'failed' && item.error" class="send-box__upload-error">
+            {{ item.error }}
+          </p>
+        </div>
+      </div>
       <div v-if="replyTo" class="send-box__reply">
         <span class="send-box__reply-text">{{ replyCardText(replyTo) }}</span>
         <button
@@ -914,5 +981,98 @@ function onInput(): void {
   .send-box__recording-dot {
     animation: none;
   }
+}
+
+/* F-35：附件上传队列（逐项状态 + 真实进度条）。 */
+.send-box__uploads {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  margin-bottom: var(--ec-space-2);
+}
+
+.send-box__upload {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-surface-hover);
+}
+
+.send-box__upload--sent {
+  opacity: 0.7;
+}
+
+.send-box__upload-main {
+  display: flex;
+  align-items: center;
+  gap: var(--ec-space-2);
+  min-width: 0;
+}
+
+.send-box__upload-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ec-font-size-small);
+  color: var(--ec-text-primary);
+}
+
+.send-box__upload-meta {
+  flex: none;
+  font-size: var(--ec-font-size-caption);
+  color: var(--ec-text-secondary);
+}
+
+.send-box__upload-track {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ec-border);
+  overflow: hidden;
+}
+
+.send-box__upload-bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ec-brand-600);
+  transition: width 120ms ease;
+}
+
+.send-box__upload-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.send-box__upload-action {
+  min-height: 28px;
+  padding: 0 var(--ec-space-2);
+  border: none;
+  border-radius: var(--ec-radius-small);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-caption);
+  cursor: pointer;
+}
+
+.send-box__upload-action:hover {
+  background: var(--ec-surface);
+  color: var(--ec-text-primary);
+}
+
+.send-box__upload-action--retry {
+  color: var(--ec-brand-600);
+  font-weight: 600;
+}
+
+.send-box__upload-error {
+  margin: 0;
+  font-size: var(--ec-font-size-caption);
+  color: var(--ec-danger);
 }
 </style>

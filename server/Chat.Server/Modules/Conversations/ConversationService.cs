@@ -638,11 +638,12 @@ public sealed class ConversationService
         string conversationId,
         bool? pinned,
         bool? muted,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool? markedUnread = null)
     {
-        if (pinned is null && muted is null)
+        if (pinned is null && muted is null && markedUnread is null)
         {
-            throw ApiException.ValidationFailed("pinned 与 muted 至少提供一个");
+            throw ApiException.ValidationFailed("pinned、muted 与 markedUnread 至少提供一个");
         }
 
         var conversation = await _db.Conversations
@@ -670,11 +671,20 @@ public sealed class ConversationService
             member.Muted = muted.Value;
         }
 
+        if (markedUnread is not null)
+        {
+            member.MarkedUnread = markedUnread.Value;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
 
         return (await BuildAsync(new[] { conversation }, currentUserId, cancellationToken))[0];
     }
 
+    /// <summary>
+    /// 更新当前用户的成员设置（F-10 / 标为未读）：pinned/muted/markedUnread 至少一项；
+    /// markedUnread 只改本人标记，不动 last_read_seq 与真实未读数。
+    /// </summary>
     /// <summary>
     /// 更新群资料（F-14 / F-23）：仅群聊群主可改标题、公告与群头像；字段为 null 表示不修改，
     /// announcement/avatarFileId 传空串表示清空（落库 NULL）。返回最新会话实体与成员列表，供端点按收件人视角推送。
@@ -885,6 +895,7 @@ public sealed class ConversationService
                     member.LastReadSeq,
                     member.Pinned,
                     member.Muted,
+                    member.MarkedUnread,
                 })
             .ToListAsync(cancellationToken);
 
@@ -947,6 +958,7 @@ public sealed class ConversationService
             // F-10：置顶/免打扰是当前用户自己的成员级设置，按收件人填充、不广播。
             var myPinned = membership?.Pinned ?? false;
             var myMuted = membership?.Muted ?? false;
+            var myMarkedUnread = membership?.MarkedUnread ?? false;
 
             Message? lastMessage = null;
             if (conversation.LastMessageId is not null &&
@@ -968,7 +980,8 @@ public sealed class ConversationService
                 myMuted,
                 conversation.Announcement,
                 conversation.AvatarFileId,
-                unreadByConversation.GetValueOrDefault(conversation.Id)));
+                unreadByConversation.GetValueOrDefault(conversation.Id),
+                myMarkedUnread));
         }
 
         return result

@@ -16,10 +16,12 @@ export interface AddConversationMembersRequest {
   userIds: string[]
 }
 
-/** 成员设置请求（F-10）：至少提供 pinned/muted 之一，服务端校验。 */
+/** 成员设置请求（F-10 / 标为未读）：至少提供 pinned/muted/markedUnread 之一，服务端校验。 */
 export interface MemberSettingsRequest {
   pinned?: boolean
   muted?: boolean
+  /** 手动标为未读：只影响未读筛选，不改已读游标与真实未读数；变更会同步到同账号其他在线设备。 */
+  markedUnread?: boolean
 }
 
 /** 群主转让请求（F-24）：目标成员用户 ID。 */

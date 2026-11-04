@@ -41,6 +41,16 @@ export function setAccessTokenProvider(provider: () => string | null): void {
   accessTokenProvider = provider
 }
 
+/** F-35：XHR 上传等非 fetch 链路读取当前令牌，避免复制鉴权逻辑。 */
+export function getAccessToken(): string | null {
+  return accessTokenProvider()
+}
+
+/** F-35：非 fetch 链路收到 401 时触发统一的登录态清理（上传接口不属于 /auth/*）。 */
+export function notifyUnauthorized(): void {
+  unauthorizedHandler?.()
+}
+
 // 401 统一处理（M2-02）：core 不反向依赖 store/router，由应用入口注册回调（project-overview.md §10）。
 // 认证接口自身返回 401（如密码错误）不触发回调，避免 /login ↔ /login 循环跳转。
 let unauthorizedHandler: (() => void) | null = null

@@ -82,7 +82,10 @@ export function filterConversations(
   unreadOf: (conversationId: string) => number = () => 0,
 ): Conversation[] {
   if (filter === 'unread') {
-    return conversations.filter((conversation) => unreadOf(conversation.conversationId) > 0)
+    // 手动标为未读（markedUnread）与真实未读数相互独立：两者任意命中都进入未读筛选。
+    return conversations.filter(
+      (conversation) => conversation.markedUnread === true || unreadOf(conversation.conversationId) > 0,
+    )
   }
   if (filter === 'group') {
     return conversations.filter((conversation) => conversation.type === 'group')

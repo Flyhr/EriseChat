@@ -26,7 +26,10 @@ const emit = defineEmits<{
   select: [conversationId: string]
   /** F-10：请求父组件更新本人成员设置（置顶/免打扰）。 */
   'update-settings': [
-    payload: { conversationId: string; settings: { pinned?: boolean; muted?: boolean } },
+    payload: {
+      conversationId: string
+      settings: { pinned?: boolean; muted?: boolean; markedUnread?: boolean }
+    },
   ]
 }>()
 
@@ -113,6 +116,15 @@ function toggleMuted(): void {
   emit('update-settings', {
     conversationId: props.conversation.conversationId,
     settings: { muted: !props.conversation.muted },
+  })
+  closeMenu()
+}
+
+/** 标记/取消「标为未读」：只影响本账号未读筛选，不改已读游标（F-10 扩展）。 */
+function toggleMarkedUnread(): void {
+  emit('update-settings', {
+    conversationId: props.conversation.conversationId,
+    settings: { markedUnread: !props.conversation.markedUnread },
   })
   closeMenu()
 }
@@ -206,6 +218,13 @@ function formatTime(timestamp: number): string {
             role="img"
             aria-label="已置顶"
           />
+          <span
+            v-if="conversation.markedUnread"
+            class="conversation-item__marked"
+            role="img"
+            aria-label="已标为未读"
+            title="已标为未读"
+          >未读</span>
           <UnreadBadge :count="unread" />
         </span>
       </span>
@@ -238,6 +257,10 @@ function formatTime(timestamp: number): string {
         <button type="button" role="menuitem" class="conversation-menu__item" @click="toggleMuted">
           <AppIcon name="mute" :size="16" />
           <span>{{ conversation.muted ? '取消免打扰' : '消息免打扰' }}</span>
+        </button>
+        <button type="button" role="menuitem" class="conversation-menu__item" @click="toggleMarkedUnread">
+          <AppIcon :name="conversation.markedUnread ? 'check' : 'bell'" :size="16" />
+          <span>{{ conversation.markedUnread ? '标为已读' : '标为未读' }}</span>
         </button>
       </div>
     </Teleport>
@@ -330,6 +353,17 @@ function formatTime(timestamp: number): string {
 .conversation-item__time {
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
+}
+
+.conversation-item__marked {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-pill, 999px);
+  color: var(--ec-brand-600);
+  font-size: 10px;
+  line-height: 14px;
+  font-weight: 600;
 }
 
 .conversation-item__flags {

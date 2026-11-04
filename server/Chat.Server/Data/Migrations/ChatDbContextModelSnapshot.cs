@@ -153,6 +153,12 @@ namespace Chat.Server.Data.Migrations
                         .HasDefaultValue(0L)
                         .HasColumnName("last_read_seq");
 
+                    b.Property<bool>("MarkedUnread")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("marked_unread");
+
                     b.Property<bool>("Muted")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")

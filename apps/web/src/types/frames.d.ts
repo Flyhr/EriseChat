@@ -159,6 +159,11 @@ export interface Conversation {
   unread?: number
   /** 当前用户是否免打扰（F-10：成员级设置，按收件人填充，不广播） */
   muted?: boolean
+  /**
+   * 当前用户是否手动标为未读（成员级设置）：只影响未读筛选与提示，不改 lastReadSeq、
+   * 不撤销对端已读回执、不增加真实未读数；同账号多端通过 conv.updated 同步。
+   */
+  markedUnread?: boolean
   /** 群公告（F-14）：≤500 字符、支持换行；null/缺省 = 无公告；单聊恒为 null */
   announcement?: string | null
   /** 群头像（F-23）：files.id；null/缺省 = 未设置；仅群聊可能非空，单聊恒为 null */

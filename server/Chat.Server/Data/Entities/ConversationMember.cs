@@ -25,4 +25,8 @@ public sealed class ConversationMember
 
     /// <summary>是否消息免打扰（F-10：当前用户自己的成员级设置，默认 false）。</summary>
     public bool Muted { get; set; }
+
+    /// <summary>是否手动标为未读（成员级设置，默认 false）：只影响未读筛选与提示，
+    /// 不改 last_read_seq、不撤销对端已读回执、不增加真实未读数。</summary>
+    public bool MarkedUnread { get; set; }
 }

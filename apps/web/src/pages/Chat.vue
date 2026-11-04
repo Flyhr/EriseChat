@@ -17,6 +17,8 @@ import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
+import { createUploadItem, type UploadItem } from '../core/uploadQueue'
+import type { FileContent } from '../types/frames'
 import type { ConversationFilter } from '../core/chatLayout'
 import { getOrLoadBlobUrl } from '../core/blobCache'
 import { conversationTitle, otherMemberOf } from '../core/conversationTitle'
@@ -337,11 +339,46 @@ function confirmEdit(): void {
 }
 
 // 切换会话/退出登录时关闭残留菜单与弹窗，避免操作到旧会话的消息。
-watch(activeId, () => {
-  actionMenu.value = null
-  recallTarget.value = null
-  editTarget.value = null
-})
+// 进入会话时清除「标为未读」个人标记：等该会话资料可用后只处理一次，只清标记、不推进已读游标。
+// 停留在当前会话期间主动标为未读、或收到同账号其他设备的标记，不在这里清除（留待下次进入）。
+const pendingEnteredMarkClear = ref<string | null>(null)
+
+function tryClearEnteredMark(): void {
+  const conversationId = activeId.value
+  const enteringId = pendingEnteredMarkClear.value
+  if (!conversationId || enteringId !== conversationId) return
+  const conversation = conversations.getById(conversationId)
+  // 缓存快照不算服务端事实：等该会话收到首个服务端结果（会话列表或 conv.updated）后再决定是否清除，
+  // 避免冷启动时用 IndexedDB 旧快照误判「未标记」而提前消费本次进入。
+  if (!conversation || !conversations.isServerSynced(conversationId)) return
+  pendingEnteredMarkClear.value = null
+  if (conversation.markedUnread) void conversations.clearMarkedUnread(conversationId)
+}
+
+watch(
+  activeId,
+  (conversationId) => {
+    actionMenu.value = null
+    recallTarget.value = null
+    editTarget.value = null
+    pendingEnteredMarkClear.value = conversationId
+    tryClearEnteredMark()
+  },
+  { immediate: true },
+)
+
+// 会话资料异步到达（冷启动直达、重新连接刷新）时再尝试一次；已处理过则 enteringId 为 null，不再清除。
+// 依赖里同时带上「是否已收到服务端数据」：缓存快照未标记时不会提前消费本次进入。
+watch(
+  () => {
+    const conversationId = activeId.value
+    if (!conversationId) return ''
+    const serverSynced = conversations.isServerSynced(conversationId) ? '1' : '0'
+    const marked = conversations.getById(conversationId)?.markedUnread ? '1' : '0'
+    return `${serverSynced}:${marked}`
+  },
+  () => tryClearEnteredMark(),
+)
 
 /** 在已加载消息中定位；不在当前窗口时循环补拉历史（≤8 页），返回是否成功定位。 */
 async function ensureMessageVisible(messageId: string): Promise<boolean> {
@@ -621,6 +658,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  // 离开聊天页（去设置/退出登录/切换账号或服务器）：中止上传并丢弃队列，
+  // 晚到的压缩/上传结果因找不到队列项而不会再发送；仅聊天页内切换会话不触发卸载。
+  cancelAllUploads()
+  uploadItems.value = []
   offWsState?.()
   offWsState = null
   conversations.setActiveConversation(null)
@@ -846,93 +887,291 @@ function onVoiceError(message: string): void {
   showToast(message, 'error')
 }
 
-// 附件上传（M3-07）：校验 → 图片压缩 → 上传 → 以 image/file 消息发送；上传期间禁止重复选择。
+// 附件上传队列（F-35）：选择后入队，串行上传并逐项展示真实进度；取消/失败不影响队列其他项。
+// 说明：表情/语音/头像上传不在本批范围，仍走 uploadBusy 的旧链路。
+const uploadItems = ref<UploadItem[]>([])
+const uploadControllers = new Map<string, AbortController>()
+let uploadProcessing = false
+/** 兼容表情/语音上传的互斥标记；附件队列使用下方的 queueBusy。 */
 const uploadBusy = ref(false)
 const uploadError = ref<string | null>(null)
+const queueBusy = computed(() =>
+  uploadItems.value.some((item) => item.status === 'uploading' || item.status === 'pending'),
+)
 
-// 退出登录/切换账号：关闭群成员面板并清空页内提示（面板内部状态随 v-if 卸载重置）；
-// 同时清空「输入中」状态与节流记录，避免沿用上一位用户的数据（M3-09）。
+// 退出登录/切换账号：关闭群成员面板、清空附件队列与页内提示（附件属于原账号）。
 watch(selfUserId, () => {
   activeDrawer.value = null
   pageNotice.value = ''
   uploadError.value = null
+  cancelAllUploads()
+  uploadItems.value = []
   typing.clear()
   typingThrottle.reset()
 })
 
-async function handleFileSelected(files: File[]): Promise<void> {
+function patchUploadItem(id: string, patch: Partial<UploadItem>): void {
+  uploadItems.value = uploadItems.value.map((item) =>
+    item.id === id ? { ...item, ...patch } : item,
+  )
+}
+
+function findUploadItem(id: string): UploadItem | undefined {
+  return uploadItems.value.find((item) => item.id === id)
+}
+
+/**
+ * 「发送中」对账：附件项与消息 store 用同一 clientMsgId 关联。
+ * pending 存在 → 仍发送中（其中 failed 表示发送失败）；pending 消失且消息已存在（ack 或补拉确认）→ 已发送。
+ */
+watch(
+  () => {
+    // 待发记录状态是原地更新的（重试耗尽→failed），显式依赖版本号。
+    void messages.pendingRevision
+    return uploadItems.value
+      .filter(
+        (item) =>
+          item.clientMsgId !== undefined &&
+          (item.status === 'sending' || (item.status === 'failed' && Boolean(item.fileId))),
+      )
+      .map((item) => {
+        const clientMsgId = item.clientMsgId ?? ''
+        const pending = messages
+          .pendingOf(item.conversationId)
+          .find((entry) => entry.clientMsgId === clientMsgId)
+        if (pending) return `${item.id}:${pending.status === 'failed' ? 'failed' : 'sending'}`
+        const confirmed = messages
+          .messagesOf(item.conversationId)
+          .some((message) => message.clientMsgId === clientMsgId)
+        return `${item.id}:${confirmed ? 'sent' : item.status === 'failed' ? 'failed' : 'sending'}`
+      })
+      .join(',')
+  },
+  (signature) => {
+    if (!signature) return
+    for (const entry of signature.split(',')) {
+      const [id, state] = entry.split(':')
+      const item = findUploadItem(id)
+      if (!item) continue
+      if (state === 'sent') {
+        // 迟到的 ack / 补拉确认也覆盖「已标记失败」的附件。
+        patchUploadItem(id, { status: 'sent', progress: 100, error: undefined })
+      } else if (state === 'failed' && item.status === 'sending') {
+        patchUploadItem(id, { status: 'failed', error: '消息发送失败，请重试' })
+      }
+    }
+  },
+  { immediate: true },
+)
+
+/** 取消所有进行中的上传（切换账号/退出登录时调用）。 */
+function cancelAllUploads(): void {
+  for (const controller of uploadControllers.values()) controller.abort()
+  uploadControllers.clear()
+}
+
+/** 选择文件：只入队并固定当时的会话/账号/回复目标，实际上传由队列串行处理。 */
+function handleFileSelected(files: File[]): void {
   if (files.length === 0) return
-  if (!activeId.value || !selfUserId.value) {
+  const conversationId = activeId.value
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId) {
     uploadError.value = '请先选择会话'
     return
   }
-  if (uploadBusy.value) {
-    uploadError.value = '上传中，请稍候'
-    return
-  }
-
   const { files: accepted, rejectedCount } = truncateFiles(files)
   if (accepted.length === 0) return
-
-  uploadBusy.value = true
   uploadError.value = null
   if (rejectedCount > 0) {
     uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 个文件，已忽略多余的 ${rejectedCount} 个`
   }
+  const reply = replyTarget.value
+  const created = accepted.map((file) =>
+    createUploadItem(normalizeDroppedFile(file, Date.now()), conversationId, senderId, {
+      replyTo: reply?.messageId,
+      replyPreview: reply?.preview,
+    }),
+  )
+  uploadItems.value = [...uploadItems.value, ...created]
+  void processUploadQueue()
+}
+
+/** 串行处理 pending 项：前一项结束（成功/失败/取消）后才开始下一项，避免内存峰值。 */
+async function processUploadQueue(): Promise<void> {
+  if (uploadProcessing) return
+  uploadProcessing = true
   try {
-    // 顺序上传，避免多张图片同时压缩/上传造成内存峰值；单个失败不阻断后续文件。
-    for (const file of accepted) {
-      await uploadAndSendFile(normalizeDroppedFile(file, Date.now()))
+    for (;;) {
+      const next = uploadItems.value.find((item) => item.status === 'pending')
+      if (!next) break
+      await processUploadItem(next.id)
     }
   } finally {
-    uploadBusy.value = false
+    uploadProcessing = false
   }
 }
 
-/** 单文件链路（F-06 从原 handleFileSelected 抽出）：校验 → 图片压缩 → 上传 → 发消息。 */
-async function uploadAndSendFile(file: File): Promise<void> {
-  const conversationId = activeId.value
-  const senderId = selfUserId.value
-  if (!conversationId || !senderId) return
-  // F-09：附件同样支持回复引用；发送成功才清空回复目标（失败保留，便于重试）。
-  const reply = replyTarget.value
-
-  const validation = validateAttachment(file)
-  if (!validation.ok) {
-    if (!uploadError.value) uploadError.value = validation.reason
+/**
+ * 单文件链路：校验 → 图片压缩 → 带真实进度上传 → 交给消息发送链路。
+ * 取消后即使上传响应晚到，也直接丢弃，不生成聊天消息。
+ */
+async function processUploadItem(id: string): Promise<void> {
+  const item = findUploadItem(id)
+  if (!item || item.status !== 'pending') return
+  const { conversationId, senderId } = item
+  if (!conversationId || !senderId) {
+    patchUploadItem(id, { status: 'failed', error: '请先选择会话' })
     return
   }
 
+  patchUploadItem(id, { status: 'uploading', progress: 0, error: undefined })
+  const controller = new AbortController()
+  uploadControllers.set(id, controller)
   try {
-    // 图片发送前压缩（最长边 1280、约 ≤300KB）；gif 由 compressImageFile 原样返回。
-    const payload = isImageFile(file) ? await compressImageFile(file) : file
-    const recheck = validateAttachment(payload)
-    if (!recheck.ok) {
-      if (!uploadError.value) uploadError.value = recheck.reason
+    const validation = validateAttachment(item.file)
+    if (!validation.ok) {
+      patchUploadItem(id, { status: 'failed', error: validation.reason })
       return
     }
+    // 图片发送前压缩（最长边 1280、约 ≤300KB）；gif 由 compressImageFile 原样返回。
+    const payload = isImageFile(item.file) ? await compressImageFile(item.file) : item.file
+    const recheck = validateAttachment(payload)
+    if (!recheck.ok) {
+      patchUploadItem(id, { status: 'failed', error: recheck.reason })
+      return
+    }
+    // 压缩期间可能已离开聊天页/取消：丢弃结果，不再上传。
+    if (findUploadItem(id)?.status !== 'uploading') return
 
-    const uploaded = await filesApi.upload(payload)
+    const uploaded = await filesApi.uploadWithProgress(payload, {
+      signal: controller.signal,
+      onProgress: (percent) => patchUploadItem(id, { progress: percent }),
+    })
+    const current = findUploadItem(id)
+    // 取消或离开聊天页后队列项已被清理：丢弃晚到结果，不再发送。
+    if (!current || current.status !== 'uploading') return
+
+    const msgType = isImageFile(payload) ? 'image' : 'file'
+    const content: FileContent = {
+      fileId: uploaded.fileId,
+      name: uploaded.name,
+      size: uploaded.size,
+      mime: uploaded.mime,
+    }
+    const clientMsgId = crypto.randomUUID()
     const sent = messages.sendFileMessage(
       conversationId,
-      isImageFile(payload) ? 'image' : 'file',
-      {
-        fileId: uploaded.fileId,
-        name: uploaded.name,
-        size: uploaded.size,
-        mime: uploaded.mime,
-      },
+      msgType,
+      content,
       senderId,
-      reply?.messageId,
-      reply?.preview,
+      item.replyTo,
+      item.replyPreview,
+      clientMsgId,
     )
-    if (sent && replyTarget.value === reply) replyTarget.value = null
-    if (!sent && !uploadError.value) uploadError.value = '消息发送失败，请重试'
+    if (!sent) {
+      patchUploadItem(id, {
+        status: 'failed',
+        progress: 100,
+        fileId: uploaded.fileId,
+        clientMsgId,
+        msgType,
+        content,
+        error: '消息发送失败，请重试',
+      })
+      return
+    }
+    // 上传完成只代表已进入消息发送链路；显示「已发送」要等 ack 或补拉确认（见下方 watch）。
+    patchUploadItem(id, {
+      status: 'sending',
+      progress: 100,
+      fileId: uploaded.fileId,
+      clientMsgId,
+      msgType,
+      content,
+      error: undefined,
+    })
+    if (item.replyTo && replyTarget.value?.messageId === item.replyTo) replyTarget.value = null
   } catch (error) {
-    if (!uploadError.value) {
-      uploadError.value = error instanceof ApiError ? error.message : '文件上传失败，请重试'
+    const current = findUploadItem(id)
+    if (!current || current.status === 'cancelled') return
+    const message =
+      error instanceof ApiError
+        ? error.message
+        : error instanceof Error && error.message === '上传已取消'
+          ? '已取消'
+          : '文件上传失败，请重试'
+    patchUploadItem(id, { status: 'failed', error: message })
+  } finally {
+    uploadControllers.delete(id)
+  }
+}
+
+/** 取消上传中的附件：中断请求并标记已取消，响应晚到也不会触发发送。 */
+function cancelUpload(id: string): void {
+  const item = findUploadItem(id)
+  if (!item || item.status !== 'uploading') return
+  uploadControllers.get(id)?.abort()
+  uploadControllers.delete(id)
+  patchUploadItem(id, { status: 'cancelled', error: undefined })
+}
+
+/** 移出等待中的附件（尚未占用上传资源）。 */
+function dismissUpload(id: string): void {
+  const item = findUploadItem(id)
+  if (!item || item.status !== 'pending') return
+  uploadItems.value = uploadItems.value.filter((entry) => entry.id !== id)
+}
+
+/** 单项重试：仅重试失败的那一项。 */
+function retryUpload(id: string): void {
+  const item = findUploadItem(id)
+  if (!item || item.status !== 'failed') return
+  // 迟到的 ack / 补拉可能已确认该消息：已确认就直接置为已发送，不再进入待发队列。
+  if (item.clientMsgId && item.fileId) {
+    const confirmed = messages
+      .messagesOf(item.conversationId)
+      .some((message) => message.clientMsgId === item.clientMsgId)
+    const pending = messages
+      .pendingOf(item.conversationId)
+      .find((entry) => entry.clientMsgId === item.clientMsgId)
+    if (confirmed && !pending) {
+      patchUploadItem(id, { status: 'sent', progress: 100, error: undefined })
+      return
     }
   }
+  // 文件已上传、仅消息发送失败：走消息 store 的既有重发入口，复用原 fileId 与 clientMsgId，
+  // 不重新上传、不创建第二条待发消息。
+  if (item.fileId && item.clientMsgId && item.content && item.msgType) {
+    const clientMsgId = item.clientMsgId
+    const existing = messages
+      .pendingOf(item.conversationId)
+      .find((entry) => entry.clientMsgId === clientMsgId)
+    if (existing) {
+      // 已存在同 clientMsgId 的待发消息：走既有重发入口，不新建待发记录。
+      messages.retrySend(item.conversationId, clientMsgId)
+    } else {
+      // 极端情况（乐观发送在创建待发记录前被拦截）：用原 clientMsgId 重新进入发送链路，保证仍只有一条消息。
+      messages.sendFileMessage(
+        item.conversationId,
+        item.msgType,
+        item.content,
+        item.senderId,
+        item.replyTo,
+        item.replyPreview,
+        clientMsgId,
+      )
+    }
+    const pending = messages
+      .pendingOf(item.conversationId)
+      .find((entry) => entry.clientMsgId === clientMsgId)
+    patchUploadItem(id, {
+      status: pending ? 'sending' : 'failed',
+      error: pending ? undefined : '消息发送失败，请重试',
+    })
+    return
+  }
+  patchUploadItem(id, { status: 'pending', progress: 0, error: undefined })
+  void processUploadQueue()
 }
 
 // 拖拽上传（F-06）：根容器显示投放提示；window 兜底阻止浏览器/Electron 直接打开文件。
@@ -950,7 +1189,8 @@ function onDragEnter(event: DragEvent): void {
 function onDragOver(event: DragEvent): void {
   if (!hasFiles(event.dataTransfer)) return
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = uploadBusy.value ? 'none' : 'copy'
+  const busy = uploadBusy.value || queueBusy.value
+  if (event.dataTransfer) event.dataTransfer.dropEffect = busy ? 'none' : 'copy'
 }
 
 function onDragLeave(event: DragEvent): void {
@@ -964,7 +1204,7 @@ function onDrop(event: DragEvent): void {
   event.preventDefault()
   dragDepth = 0
   dragActive.value = false
-  if (uploadBusy.value) {
+  if (uploadBusy.value || queueBusy.value) {
     uploadError.value = '上传中，请稍候'
     return
   }
@@ -1071,14 +1311,18 @@ function onWindowDrop(event: DragEvent): void {
                 ref="sendBoxRef"
                 :conversation-id="activeId ?? ''"
                 :initial-draft="activeId ? drafts.draftOf(activeId) : ''"
-                :uploading="uploadBusy"
+                :uploading="uploadBusy || queueBusy"
                 :upload-error="uploadError"
+                :upload-items="uploadItems"
                 :emoji-open="activeDrawer === 'emoji'"
                 :reply-to="replyTarget?.preview ?? null"
                 :mention-candidates="mentionCandidates"
                 @send="sendMessage"
                 @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"
+                @cancel-upload="cancelUpload"
+                @retry-upload="retryUpload"
+                @dismiss-upload="dismissUpload"
                 @send-voice="handleVoiceRecorded"
                 @voice-error="onVoiceError"
                 @typing="sendTyping"

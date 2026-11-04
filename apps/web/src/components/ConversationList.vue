@@ -189,17 +189,20 @@ function unreadOf(conversationId: string): number {
 
 /** F-10：置顶/免打扰成功后的轻提示文案，按本次改动的字段决定。 */
 function settingsToastText(
-  settings: { pinned?: boolean; muted?: boolean },
+  settings: { pinned?: boolean; muted?: boolean; markedUnread?: boolean },
   updated: Conversation,
 ): string {
   if (settings.pinned !== undefined) return updated.pinned ? '会话已置顶' : '已取消置顶'
   if (settings.muted !== undefined) return updated.muted ? '已开启消息免打扰' : '已关闭消息免打扰'
+  if (settings.markedUnread !== undefined) {
+    return updated.markedUnread ? '已标为未读' : '已取消未读标记'
+  }
   return '设置已更新'
 }
 
 async function onUpdateSettings(payload: {
   conversationId: string
-  settings: { pinned?: boolean; muted?: boolean }
+  settings: { pinned?: boolean; muted?: boolean; markedUnread?: boolean }
 }): Promise<void> {
   try {
     const updated = await conversationsStore.setMemberSettings(

@@ -101,6 +101,8 @@ export const useMessagesStore = defineStore('messages', () => {
   /** F-34：各会话已同步到的服务端时间（撤回/编辑补齐游标）。 */
   const stateSyncedAtByConversation = ref<Record<string, number>>({})
   const pendingByConversation = ref<Record<string, PendingMessage[]>>({})
+  /** 待发记录状态/重试次数变更的版本号：组件 watcher 依赖它感知原地状态变更（如重试耗尽→failed）。 */
+  const pendingRevision = ref(0)
   const hasMoreByConversation = ref<Record<string, boolean>>({})
   const loadedConversations = ref<Record<string, boolean>>({})
   const loadingInitialByConversation = ref<Record<string, boolean>>({})
@@ -699,6 +701,8 @@ export const useMessagesStore = defineStore('messages', () => {
     clearTimers(pending.clientMsgId)
     if (pending.retries >= RETRY_DELAYS_MS.length) {
       pending.status = 'failed'
+      // 原地变更不会触发依赖 pending 数组的 watcher，显式通知（附件面板据此显示发送失败）。
+      pendingRevision.value += 1
       // F-03：落库「失败」状态，刷新后仍显示可重发。
       persistPending(pending)
       return
@@ -720,10 +724,11 @@ export const useMessagesStore = defineStore('messages', () => {
     senderId: string,
     replyTo?: string,
     replyPreview?: ReplyPreviewLike,
+    clientMsgId?: string,
   ): boolean {
     if (!conversationId || !senderId) return false
     const pending: PendingMessage = {
-      clientMsgId: crypto.randomUUID(),
+      clientMsgId: clientMsgId || crypto.randomUUID(),
       conversationId,
       senderId,
       msgType,
@@ -770,6 +775,7 @@ export const useMessagesStore = defineStore('messages', () => {
     senderId: string,
     replyTo?: string,
     replyPreview?: ReplyPreviewLike,
+    clientMsgId?: string,
   ): boolean {
     if (
       !content.fileId ||
@@ -781,7 +787,15 @@ export const useMessagesStore = defineStore('messages', () => {
       console.warn('[messages] 文件消息 content 不完整，已拦截')
       return false
     }
-    return sendContent(conversationId, msgType, { ...content }, senderId, replyTo, replyPreview)
+    return sendContent(
+      conversationId,
+      msgType,
+      { ...content },
+      senderId,
+      replyTo,
+      replyPreview,
+      clientMsgId,
+    )
   }
 
   /** 乐观发送语音消息（F-28）：fileId 必须来自已上传的 webm 文件，时长 1000~60000 毫秒。 */
@@ -805,6 +819,7 @@ export const useMessagesStore = defineStore('messages', () => {
     if (!pending || pending.status !== 'failed') return
     pending.status = 'sending'
     pending.retries = 0
+    pendingRevision.value += 1
     // F-03：状态回到 sending 也要同步缓存，避免刷新后仍显示失败。
     persistPending(pending)
     transmit(pending)
@@ -962,6 +977,7 @@ export const useMessagesStore = defineStore('messages', () => {
         if (pending) {
           clearTimers(pending.clientMsgId)
           pending.status = 'failed'
+          pendingRevision.value += 1
           // F-03：服务端明确拒绝，也要把失败状态落库。
           persistPending(pending)
         }
@@ -1112,6 +1128,7 @@ export const useMessagesStore = defineStore('messages', () => {
     lastSyncedAt,
     messagesOf,
     pendingOf,
+    pendingRevision,
     hasMoreOf,
     isLoaded,
     isLoadingMore,
