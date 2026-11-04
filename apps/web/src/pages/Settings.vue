@@ -23,7 +23,14 @@ import {
 import type { AppIconName } from '../core/icons'
 import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
-import { getServerUrl, isPackagedShell, resetServerUrl, resolveApiBase, setServerUrl } from '../core/config'
+import {
+  getServerUrl,
+  isPackagedShell,
+  resetServerUrl,
+  resolveApiBase,
+  resolveServerOrigin,
+  setServerUrl,
+} from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { compressImageFile } from '../core/imageCompress'
 import { changePasswordFormError } from '../core/passwordRules'
@@ -35,6 +42,8 @@ import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { downloadAndInstallApk, isAndroidUpdaterAvailable, subscribeApkUpdateProgress } from '../core/updateAndroid'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
+import { useDraftsStore } from '../stores/drafts'
+import { useFriendsStore } from '../stores/friends'
 import { useMessagesStore } from '../stores/messages'
 import { useSettingsStore } from '../stores/settings'
 
@@ -47,6 +56,8 @@ const auth = useAuthStore()
 const conversations = useConversationsStore()
 const messages = useMessagesStore()
 const settings = useSettingsStore()
+const friends = useFriendsStore()
+const drafts = useDraftsStore()
 
 type SectionId = 'profile' | 'account' | 'notifications' | 'appearance' | 'connection'
 
@@ -149,14 +160,21 @@ const savedServerUrl = ref(getServerUrl())
 const serverUrlInput = ref(savedServerUrl.value)
 const serverMessage = ref('')
 const savingServer = ref(false)
+const switchingServer = ref(false)
 const currentServerLabel = ref(savedServerUrl.value || '与当前页面同源')
 
 const logoutConfirmOpen = ref(false)
 const loggingOut = ref(false)
 
-/** 保存服务器地址：校验 → 持久化 → toast 提示 → 断开旧连接并按新地址重连。 */
+/**
+ * 保存服务器地址：
+ * - origin 未变化：只断开并按新地址重连，保留登录态；
+ * - origin 变化：先隔离旧登录态（断连 → 清令牌/WS 认证 → 清会话/消息缓存 → 回登录页），
+ *   新服务器的 HTTP/WS 请求不会带上旧令牌。
+ */
 function saveServer(): void {
-  if (savingServer.value) return
+  if (savingServer.value || switchingServer.value) return
+  const previousOrigin = resolveServerOrigin()
   const value = serverUrlInput.value.trim()
   if (value.length > 0 && !setServerUrl(value)) {
     serverMessage.value = '地址无效：需以 http:// 或 https:// 开头'
@@ -165,17 +183,42 @@ function saveServer(): void {
   if (value.length === 0) {
     resetServerUrl()
   }
-  savingServer.value = true
   serverMessage.value = ''
   savedServerUrl.value = getServerUrl()
   currentServerLabel.value = savedServerUrl.value || '与当前页面同源'
   serverUrlInput.value = savedServerUrl.value
+  const nextOrigin = resolveServerOrigin()
+  if (previousOrigin !== nextOrigin) {
+    void switchServer()
+    return
+  }
+  savingServer.value = true
   if (chatWs.state !== 'idle' && chatWs.state !== 'closed') {
     chatWs.disconnect(1000, 'server url changed')
   }
   chatWs.connect()
   savingServer.value = false
   showToast('服务器地址已保存，正在重新连接', 'success')
+}
+
+/** 服务器 origin 变化：断开旧连接、清空旧登录态与缓存，回登录页重新登录（F-34）。 */
+async function switchServer(): Promise<void> {
+  switchingServer.value = true
+  try {
+    chatWs.disconnect(1000, 'server switched')
+    // 新服务器的 HTTP/WS 请求不得携带旧令牌：清内存令牌与 WS 认证。
+    chatWs.setAuth(null, null)
+    auth.clearSession()
+    conversations.clear()
+    friends.clear()
+    messages.clear()
+    drafts.clear()
+    await clearAllData()
+    showToast('服务器已切换，请重新登录', 'success')
+    await router.replace({ name: 'login', query: { notice: '服务器地址已切换，请重新登录' } })
+  } finally {
+    switchingServer.value = false
+  }
 }
 
 /** 断线后手动重连（与全局 ConnectionBanner 的「重试」能力一致）。 */
@@ -916,13 +959,14 @@ async function saveProfile(): Promise<void> {
                 <button
                   type="button"
                   class="settings-btn settings-btn--primary"
-                  :disabled="savingServer"
+                  :disabled="savingServer || switchingServer"
                   @click="saveServer"
                 >
-                  保存
+                  {{ switchingServer ? '切换中…' : '保存' }}
                 </button>
               </div>
               <p class="settings-field__hint">当前：{{ currentServerLabel }}</p>
+              <p class="settings-field__hint">切换服务器地址会退出当前登录，需要在新服务器重新登录。</p>
               <p v-if="serverMessage" class="settings-field__error" role="alert">{{ serverMessage }}</p>
             </SettingsRow>
           </SettingsGroup>

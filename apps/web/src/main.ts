@@ -31,6 +31,8 @@ const drafts = useDraftsStore()
  */
 function cleanupSession(): void {
   chatWs.disconnect(1000, 'session cleanup')
+  // 切换账号/登录失效后不能让重连再携带旧令牌。
+  chatWs.setAuth(null, null)
   auth.clearSession()
   conversations.clear()
   friends.clear()

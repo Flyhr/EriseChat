@@ -98,6 +98,17 @@ export function getServerUrl(): string {
   return readStoredServerUrl() ?? readInjectedServerUrl() ?? ''
 }
 
+/**
+ * 实际生效的服务器 origin（未配置时回退当前页面 origin）。
+ * 仅当 origin 变化时才需要隔离旧登录态（F-34）。
+ */
+export function resolveServerOrigin(url: string = getServerUrl()): string {
+  const normalized = normalizeServerUrl(url)
+  if (normalized) return normalized
+  if (typeof window === 'undefined') return ''
+  return window.location.origin
+}
+
 /** REST 基础路径：配置了服务器地址时为 `<server>/api`，否则退回构建期/同源默认值。 */
 export function resolveApiBase(): string {
   const server = readStoredServerUrl() ?? readInjectedServerUrl()
