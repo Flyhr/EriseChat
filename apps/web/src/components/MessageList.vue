@@ -38,6 +38,12 @@ const props = defineProps<{
   mentionNames?: readonly string[]
   /** F-25：当前用户昵称（用于气泡「提到你」标记）。 */
   selfDisplayName?: string
+  /** F-37：定位窗口模式（独立于正常时间线，不提供加载更早入口）。 */
+  locateMode?: boolean
+  /** F-37：定位窗口上方是否还有更早消息（仅提示）。 */
+  locateHasOlder?: boolean
+  /** F-37：定位窗口下方是否还有更新消息。 */
+  locateHasNewer?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -327,7 +333,15 @@ function scrollToMessage(messageId: string): boolean {
   return true
 }
 
-defineExpose({ scrollToMessage })
+function getScrollTop(): number {
+  return container.value?.scrollTop ?? 0
+}
+
+function setScrollTop(value: number): void {
+  if (container.value) container.value.scrollTop = Math.max(0, value)
+}
+
+defineExpose({ scrollToMessage, scrollToBottom, getScrollTop, setScrollTop })
 
 // 切换会话：窗口重置到末尾、重新贴底、清浮标并上报，父组件据此推进新会话的已读。
 watch(
@@ -349,6 +363,13 @@ watch(
 watch(
   () => props.messages.length,
   (next, previous) => {
+    if (props.locateMode) {
+      windowRange.value = initialWindowRange(next, INITIAL_WINDOW_SIZE)
+      lastFirstMessageId.value = firstMessageId()
+      newMessageCount.value = 0
+      return
+    }
+
     const delta = next - previous
 
     if (delta < 0) {
@@ -430,7 +451,7 @@ onMounted(() => {
   <div class="message-list-wrap">
     <div ref="container" class="message-list" @scroll="onScroll">
       <button
-        v-if="hasMore || renderedRange.start > 0"
+        v-if="!locateMode && (hasMore || renderedRange.start > 0)"
         class="message-list__more"
         type="button"
         :disabled="Boolean(loading) && renderedRange.start === 0"
@@ -438,7 +459,10 @@ onMounted(() => {
       >
         {{ loading && renderedRange.start === 0 ? '加载中…' : '加载更早消息' }}
       </button>
-      <p v-else-if="messages.length > 0" class="message-list__top">没有更早的消息了</p>
+      <p v-else-if="!locateMode && messages.length > 0" class="message-list__top">没有更早的消息了</p>
+      <p v-if="locateMode" class="message-list__gap">
+        {{ locateHasOlder ? '上方还有更早的未加载消息，查看更早请点「回到最新」后上滑' : '已到这段历史的最早一条' }}
+      </p>
 
       <template v-for="item in items" :key="item.key">
         <div v-if="item.kind === 'separator'" class="message-list__date">
@@ -477,8 +501,12 @@ onMounted(() => {
       />
     </div>
 
+    <p v-if="locateMode && locateHasNewer" class="message-list__gap">
+      下方还有更新的消息，点「回到最新」查看
+    </p>
+
     <button
-      v-if="shouldShowNewMessageBadge(stickToBottom, newMessageCount)"
+      v-if="!locateMode && shouldShowNewMessageBadge(stickToBottom, newMessageCount)"
       type="button"
       class="message-list__badge"
       @click="jumpToBottom"
@@ -580,5 +608,15 @@ onMounted(() => {
   .message-list__date {
     font-size: var(--ec-font-size-small);
   }
+}
+.message-list__gap {
+  margin: var(--ec-space-2) var(--ec-space-4);
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px dashed var(--ec-border);
+  border-radius: var(--ec-radius-panel);
+  color: var(--ec-text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
 }
 </style>

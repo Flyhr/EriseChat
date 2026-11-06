@@ -143,7 +143,13 @@ async function send(path: string, options: RequestOptions, acceptJson: boolean):
 
     if (!response.ok) {
       // 401：token 失效/被撤销 → 清登录态并回登录页（认证接口自身 401 只抛错给页面提示）。
-      if (response.status === 401 && unauthorizedHandler !== null && !isAuthEndpoint(path)) {
+      // 旧请求的 401 不能清掉新登录态：只有 Bearer token 仍是当前 token 时才退出登录。
+      if (
+        response.status === 401 &&
+        unauthorizedHandler !== null &&
+        !isAuthEndpoint(path) &&
+        getAccessToken() === token
+      ) {
         unauthorizedHandler()
       }
       throw new ApiError(response.status, await readErrorBody(response))

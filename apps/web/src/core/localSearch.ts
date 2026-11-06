@@ -31,35 +31,76 @@ function normalizeLimit(limit: number | undefined): number {
   return value > 0 ? value : LOCAL_SEARCH_LIMIT
 }
 
+/** F-37：本地搜索选项——与服务端的发送人/时间筛选、链接模式保持一致。 */
+export interface LocalSearchOptions {
+  limit?: number
+  senderId?: string
+  from?: number
+  to?: number
+  linkOnly?: boolean
+}
+
+const HTTP_URL_PATTERN = /https?:\/\/[^\s<>"'`]+/gi
+
+/** 提取文本中的 HTTP/HTTPS URL（去尾部常见标点）。 */
+export function extractHttpUrls(text: string): string[] {
+  const urls: string[] = []
+  for (const match of text.matchAll(HTTP_URL_PATTERN)) {
+    const url = match[0].replace(/[.,;:!?)\]}，。；：！？）】]+$/u, '')
+    if (url.length > 'https://'.length) urls.push(url)
+  }
+  return urls
+}
+
+function matchesLocalFilters(message: Message, options: LocalSearchOptions): boolean {
+  const senderId = options.senderId?.trim()
+  if (senderId && message.senderId !== senderId) return false
+  const { from, to } = options
+  if (from !== undefined && message.createdAt < from) return false
+  if (to !== undefined && message.createdAt > to) return false
+  return true
+}
+
+function matchesLocalSearch(message: Message, keyword: string, options: LocalSearchOptions): boolean {
+  if (message.deletedAt != null) return false
+  if (!matchesLocalFilters(message, options)) return false
+  if (options.linkOnly) {
+    if (message.msgType !== 'text' || typeof message.content !== 'string') return false
+    return extractHttpUrls(message.content).some((url) => url.toLowerCase().includes(keyword))
+  }
+  const text = searchableTextOf(message)
+  return text !== null && text.toLowerCase().includes(keyword)
+}
+
 /**
  * 在已加载消息中搜索关键词：去空白后为空返回 []；命中按 seq 降序、最多 limit 条。
- * 只读入参，不修改 messages 数组或其中对象。
+ * F-37：应用与服务端相同的发送人/时间筛选与显式链接模式；只读入参。
  */
 export function searchLocalMessages(
   messages: readonly Message[],
   query: string,
-  options: { limit?: number } = {},
+  options: LocalSearchOptions = {},
 ): Message[] {
   const keyword = query.trim().toLowerCase()
   if (!keyword) return []
 
-  const hits = messages.filter((message) => {
-    const text = searchableTextOf(message)
-    return text !== null && text.toLowerCase().includes(keyword)
-  })
-
+  const hits = messages.filter((message) => matchesLocalSearch(message, keyword, options))
   hits.sort((left, right) => right.seq - left.seq)
   return hits.slice(0, normalizeLimit(options.limit))
 }
 
-/** 命中总数（不受 limit 截断，用于「本地 N 条」提示）。 */
-export function countLocalMatches(messages: readonly Message[], query: string): number {
+/** 命中总数（不受 limit 截断）；筛选/链接模式与 searchLocalMessages 一致。 */
+export function countLocalMatches(
+  messages: readonly Message[],
+  query: string,
+  options: LocalSearchOptions = {},
+): number {
   const keyword = query.trim().toLowerCase()
   if (!keyword) return 0
-  return messages.reduce((total, message) => {
-    const text = searchableTextOf(message)
-    return text !== null && text.toLowerCase().includes(keyword) ? total + 1 : total
-  }, 0)
+  return messages.reduce(
+    (total, message) => (matchesLocalSearch(message, keyword, options) ? total + 1 : total),
+    0,
+  )
 }
 
 /**

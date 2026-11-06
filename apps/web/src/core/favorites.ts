@@ -39,6 +39,8 @@ export interface FavoriteRecord {
   createdAt: number
   /** 收藏时间（UTC 毫秒），列表按此倒序。 */
   favoritedAt: number
+  /** F-38：已导入的服务端来源（如服务器 origin）；undefined 表示尚未导入，仍只存本机。 */
+  migratedTo?: string
 }
 
 /** 收藏 ID：账号 + 消息 ID，保证重复点击不会产生两条记录。 */

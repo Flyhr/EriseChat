@@ -16,7 +16,7 @@ import type {
   VoiceContent,
 } from '../types/frames'
 import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
-import { messagesApi } from '../api/messages'
+import { messagesApi, type MessageContextPage } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
 import { MAX_TEXT_LENGTH, config } from '../core/config'
 import {
@@ -222,19 +222,26 @@ export const useMessagesStore = defineStore('messages', () => {
     persistMessages([updated])
   }
 
+  /** F-37：最近一次实时撤回/编辑帧的补丁（供定位窗口等非缓存视图同步）。 */
+  const lastMessagePatch = ref<{
+    conversationId: string
+    messageId: string
+    patch: Partial<Message>
+  } | null>(null)
+
   function handleRecalled(frame: MessageRecalledFrame): void {
     // 撤回后内容为空文本、不再带文件信息；deletedAt 非空即视为已撤回。
-    patchStoredMessage(frame.conversationId, frame.messageId, {
-      content: '',
-      deletedAt: frame.deletedAt,
-    })
+    const patch = { content: '', deletedAt: frame.deletedAt }
+    // F-37：定位窗口等临时视图要靠原始帧补丁更新，不能依赖消息是否已在缓存中。
+    lastMessagePatch.value = { conversationId: frame.conversationId, messageId: frame.messageId, patch }
+    patchStoredMessage(frame.conversationId, frame.messageId, patch)
   }
 
   function handleEdited(frame: MessageEditedFrame): void {
-    patchStoredMessage(frame.conversationId, frame.messageId, {
-      content: frame.content,
-      editedAt: frame.editedAt,
-    })
+    const patch = { content: frame.content, editedAt: frame.editedAt }
+    // F-37：定位窗口等临时视图要靠原始帧补丁更新，不能依赖消息是否已在缓存中。
+    lastMessagePatch.value = { conversationId: frame.conversationId, messageId: frame.messageId, patch }
+    patchStoredMessage(frame.conversationId, frame.messageId, patch)
   }
 
   /** 合并服务端事实消息：去重 + 按 seq 升序，并持久化消息与游标。 */
@@ -463,6 +470,21 @@ export const useMessagesStore = defineStore('messages', () => {
         [conversationId]: false,
       }
     }
+  }
+
+  /**
+   * F-36：加载目标消息附近的上下文窗口并合并进缓存。
+   * 只补充历史消息，不推进 lastSeq / 同步水位，避免历史跳转被当成实时补拉。
+   */
+  /**
+   * F-37：按目标读取定位上下文窗口。定位窗口只用于展示，不合并进会话时间线、
+   * 不写 IndexedDB，也不推进 lastSeq / 同步水位 / 历史分页起点。
+   */
+  async function loadContextAround(
+    conversationId: string,
+    target: { messageId?: string; seq?: number; before?: number; after?: number },
+  ): Promise<MessageContextPage> {
+    return messagesApi.getContext(conversationId, target)
   }
 
   function isSameContent(a: Message['content'], b: Message['content']): boolean {
@@ -1129,6 +1151,7 @@ export const useMessagesStore = defineStore('messages', () => {
     messagesOf,
     pendingOf,
     pendingRevision,
+    lastMessagePatch,
     hasMoreOf,
     isLoaded,
     isLoadingMore,
@@ -1139,6 +1162,7 @@ export const useMessagesStore = defineStore('messages', () => {
     restoreFromCache,
     loadInitial,
     loadMore,
+    loadContextAround,
     syncAll,
     sendText,
     sendFileMessage,

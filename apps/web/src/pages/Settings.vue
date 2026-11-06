@@ -29,6 +29,7 @@ import {
   resetServerUrl,
   resolveApiBase,
   resolveServerOrigin,
+  resolveWsUrl,
   setServerUrl,
 } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
@@ -40,6 +41,11 @@ import { shouldOfferUpdate, platformArtifactOf, updatePromptOf } from '../core/u
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { downloadAndInstallApk, isAndroidUpdaterAvailable, subscribeApkUpdateProgress } from '../core/updateAndroid'
+import {
+  isAndroidBackgroundAvailable,
+  startBackgroundNotifications,
+  stopBackgroundNotifications,
+} from '../core/backgroundNotifications'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useDraftsStore } from '../stores/drafts'
@@ -136,6 +142,9 @@ function sectionSummaryOf(id: SectionId): string {
     case 'account':
       return auth.user?.email ?? '未登录'
     case 'notifications':
+      if (androidBackgroundAvailable) {
+        return `后台消息提醒${settings.androidBackgroundNotificationsEnabled ? '开' : '关'} · 提示音${settings.soundEnabled ? '开' : '关'}`
+      }
       return `桌面通知${settings.desktopNotificationsEnabled ? '开' : '关'} · 提示音${settings.soundEnabled ? '开' : '关'}`
     case 'appearance':
       return '浅色主题'
@@ -146,6 +155,9 @@ function sectionSummaryOf(id: SectionId): string {
 
 // 桌面通知开关请求进行中（防止重复点击/重复申请权限）。
 const notificationBusy = ref(false)
+// Android 前台服务后台消息提醒：仅原生壳内可用。
+const androidBackgroundAvailable = isAndroidBackgroundAvailable()
+const backgroundBusy = ref(false)
 
 const wsState = ref<WsState>(chatWs.state)
 let unsubscribeWs: (() => void) | null = null
@@ -521,6 +533,47 @@ async function toggleDesktopNotifications(): Promise<void> {
   }
 }
 
+/**
+ * 切换 Android 后台消息提醒：开启时先请求通知权限，再启动原生前台服务；
+ * 授权失败保持关闭并提示，不写成功状态。
+ */
+async function toggleAndroidBackgroundNotifications(): Promise<void> {
+  if (backgroundBusy.value) return
+  if (settings.androidBackgroundNotificationsEnabled) {
+    backgroundBusy.value = true
+    try {
+      await stopBackgroundNotifications()
+      settings.setAndroidBackgroundNotificationsEnabled(false)
+      showToast('后台消息提醒已关闭', 'success')
+    } finally {
+      backgroundBusy.value = false
+    }
+    return
+  }
+  if (!auth.isLoggedIn || !auth.accessToken || !auth.user) {
+    showToast('请先登录', 'error')
+    return
+  }
+  backgroundBusy.value = true
+  try {
+    const result = await startBackgroundNotifications({
+      apiBase: resolveApiBase(),
+      wsUrl: resolveWsUrl(),
+      token: auth.accessToken,
+      deviceId: auth.deviceId,
+      userId: auth.user.userId,
+    })
+    if (!result.started) {
+      showToast(result.permission === false ? '通知权限未开启' : '后台消息提醒开启失败', 'error')
+      return
+    }
+    settings.setAndroidBackgroundNotificationsEnabled(true)
+    showToast('后台消息提醒已开启', 'success')
+  } finally {
+    backgroundBusy.value = false
+  }
+}
+
 /** 切换提示音（即时生效并持久化）。 */
 function toggleSound(): void {
   settings.setSoundEnabled(!settings.soundEnabled)
@@ -886,12 +939,20 @@ async function saveProfile(): Promise<void> {
         <!-- 通知与提醒 -->
         <div v-else-if="activeSectionId === 'notifications'" class="settings-content__body">
           <SettingsGroup title="消息提醒">
-            <SettingsRow label="桌面通知">
+            <SettingsRow v-if="!androidBackgroundAvailable" label="桌面通知">
               <SettingsSwitch
                 :model-value="settings.desktopNotificationsEnabled"
                 label="桌面通知"
                 :disabled="notificationBusy"
                 @update:model-value="toggleDesktopNotifications"
+              />
+            </SettingsRow>
+            <SettingsRow v-else label="后台消息提醒">
+              <SettingsSwitch
+                :model-value="settings.androidBackgroundNotificationsEnabled"
+                label="后台消息提醒"
+                :disabled="backgroundBusy"
+                @update:model-value="toggleAndroidBackgroundNotifications"
               />
             </SettingsRow>
             <SettingsRow label="提示音">

@@ -31,6 +31,21 @@ export const useSearchStore = defineStore('search', () => {
   const hasMore = ref(false)
   /** F-34：全局搜索翻页游标（服务端返回，跨会话不重不漏）。 */
   const nextCursor = ref<{ createdAt: number; messageId: string } | null>(null)
+  /** F-36：发送人筛选（用户 ID，空串 = 不筛选）。 */
+  const senderFilter = ref('')
+  /** F-36：发送时间范围（毫秒时间戳，含端点；null = 不限）。 */
+  const fromFilter = ref<number | null>(null)
+  const toFilter = ref<number | null>(null)
+  /** F-37：显式链接模式（只匹配消息中识别出的 HTTP/HTTPS URL）。 */
+  const linkOnly = ref(false)
+
+  /** 是否启用了筛选（用于面板展示清除按钮）。 */
+  const filtersActive = computed(
+    () =>
+      senderFilter.value.trim().length > 0 ||
+      fromFilter.value !== null ||
+      toFilter.value !== null,
+  )
   /** F-19：会话内本地已加载消息的即时命中（0 延迟展示；全局搜索恒为空）。 */
   const localResults = ref<Message[]>([])
   /** F-19：本地结果对应的已提交关键词（用于高亮，避免与输入中间态不一致）。 */
@@ -72,10 +87,33 @@ export const useSearchStore = defineStore('search', () => {
       return
     }
     const loaded = useMessagesStore().messagesOf(conversationId)
-    localResults.value = searchLocalMessages(loaded, keyword)
+    const options = {
+      senderId: senderFilter.value.trim() || undefined,
+      from: fromFilter.value ?? undefined,
+      to: toFilter.value ?? undefined,
+      linkOnly: linkOnly.value,
+    }
+    localResults.value = searchLocalMessages(loaded, keyword, options)
     localQuery.value = keyword
-    localTotal.value = countLocalMatches(loaded, keyword)
+    localTotal.value = countLocalMatches(loaded, keyword, options)
     offlineFallback.value = false
+  }
+
+  /** F-36：更新筛选条件——重置分页并按当前关键词重新搜索。 */
+  function setFilters(next: { senderId?: string; from?: number | null; to?: number | null }): void {
+    senderFilter.value = (next.senderId ?? '').trim()
+    fromFilter.value = next.from ?? null
+    toFilter.value = next.to ?? null
+    resetResults()
+    if (query.value.trim()) search()
+  }
+
+  /** F-37：切换显式链接模式——重置分页并按当前关键词重新搜索（本地即时结果同样按该模式）。 */
+  function setLinkOnly(value: boolean): void {
+    if (linkOnly.value === value) return
+    linkOnly.value = value
+    resetResults()
+    if (query.value.trim()) search()
   }
 
   function resetResults(): void {
@@ -94,6 +132,10 @@ export const useSearchStore = defineStore('search', () => {
   function openGlobal(): void {
     scopeConversationId.value = null
     query.value = ''
+    senderFilter.value = ''
+    fromFilter.value = null
+    toFilter.value = null
+    linkOnly.value = false
     resetResults()
     isOpen.value = true
   }
@@ -101,6 +143,10 @@ export const useSearchStore = defineStore('search', () => {
   function openInConversation(conversationId: string): void {
     scopeConversationId.value = conversationId
     query.value = ''
+    senderFilter.value = ''
+    fromFilter.value = null
+    toFilter.value = null
+    linkOnly.value = false
     resetResults()
     isOpen.value = true
   }
@@ -134,6 +180,12 @@ export const useSearchStore = defineStore('search', () => {
         beforeSeq: before?.beforeSeq,
         beforeCreatedAt: before?.beforeCreatedAt,
         beforeMessageId: before?.beforeMessageId,
+        senderId: senderFilter.value.trim() || undefined,
+        from: fromFilter.value ?? undefined,
+        to: toFilter.value ?? undefined,
+        // F-36：新客户端全局搜索显式启用发送时间游标（旧客户端不传 timeCursor 走旧规则）。
+        timeCursor: isGlobal.value ? true : undefined,
+        linkOnly: linkOnly.value ? true : undefined,
         limit: SEARCH_PAGE_SIZE,
       })
       if (seq !== requestSeq) return
@@ -229,6 +281,13 @@ export const useSearchStore = defineStore('search', () => {
     results,
     hasMore,
     nextCursor,
+    senderFilter,
+    fromFilter,
+    toFilter,
+    filtersActive,
+    setFilters,
+    linkOnly,
+    setLinkOnly,
     localResults,
     localQuery,
     localTotal,

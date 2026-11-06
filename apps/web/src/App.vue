@@ -8,11 +8,21 @@ import SearchDialog from './components/SearchDialog.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
+import { resolveApiBase, resolveWsUrl } from './core/config'
+import {
+  isAndroidBackgroundAvailable,
+  setBackgroundConversation,
+  startBackgroundNotifications,
+  stopBackgroundNotifications,
+  subscribeBackgroundNotificationClick,
+  type BackgroundNotifyConfig,
+} from './core/backgroundNotifications'
 import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
 import { useFavoritesStore } from './stores/favorites'
 import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
+import { useSettingsStore } from './stores/settings'
 import { useVisualViewport } from './core/useVisualViewport'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
@@ -26,11 +36,13 @@ const conversations = useConversationsStore()
 const favorites = useFavoritesStore()
 const friends = useFriendsStore()
 const presence = usePresenceStore()
+const settings = useSettingsStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
 const { keyboardOpen } = useVisualViewport()
 const wsState = ref<WsState>(chatWs.state)
 let unsubscribe: (() => void) | null = null
 let unsubscribeNotificationClick: (() => void) | null = null
+let unsubscribeBackgroundClick: (() => void) | null = null
 
 const isBlankLayout = computed(() => route.meta.layout === 'blank')
 
@@ -49,6 +61,28 @@ function openConversationFromNotification(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
 }
 
+/** Android 后台消息提醒：登录态与服务器地址就绪后启动原生前台服务，否则停止。 */
+function backgroundNotifyConfig(): BackgroundNotifyConfig | null {
+  if (!auth.isLoggedIn || !auth.accessToken || !auth.user) return null
+  return {
+    apiBase: resolveApiBase(),
+    wsUrl: resolveWsUrl(),
+    token: auth.accessToken,
+    deviceId: auth.deviceId,
+    userId: auth.user.userId,
+  }
+}
+
+async function syncAndroidBackgroundNotifications(): Promise<void> {
+  if (!isAndroidBackgroundAvailable()) return
+  const config = backgroundNotifyConfig()
+  if (settings.androidBackgroundNotificationsEnabled && config) {
+    await startBackgroundNotifications(config)
+  } else {
+    await stopBackgroundNotifications()
+  }
+}
+
 onMounted(() => {
   presence.subscribeRealtime()
   // F-17：好友的 REST 全量拉取 + friend.changed 增量推送（登录后/重连 authed 时拉取）。
@@ -64,7 +98,29 @@ onMounted(() => {
   })
   // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
   unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)
+  // Android：原生前台服务通知点击回传（WebView 内无浏览器 Notification API）。
+  unsubscribeBackgroundClick = subscribeBackgroundNotificationClick(openConversationFromNotification)
+  void syncAndroidBackgroundNotifications()
 })
+
+// Android 后台消息提醒：登录/退出或切换账号时同步原生前台服务状态。
+watch(
+  () => auth.user?.userId ?? '',
+  () => {
+    void syncAndroidBackgroundNotifications()
+  },
+)
+
+// Android 后台消息提醒：记录当前打开的会话，供原生服务在前台时抑制通知。
+watch(
+  () => (route.name === 'chat' && typeof route.params.conversationId === 'string'
+    ? route.params.conversationId
+    : null),
+  (conversationId) => {
+    setBackgroundConversation(conversationId)
+  },
+  { immediate: true },
+)
 
 // F-26：登录后加载当前账号本地收藏；登出/切账号只清内存（IndexedDB 保留，换账号可见性由 ownerId 过滤）。
 watch(
@@ -86,6 +142,7 @@ watch(
 onBeforeUnmount(() => {
   unsubscribe?.()
   unsubscribeNotificationClick?.()
+  unsubscribeBackgroundClick?.()
 })
 
 function reconnect(): void {

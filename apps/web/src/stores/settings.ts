@@ -12,12 +12,15 @@ export interface ClientSettings {
   soundEnabled: boolean
   /** 窗口不可见时弹系统通知（桌面壳走 preload，Web 版走浏览器 Notification）。 */
   desktopNotificationsEnabled: boolean
+  /** Android 应用在后台时由原生前台服务接收消息并发送系统通知。 */
+  androidBackgroundNotificationsEnabled: boolean
 }
 
 /** 默认值：提示音开启、系统通知关闭（需要用户显式授权/开启）。 */
 export const DEFAULT_SETTINGS: ClientSettings = {
   soundEnabled: true,
   desktopNotificationsEnabled: false,
+  androidBackgroundNotificationsEnabled: false,
 }
 
 /** 未保存过偏好时的默认设置：桌面壳的系统通知是原生能力、无需浏览器授权，默认开启。 */
@@ -37,6 +40,9 @@ export function parseStoredSettings(raw: string | null | undefined): ClientSetti
     if (typeof parsed.soundEnabled === 'boolean') result.soundEnabled = parsed.soundEnabled
     if (typeof parsed.desktopNotificationsEnabled === 'boolean') {
       result.desktopNotificationsEnabled = parsed.desktopNotificationsEnabled
+    }
+    if (typeof parsed.androidBackgroundNotificationsEnabled === 'boolean') {
+      result.androidBackgroundNotificationsEnabled = parsed.androidBackgroundNotificationsEnabled
     }
   } catch {
     // 损坏的 JSON 按默认值处理，下一次保存会覆盖。
@@ -61,11 +67,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const stored = readStoredSettings()
   const soundEnabled = ref(stored.soundEnabled)
   const desktopNotificationsEnabled = ref(stored.desktopNotificationsEnabled)
+  const androidBackgroundNotificationsEnabled = ref(stored.androidBackgroundNotificationsEnabled)
 
   function persist(): void {
     writeStoredSettings({
       soundEnabled: soundEnabled.value,
       desktopNotificationsEnabled: desktopNotificationsEnabled.value,
+      androidBackgroundNotificationsEnabled: androidBackgroundNotificationsEnabled.value,
     })
   }
 
@@ -81,10 +89,18 @@ export const useSettingsStore = defineStore('settings', () => {
     persist()
   }
 
+  function setAndroidBackgroundNotificationsEnabled(value: boolean): void {
+    if (androidBackgroundNotificationsEnabled.value === value) return
+    androidBackgroundNotificationsEnabled.value = value
+    persist()
+  }
+
   return {
     soundEnabled,
     desktopNotificationsEnabled,
+    androidBackgroundNotificationsEnabled,
     setSoundEnabled,
     setDesktopNotificationsEnabled,
+    setAndroidBackgroundNotificationsEnabled,
   }
 })

@@ -40,10 +40,15 @@ const senderName = computed(() => {
 
 const timeText = computed(() => formatTime(props.message.createdAt))
 
-/** 摘要：以命中为中心截取，再按关键词切高亮片段。 */
+/** 摘要：文本取正文、图片/文件取文件名；以命中为中心截取，再按关键词切高亮片段。 */
 const segments = computed(() => {
   const content = props.message.content
-  const text = typeof content === 'string' ? content : ''
+  const text =
+    typeof content === 'string'
+      ? content
+      : content && typeof content === 'object' && 'name' in content && typeof content.name === 'string'
+        ? content.name
+        : ''
   const snippet = snippetOf(text, props.query)
   return highlightSegments(snippet, props.query)
 })

@@ -62,7 +62,7 @@ export function uploadWithProgress(
         }
         return
       }
-      if (xhr.status === 401) notifyUnauthorized()
+      if (xhr.status === 401 && getAccessToken() === token) notifyUnauthorized()
       let body: ApiErrorBody = {}
       try {
         body = xhr.responseText ? (JSON.parse(xhr.responseText) as ApiErrorBody) : {}

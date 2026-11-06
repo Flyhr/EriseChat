@@ -28,6 +28,7 @@ export type FrameType =
   | 'typing'
   | 'presence'
   | 'friend.changed'
+  | 'favorite.changed'
   | 'kicked'
   | 'error'
 
@@ -164,6 +165,8 @@ export interface Conversation {
    * 不撤销对端已读回执、不增加真实未读数；同账号多端通过 conv.updated 同步。
    */
   markedUnread?: boolean
+  /** 群置顶消息（F-36）：每群最多一条；已撤回的置顶消息由服务端置空、不再下发 */
+  pinnedMessage?: Message | null
   /** 群公告（F-14）：≤500 字符、支持换行；null/缺省 = 无公告；单聊恒为 null */
   announcement?: string | null
   /** 群头像（F-23）：files.id；null/缺省 = 未设置；仅群聊可能非空，单聊恒为 null */
@@ -394,6 +397,25 @@ export interface FriendChangedFrame extends FrameBase {
   request?: FriendRequest
 }
 
+/** 个人收藏条目（F-38，protocol §7 第 13 条）：available=false 时 message 恒为 null。 */
+export interface FavoriteItem {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  senderName: string
+  available: boolean
+  favoritedAt: number
+  message: Message | null
+}
+
+/** 个人收藏变更推送（F-38，protocol §4.10）：只推本人连接，收到后重新拉取列表。 */
+export interface FavoriteChangedFrame extends FrameBase {
+  type: 'favorite.changed'
+  messageId: string
+  favorited: boolean
+  changedAt: number
+}
+
 export interface ErrorFrame extends FrameBase {
   type: 'error'
   code: ErrorCode
@@ -429,5 +451,6 @@ export type ServerFrame =
   | TypingServerFrame
   | PresenceFrame
   | FriendChangedFrame
+  | FavoriteChangedFrame
   | KickedFrame
   | ErrorFrame

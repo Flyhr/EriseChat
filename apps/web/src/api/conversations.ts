@@ -120,6 +120,17 @@ export const conversationsApi = {
     ),
 
   /**
+   * 群置顶消息设置/替换（F-36）：仅群主；目标消息须属于该群且未撤回。
+   * 返回当前用户视角的 Conversation；其他成员通过 conv.updated 刷新。
+   */
+  setPinnedMessage: (conversationId: string, messageId: string) =>
+    http.put<Conversation>(`/conversations/${conversationId}/pinned-message`, { messageId }),
+
+  /** 取消群置顶消息（F-36）：仅群主；无置顶时幂等。 */
+  clearPinnedMessage: (conversationId: string) =>
+    http.delete<Conversation>(`/conversations/${conversationId}/pinned-message`),
+
+  /**
    * 会话共享文件分页（F-15）：需登录且为会话成员；type 必填，limit 1~100（默认 50），
    * beforeSeq 为排他游标（传上一页最后一项的 messageSeq 继续向前翻）。
    */

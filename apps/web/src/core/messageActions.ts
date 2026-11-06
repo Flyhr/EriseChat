@@ -14,7 +14,15 @@ export const MESSAGE_RECALL_WINDOW_MS = 120_000
 /** 编辑窗口（毫秒），与服务端 AppOptions.MessageEditWindowSeconds 默认值一致。 */
 export const MESSAGE_EDIT_WINDOW_MS = 900_000
 
-export type MessageActionId = 'reply' | 'forward' | 'favorite' | 'unfavorite' | 'recall' | 'edit'
+export type MessageActionId =
+  | 'reply'
+  | 'forward'
+  | 'favorite'
+  | 'unfavorite'
+  | 'pin'
+  | 'unpin'
+  | 'recall'
+  | 'edit'
 
 export interface MessageAction {
   id: MessageActionId
@@ -33,6 +41,10 @@ export interface MessageActionOptions {
   senderName?: string
   /** F-26：该消息是否已被当前账号收藏（决定显示「收藏」还是「取消收藏」）。 */
   favorited?: boolean
+  /** F-36：当前用户是否可管理群置顶（群主 + 群聊）。 */
+  canManagePinned?: boolean
+  /** F-36：该消息是否就是当前群的置顶消息（决定显示「置顶」还是「取消置顶」）。 */
+  pinned?: boolean
 }
 
 /** 是否已被撤回（deletedAt 非空）。 */
@@ -89,7 +101,17 @@ export function recallPlaceholderText(
   return '对方撤回了一条消息'
 }
 
-/** 构建消息操作菜单项（回复恒有；转发/收藏/撤回/编辑按能力与权限过滤）。 */
+/** F-36：是否可设置/取消群置顶——群主、非系统、未撤回。 */
+export function canManagePinned(
+  message: Message | null | undefined,
+  options: Pick<MessageActionOptions, 'canManagePinned'>,
+): boolean {
+  if (!options.canManagePinned || !message) return false
+  if (message.msgType === 'system') return false
+  return !isRecalled(message)
+}
+
+/** 构建消息操作菜单项（回复恒有；转发/收藏/撤回/编辑/置顶按能力与权限过滤）。 */
 export function buildMessageActions(
   message: Message | null | undefined,
   options: MessageActionOptions,
@@ -103,6 +125,11 @@ export function buildMessageActions(
       options.favorited
         ? { id: 'unfavorite', label: '取消收藏' }
         : { id: 'favorite', label: '收藏' },
+    )
+  }
+  if (canManagePinned(message, options)) {
+    actions.push(
+      options.pinned ? { id: 'unpin', label: '取消置顶' } : { id: 'pin', label: '置顶' },
     )
   }
   if (canRecall(message, options.selfUserId, options.now, options.recallWindowMs)) {

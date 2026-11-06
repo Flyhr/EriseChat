@@ -20,6 +20,13 @@ export interface MessageSearchPage {
   nextCursor?: { createdAt: number; messageId: string }
 }
 
+export interface MessageContextPage {
+  /** 按 seq 升序 */
+  messages: Message[]
+  hasOlder: boolean
+  hasNewer: boolean
+}
+
 export interface MessageSearchOptions {
   /** 传入即只搜该会话；不传则跨当前用户全部会话。 */
   conversationId?: string
@@ -28,6 +35,16 @@ export interface MessageSearchOptions {
   /** 全局翻页游标：返回发送时间早于 beforeCreatedAt，或同时间且 id < beforeMessageId 的命中。 */
   beforeCreatedAt?: number
   beforeMessageId?: string
+  /** F-36：发送人筛选（用户 ID）。 */
+  senderId?: string
+  /** F-36：发送时间下界（毫秒时间戳，含）。 */
+  from?: number
+  /** F-36：发送时间上界（毫秒时间戳，含）。 */
+  to?: number
+  /** F-36：全局搜索显式启用发送时间游标（新客户端固定传 true）。 */
+  timeCursor?: boolean
+  /** F-37：显式链接模式——只匹配消息中识别出的 HTTP/HTTPS URL。 */
+  linkOnly?: boolean
   /** 每页条数 1~50，默认 20。 */
   limit?: number
 }
@@ -46,7 +63,25 @@ export const messagesApi = {
         beforeSeq: options.beforeSeq,
         beforeCreatedAt: options.beforeCreatedAt,
         beforeMessageId: options.beforeMessageId,
+        senderId: options.senderId,
+        from: options.from,
+        to: options.to,
+        timeCursor: options.timeCursor,
+        linkOnly: options.linkOnly,
         limit: options.limit,
+      },
+    }),
+  /** F-36：按目标消息（messageId 或 seq）加载上下文窗口；只读历史，不推进同步游标。 */
+  getContext: (
+    conversationId: string,
+    target: { messageId?: string; seq?: number; before?: number; after?: number },
+  ) =>
+    http.get<MessageContextPage>(`/conversations/${conversationId}/messages/context`, {
+      query: {
+        messageId: target.messageId,
+        seq: target.seq,
+        before: target.before,
+        after: target.after,
       },
     }),
 }

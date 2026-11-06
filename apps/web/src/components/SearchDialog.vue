@@ -21,6 +21,47 @@ const search = useSearchStore()
 
 const inputRef = ref<HTMLInputElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
+
+/** F-36：筛选条件（发送人用户 ID + 本地日期范围）；日期按浏览器时区换算为毫秒时间戳。 */
+const senderInput = ref('')
+const fromDate = ref('')
+const toDate = ref('')
+
+const filtersActive = computed(
+  () =>
+    senderInput.value.trim().length > 0 ||
+    fromDate.value.length > 0 ||
+    toDate.value.length > 0,
+)
+
+function toEpochMillis(dateText: string, endOfDay: boolean): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText.trim())
+  if (!match) return null
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  const time = date.getTime()
+  if (Number.isNaN(time)) return null
+  return endOfDay ? time + 24 * 60 * 60 * 1000 - 1 : time
+}
+
+function applyFilters(): void {
+  search.setFilters({
+    senderId: senderInput.value,
+    from: toEpochMillis(fromDate.value, false),
+    to: toEpochMillis(toDate.value, true),
+  })
+}
+
+function clearFilters(): void {
+  senderInput.value = ''
+  fromDate.value = ''
+  toDate.value = ''
+  search.setFilters({ senderId: '', from: null, to: null })
+}
+
+/** F-37：显式链接模式——只匹配识别出的 HTTP/HTTPS URL。 */
+function toggleLinkOnly(event: Event): void {
+  search.setLinkOnly((event.target as HTMLInputElement).checked)
+}
 const activeIndex = ref(0)
 let lastFocused: HTMLElement | null = null
 
@@ -98,7 +139,7 @@ async function selectResult(message: Message): Promise<void> {
   await router.push({
     name: 'chat',
     params: { conversationId: message.conversationId },
-    query: { jumpSeq: String(message.seq) },
+    query: { jumpSeq: String(message.seq), jumpMessageId: message.messageId },
   })
 }
 
@@ -162,6 +203,9 @@ watch(
   async (open) => {
     if (open) {
       lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      senderInput.value = ''
+      fromDate.value = ''
+      toDate.value = ''
       await nextTick()
       inputRef.value?.focus()
     } else if (lastFocused) {
@@ -214,6 +258,37 @@ onBeforeUnmount(() => {
             aria-label="搜索关键词"
             @keydown="onInputKeydown"
           />
+        </div>
+
+        <div class="ec-search__filters">
+          <input
+            v-model="senderInput"
+            type="search"
+            class="ec-search__filter-input"
+            placeholder="发送人用户 ID"
+            aria-label="按发送人筛选"
+            @change="applyFilters"
+          />
+          <label class="ec-search__filter-date">
+            <span>起始</span>
+            <input v-model="fromDate" type="date" :max="toDate || undefined" @change="applyFilters" />
+          </label>
+          <label class="ec-search__filter-date">
+            <span>结束</span>
+            <input v-model="toDate" type="date" :min="fromDate || undefined" @change="applyFilters" />
+          </label>
+          <label class="ec-search__filter-check">
+            <input type="checkbox" :checked="search.linkOnly" @change="toggleLinkOnly" />
+            <span>仅链接</span>
+          </label>
+          <button
+            v-if="filtersActive"
+            type="button"
+            class="ec-search__filter-clear"
+            @click="clearFilters"
+          >
+            清除筛选
+          </button>
         </div>
 
         <div class="ec-search__body">
@@ -352,6 +427,55 @@ onBeforeUnmount(() => {
   border-color: var(--ec-brand-600);
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
+}
+
+.ec-search__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ec-space-2);
+  flex: none;
+  padding: 0 var(--ec-space-4) var(--ec-space-2);
+}
+
+.ec-search__filter-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-small);
+}
+
+.ec-search__filter-date {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ec-space-1);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.ec-search__filter-date input {
+  min-height: 32px;
+  padding: 0 var(--ec-space-1);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-small);
+}
+
+.ec-search__filter-clear {
+  min-height: 32px;
+  padding: 0 var(--ec-space-2);
+  border: 0;
+  background: none;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
 }
 
 .ec-search__body {
@@ -510,5 +634,18 @@ onBeforeUnmount(() => {
   .ec-search__result {
     transition: none;
   }
+}
+.ec-search__filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ec-space-1);
+  color: var(--ec-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ec-search__filter-check input {
+  accent-color: var(--ec-brand-600);
 }
 </style>

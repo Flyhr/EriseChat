@@ -15,6 +15,7 @@ import MessageActionMenu from '../components/MessageActionMenu.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
+import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import { createUploadItem, type UploadItem } from '../core/uploadQueue'
@@ -24,6 +25,7 @@ import { getOrLoadBlobUrl } from '../core/blobCache'
 import { conversationTitle, otherMemberOf } from '../core/conversationTitle'
 import { MAX_TEXT_LENGTH } from '../core/config'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
+import { friendlyError } from '../core/errorMessages'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
@@ -90,6 +92,30 @@ const mentionNames = computed(() => activeConversation.value?.members.map((membe
 /** F-25：当前用户昵称，用于「提到你」标记（与消息里书写时的昵称一致）。 */
 const selfDisplayName = computed(() => auth.user?.displayName ?? '')
 const memberCount = computed(() => activeConversation.value?.members.length ?? 0)
+
+/** F-36：仅群主可设置/取消置顶（服务端仍是最终判定）。 */
+const canManagePinned = computed(
+  () =>
+    isGroup.value &&
+    activeConversation.value?.members.some(
+      (member) => member.userId === selfUserId.value && member.role === 'owner',
+    ) === true,
+)
+
+/** F-36：当前会话的置顶消息（服务端对已撤回的置顶消息置空，不再下发）。 */
+const pinnedMessage = computed(() => activeConversation.value?.pinnedMessage ?? null)
+
+/** F-36：置顶条摘要——发送人 + 内容前 60 字（文件/语音用占位文案）。 */
+const pinnedText = computed(() => {
+  const pinned = pinnedMessage.value
+  if (!pinned) return ''
+  const content = pinned.content
+  let text = ''
+  if (typeof content === 'string') text = content
+  else if ('name' in content) text = `[文件] ${content.name}`
+  else if ('durationMs' in content) text = '[语音]'
+  return `${senderNameOf(pinned)}：${text.slice(0, 60)}`
+})
 const activeTitle = computed(() =>
   activeConversation.value
     ? conversationTitle(activeConversation.value, selfUserId.value, {
@@ -142,7 +168,10 @@ function onWsStateChange(next: WsState): void {
       recovered.value = false
       recoveredTimer = null
     }, 3000)
-    return
+  }
+  // F-38 前置修复：断线重连成功后刷新历史定位窗口（保持查看位置）。
+  if (next === 'authed' && previous !== 'authed' && locateMode.value) {
+    void refreshLocateWindow()
   }
   if (next !== 'authed') recovered.value = false
 }
@@ -190,11 +219,51 @@ const activeLoadingHistory = computed(() =>
 )
 const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
 
+// F-37：定位窗口与正常时间线分离。置顶/引用/搜索跳转只展示目标附近的上下文窗口，
+// 不合并进会话缓存、不推进 lastSeq / 同步水位 / 历史分页起点；跳转后提供「回到最新」。
+const locateWindow = ref<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean } | null>(null)
+/** 当前定位窗口的锚点（重连后按同一目标刷新窗口，保持用户查看的历史位置）。 */
+const locateAnchor = ref<{ conversationId: string; messageId?: string; seq?: number } | null>(null)
+/** 定位窗口代数：每次打开/替换/关闭窗口 +1；迟到的刷新响应据此校验是否仍属同一个窗口。 */
+const locateWindowVersion = ref(0)
+const locateLoading = ref(false)
+/** F-37：定位请求进行中（从发起定位到上下文接口返回），期间同样不能上报已读。 */
+const locateRequestingCount = ref(0)
+const locateRequesting = computed(() => locateRequestingCount.value > 0)
+const locateMode = computed(() => locateWindow.value !== null)
+const displayMessages = computed(() => locateWindow.value?.messages ?? activeMessages.value)
+const displayPending = computed(() => (locateMode.value ? [] : activePending.value))
+const displayHasMore = computed(() => (locateMode.value ? false : activeHasMore.value))
+
+function exitLocateWindow(): void {
+  locateWindowVersion.value += 1
+  locateWindow.value = null
+  locateAnchor.value = null
+  locateLoading.value = false
+}
+
+/** 回到最新：退出定位窗口并滚回正常时间线底部（定位期间未改动分页与同步水位）。 */
+function backToLatest(): void {
+  if (!locateMode.value) return
+  exitLocateWindow()
+  atBottom.value = true
+  void nextTick(() => {
+    messageListRef.value?.scrollToBottom()
+    markActiveConversationRead()
+  })
+}
+
 // 回复引用（F-09）：replyTarget 记录当前回复目标与本地引用条摘要，发送成功或取消后清空；
 // 点击引用条先在本窗口定位，未加载时循环补拉历史（≤8 页）。
 const replyTarget = ref<{ messageId: string; preview: ReplyPreviewLike } | null>(null)
-const messageListRef = ref<{ scrollToMessage: (messageId: string) => boolean } | null>(null)
-const JUMP_MAX_LOAD_PAGES = 8
+const messageListRef = ref<{
+  scrollToMessage: (messageId: string) => boolean
+  scrollToBottom: () => void
+  getScrollTop?: () => number
+  setScrollTop?: (value: number) => void
+} | null>(null)
+const JUMP_CONTEXT_BEFORE = 25
+const JUMP_CONTEXT_AFTER = 25
 
 function replyPreviewOf(message: Message): ReplyPreviewLike {
   const content = message.content
@@ -208,7 +277,8 @@ function replyPreviewOf(message: Message): ReplyPreviewLike {
 }
 
 function onReplyMessage(messageId: string): void {
-  const message = activeMessages.value.find((item) => item.messageId === messageId)
+  // F-37：从当前展示的数据取目标（历史定位窗口中的旧消息也可回复）。
+  const message = displayMessages.value.find((item) => item.messageId === messageId)
   if (!message) return
   replyTarget.value = { messageId, preview: replyPreviewOf(message) }
   void nextTick(() => sendBoxRef.value?.focusInput())
@@ -223,7 +293,8 @@ const actionMenu = ref<{ messageId: string; x: number; y: number } | null>(null)
 const actionMenuMessage = computed<Message | null>(() => {
   const target = actionMenu.value
   if (!target) return null
-  return activeMessages.value.find((message) => message.messageId === target.messageId) ?? null
+  // F-37：从当前展示的数据取目标（历史定位窗口中的旧消息也可操作）。
+  return displayMessages.value.find((message) => message.messageId === target.messageId) ?? null
 })
 const actionMenuSenderName = computed(() => {
   const message = actionMenuMessage.value
@@ -246,15 +317,47 @@ function senderNameOf(message: Message): string {
 /** F-26：转发弹窗目标消息（null = 关闭）。 */
 const forwardTarget = ref<Message | null>(null)
 
-/** F-26：收藏/取消收藏；成功/失败用 toast 反馈。 */
+/** F-38：收藏/取消收藏（服务端为事实源）；失败用明确错误提示，不显示成功。 */
 async function toggleFavorite(message: Message): Promise<void> {
+  if (!selfUserId.value) {
+    showToast('请先登录后再收藏', 'error')
+    return
+  }
   try {
-    const result = await favorites.toggle(message, activeConversation.value, senderNameOf(message), selfUserId.value)
-    if (result === 'added') showToast('已收藏')
-    else if (result === 'removed') showToast('已取消收藏')
-    else if (result === 'unsupported') showToast('该消息不支持收藏', 'error')
-  } catch {
-    showToast('收藏操作失败，请稍后重试', 'error')
+    const result = await favorites.toggle(message.messageId)
+    if (result === 'stale') {
+      showToast('登录状态或服务器已切换，请重试', 'error')
+      return
+    }
+    showToast(result === 'added' ? '已收藏' : '已取消收藏')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  }
+}
+
+/** F-36：设置/替换会话置顶消息（仅群主；其他成员通过 conv.updated 刷新）。 */
+async function setPinned(message: Message): Promise<void> {
+  const conversationId = activeId.value
+  if (!conversationId) return
+  try {
+    const updated = await conversationsApi.setPinnedMessage(conversationId, message.messageId)
+    conversations.upsert([updated])
+    showToast('已置顶')
+  } catch (cause) {
+    showToast(friendlyError(cause), 'error')
+  }
+}
+
+/** F-36：取消会话置顶消息（仅群主）。 */
+async function clearPinnedMessage(): Promise<void> {
+  const conversationId = activeId.value
+  if (!conversationId) return
+  try {
+    const updated = await conversationsApi.clearPinnedMessage(conversationId)
+    conversations.upsert([updated])
+    showToast('已取消置顶')
+  } catch (cause) {
+    showToast(friendlyError(cause), 'error')
   }
 }
 
@@ -281,6 +384,13 @@ function onActionSelect(action: MessageActionId): void {
   }
   if (action === 'favorite' || action === 'unfavorite') {
     void toggleFavorite(message)
+  }
+  if (action === 'pin') {
+    void setPinned(message)
+    return
+  }
+  if (action === 'unpin') {
+    void clearPinnedMessage()
   }
 }
 
@@ -380,80 +490,181 @@ watch(
   () => tryClearEnteredMark(),
 )
 
-/** 在已加载消息中定位；不在当前窗口时循环补拉历史（≤8 页），返回是否成功定位。 */
-async function ensureMessageVisible(messageId: string): Promise<boolean> {
-  const conversationId = activeId.value
-  if (!conversationId) return false
+/** 在已加载消息中定位；不在缓存时按目标一次性加载上下文窗口（不扫最新页、不改正常时间线分页）。 */
+async function ensureMessageVisible(
+  conversationId: string,
+  target: { messageId?: string; seq?: number },
+  options: {
+    scroll?: boolean
+    forceContext?: boolean
+    /** 写回窗口前校验：调用方身份/窗口是否仍有效（迟到的重连刷新不得重开旧窗口）。 */
+    guard?: () => boolean
+  } = {},
+): Promise<boolean> {
+  const findLoadedId = (): string | undefined =>
+    target.messageId ??
+    activeMessages.value.find((message) => message.seq === target.seq)?.messageId
 
-  if (messageListRef.value?.scrollToMessage(messageId)) return true
-  for (let page = 0; page < JUMP_MAX_LOAD_PAGES && activeHasMore.value; page += 1) {
-    await messages.loadMore(conversationId)
+  // 重连刷新必须走服务端上下文接口，不能因本地仍有旧快照而跳过。
+  const existingId = options.forceContext ? undefined : findLoadedId()
+  if (existingId && messageListRef.value?.scrollToMessage(existingId)) return true
+
+  // 需要请求上下文窗口时才算「定位请求进行中」；期间所有已读上报都要暂停。
+  locateRequestingCount.value += 1
+  locateLoading.value = true
+  try {
+    // F-37：按目标取前后窗口，只用于定位展示；不合并进会话缓存、不推进同步水位或历史分页。
+    const page = await messages.loadContextAround(conversationId, {
+      messageId: target.messageId,
+      seq: target.messageId ? undefined : target.seq,
+      before: JUMP_CONTEXT_BEFORE,
+      after: JUMP_CONTEXT_AFTER,
+    })
     await nextTick()
     if (activeId.value !== conversationId) return false
-    if (messageListRef.value?.scrollToMessage(messageId)) return true
+    if (options.guard && !options.guard()) return false
+    const targetId =
+      target.messageId ??
+      page.messages.find((message) => message.seq === target.seq)?.messageId
+    if (!targetId || !page.messages.some((message) => message.messageId === targetId)) {
+      return false
+    }
+    locateWindowVersion.value += 1
+    locateWindow.value = {
+      messages: page.messages,
+      hasOlder: page.hasOlder,
+      hasNewer: page.hasNewer,
+    }
+    locateAnchor.value = target.messageId
+      ? { conversationId, messageId: target.messageId }
+      : { conversationId, seq: target.seq }
+    await nextTick()
+    if (options.scroll === false) return true
+    return messageListRef.value?.scrollToMessage(targetId) ?? false
+  } catch {
+    return false
+  } finally {
+    locateLoading.value = false
+    locateRequestingCount.value = Math.max(0, locateRequestingCount.value - 1)
   }
-  return messageListRef.value?.scrollToMessage(messageId) ?? false
 }
+
+/**
+ * F-38 前置修复：重连成功后按锚点重新拉取定位窗口，让断线期间的撤回/编辑反映到窗口内。
+ * 保持用户查看位置（恢复滚动偏移），窗口数据仍只用于展示，不并入缓存/不动游标。
+ */
+async function refreshLocateWindow(): Promise<void> {
+  const conversationId = activeId.value
+  const anchor = locateAnchor.value
+  // 只刷新仍打开、仍是同一会话的历史窗口；正常时间线不触发。
+  if (!conversationId || !anchor || !locateMode.value) return
+  if (anchor.conversationId !== conversationId) return
+  const capturedVersion = locateWindowVersion.value
+  // 写回窗口（打开/替换）前校验：期间未「回到最新」、未切会话、未跳到另一条历史消息。
+  const isSameWindowBeforeApply = (): boolean =>
+    activeId.value === conversationId &&
+    locateMode.value &&
+    locateWindowVersion.value === capturedVersion &&
+    locateAnchor.value?.conversationId === conversationId &&
+    locateAnchor.value?.messageId === anchor.messageId &&
+    locateAnchor.value?.seq === anchor.seq
+  const list = messageListRef.value
+  const scrollTop = list?.getScrollTop?.() ?? 0
+  const applied = await ensureMessageVisible(conversationId, anchor, {
+    scroll: false,
+    forceContext: true,
+    guard: isSameWindowBeforeApply,
+  })
+  if (!applied) return
+  await nextTick()
+  // 恢复滚动前再次校验：窗口仍是同一会话、同一目标的定位窗口。
+  if (
+    activeId.value !== conversationId ||
+    !locateMode.value ||
+    locateAnchor.value?.conversationId !== conversationId ||
+    locateAnchor.value?.messageId !== anchor.messageId ||
+    locateAnchor.value?.seq !== anchor.seq
+  ) {
+    return
+  }
+  list?.setScrollTop?.(scrollTop)
+}
+
+// F-37：定位窗口打开期间，同会话的撤回/编辑帧也要反映到窗口内（只更新临时窗口，不落缓存）。
+watch(
+  () => messages.lastMessagePatch,
+  (event) => {
+    const window = locateWindow.value
+    if (!event || !window || event.conversationId !== activeId.value) return
+    const index = window.messages.findIndex((message) => message.messageId === event.messageId)
+    if (index < 0) return
+    const next = window.messages.slice()
+    next[index] = { ...next[index], ...event.patch }
+    locateWindow.value = { ...window, messages: next }
+  },
+)
 
 async function onJumpToMessage(messageId: string): Promise<void> {
-  if (!activeId.value) return
-  if (!(await ensureMessageVisible(messageId))) {
-    pageNotice.value = '被引用的消息不在本地缓存中，可手动加载更早消息查看'
+  const conversationId = activeId.value
+  if (!conversationId) return
+  if (!(await ensureMessageVisible(conversationId, { messageId }))) {
+    pageNotice.value = '消息已不存在或无法定位'
   }
 }
 
-// F-11：搜索结果跳转（?jumpSeq=）复用 F-09 的定位机制——按 seq 在已加载消息里找 messageId，
-// 找不到则循环补拉（≤8 页）；定位完成后清掉查询参数，避免刷新页面重复跳转。
+// F-11：搜索结果跳转（?jumpSeq= / ?jumpMessageId=）：按目标加载上下文窗口后定位，
+// 完成后清掉查询参数，避免刷新页面重复跳转。
 let pendingJumpSeq: number | null = null
+let pendingJumpMessageId: string | null = null
 
 function clearJumpQuery(): void {
-  if (!('jumpSeq' in route.query)) return
+  if (!('jumpSeq' in route.query) && !('jumpMessageId' in route.query)) return
   const query = { ...route.query }
   delete query.jumpSeq
+  delete query.jumpMessageId
   void router.replace({ query })
 }
 
 async function runPendingJump(): Promise<void> {
   const conversationId = activeId.value
+  const messageId = pendingJumpMessageId
   const seq = pendingJumpSeq
-  if (!conversationId || seq === null) return
+  if (!conversationId || (messageId === null && seq === null)) return
 
-  for (let page = 0; page < JUMP_MAX_LOAD_PAGES; page += 1) {
-    const target = activeMessages.value.find((message) => message.seq === seq)
-    if (target && messageListRef.value?.scrollToMessage(target.messageId)) {
-      pendingJumpSeq = null
-      clearJumpQuery()
-      return
-    }
-    if (!activeHasMore.value) break
-    await messages.loadMore(conversationId)
-    await nextTick()
-    if (activeId.value !== conversationId || pendingJumpSeq !== seq) return
+  const located = await ensureMessageVisible(conversationId, {
+    ...(messageId ? { messageId } : {}),
+    ...(messageId ? {} : { seq: seq ?? undefined }),
+  })
+  if (pendingJumpMessageId !== messageId || pendingJumpSeq !== seq) return
+  if (located) {
+    pendingJumpMessageId = null
+    pendingJumpSeq = null
+    clearJumpQuery()
+    return
   }
-
-  if (pendingJumpSeq !== seq) return
+  pendingJumpMessageId = null
   pendingJumpSeq = null
   clearJumpQuery()
   pageNotice.value = '消息不在当前加载范围，可手动加载更早消息查看'
+  // 定位失败时已回到正常时间线，按原有可见/贴底规则恢复已读上报。
+  void nextTick(markActiveConversationRead)
 }
 
 watch(
-  () => route.query.jumpSeq,
-  (value) => {
-    const seq = typeof value === 'string' ? Number(value) : Number.NaN
-    if (!Number.isFinite(seq) || seq <= 0) {
-      pendingJumpSeq = null
-      return
-    }
-    pendingJumpSeq = seq
-    void runPendingJump()
+  () => [route.query.jumpSeq, route.query.jumpMessageId] as const,
+  ([seqValue, messageIdValue]) => {
+    const seq = typeof seqValue === 'string' ? Number(seqValue) : Number.NaN
+    pendingJumpMessageId =
+      typeof messageIdValue === 'string' && messageIdValue.length > 0 ? messageIdValue : null
+    pendingJumpSeq = Number.isFinite(seq) && seq > 0 ? seq : null
+    if (pendingJumpMessageId !== null || pendingJumpSeq !== null) void runPendingJump()
   },
   { immediate: true },
 )
 
 // 目标会话的消息可能还在异步加载：加载完成后再尝试一次定位。
 watch(activeLoaded, (loaded) => {
-  if (loaded && pendingJumpSeq !== null) void runPendingJump()
+  if (loaded && (pendingJumpSeq !== null || pendingJumpMessageId !== null)) void runPendingJump()
 })
 
 // 切换会话时清空回复目标，避免把引用带到另一个会话（F-09）。
@@ -478,7 +689,7 @@ let previewRequestSeq = 0
 const previewSources = computed<PreviewSource[]>(() => {
   if (!activeId.value) return []
   const fileIds = new Map<string, string>()
-  for (const message of activeMessages.value) {
+  for (const message of displayMessages.value) {
     // F-18：已撤回的图片不再出现在预览序列里。
     if (typeof message.deletedAt === 'number') continue
     const content = message.content
@@ -486,10 +697,10 @@ const previewSources = computed<PreviewSource[]>(() => {
     const fileId = 'fileId' in content ? content.fileId : null
     if (typeof fileId === 'string' && fileId) fileIds.set(message.messageId, fileId)
   }
-  const sources: PreviewSource[] = imageItemsOf(activeMessages.value)
+  const sources: PreviewSource[] = imageItemsOf(displayMessages.value)
     .map((item) => ({ messageId: item.messageId, name: item.name, fileId: fileIds.get(item.messageId) ?? '' }))
     .filter((item) => Boolean(item.fileId))
-  for (const pending of activePending.value) {
+  for (const pending of displayPending.value) {
     const content = pending.content
     if (pending.msgType !== 'image' || typeof content !== 'object' || content === null) continue
     const fileId = 'fileId' in content ? content.fileId : null
@@ -586,6 +797,7 @@ watch(
   activeId,
   (conversationId, previousId) => {
     activeDrawer.value = null
+    exitLocateWindow()
     atBottom.value = true
     // 离开会话即清除其「输入中」状态（M3-09，避免残留旧会话提示）。
     if (previousId) typing.clearConversation(previousId)
@@ -602,6 +814,8 @@ watch(
 // 未读角标随之清除；服务端 last_read_seq 是重新登录/换设备后未读计算的依据。
 // M3-00 N6：仅当页面可见且当前会话就是 activeId 时才推进；滚到底判定留 M3-09。
 function markActiveConversationRead(): void {
+  // F-37：定位窗口不是最新位置，滚动/可见性变化不能推进已读游标。
+  if (locateMode.value || locateRequesting.value) return
   const conversationId = activeId.value
   const lastSeq = activeConversation.value?.lastSeq ?? 0
   const advance = shouldAdvanceRead({
@@ -619,6 +833,7 @@ function markActiveConversationRead(): void {
 /** 消息列表滚动/自动贴底事件：回到或停在底部时推进已读（M3-09）。 */
 function onNearBottomChange(value: boolean): void {
   atBottom.value = value
+  if (locateMode.value || locateRequesting.value) return
   if (value) markActiveConversationRead()
 }
 
@@ -1274,24 +1489,53 @@ function onWindowDrop(event: DragEvent): void {
           @back="backToList"
           @search="openConversationSearch"
         />
+        <!-- F-36：群置顶消息条——全员可见，点击定位原消息；仅群主可取消置顶。 -->
+        <div v-if="isGroup && pinnedMessage" class="chat-page__pinned">
+          <button
+            type="button"
+            class="chat-page__pinned-main"
+            :aria-label="`查看置顶消息：${pinnedText}`"
+            @click="onJumpToMessage(pinnedMessage.messageId)"
+          >
+            <AppIcon name="pin" :size="16" />
+            <span class="chat-page__pinned-text">{{ pinnedText }}</span>
+          </button>
+          <button
+            v-if="canManagePinned"
+            type="button"
+            class="chat-page__pinned-clear"
+            title="取消置顶"
+            aria-label="取消置顶"
+            @click="clearPinnedMessage"
+          >
+            <AppIcon name="close" :size="14" />
+          </button>
+        </div>
         <div class="chat-page__content" :class="{ 'chat-page__content--members': asideOpen }">
           <div class="chat-page__chat">
             <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
+            <div v-if="locateMode" class="chat-page__locate">
+              <span>{{ locateLoading ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
+              <button type="button" class="chat-page__locate-back" @click="backToLatest">回到最新</button>
+            </div>
             <MessageList
               ref="messageListRef"
-              :messages="activeMessages"
-              :pending="activePending"
+              :messages="displayMessages"
+              :pending="displayPending"
               :self-user-id="selfUserId"
               :conversation-id="activeId"
               :members="activeConversation.members"
               :is-group="isGroup"
               :peer-read-seq="peerReadSeqForDisplay"
               :show-read-receipt="!isGroup"
-              :has-more="activeHasMore"
+              :has-more="displayHasMore"
               :loading="activeLoadingHistory"
               :mention-names="mentionNames"
               :self-display-name="selfDisplayName"
+              :locate-mode="locateMode"
+              :locate-has-older="locateWindow?.hasOlder ?? false"
+              :locate-has-newer="locateWindow?.hasNewer ?? false"
               @load-more="loadMoreMessages"
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
@@ -1429,6 +1673,12 @@ function onWindowDrop(event: DragEvent): void {
       :is-group="isGroup"
       :sender-name="actionMenuSenderName"
       :favorited="actionMenuMessage ? favorites.isFavorited(actionMenuMessage.messageId) : false"
+      :can-manage-pinned="canManagePinned"
+      :pinned="Boolean(
+        actionMenuMessage &&
+          pinnedMessage &&
+          actionMenuMessage.messageId === pinnedMessage.messageId,
+      )"
       :position="actionMenu ? { x: actionMenu.x, y: actionMenu.y } : { x: 0, y: 0 }"
       @select="onActionSelect"
       @close="actionMenu = null"
@@ -1541,6 +1791,57 @@ function onWindowDrop(event: DragEvent): void {
   .chat-page__members {
     width: 260px;
   }
+}
+
+/* F-36：群置顶消息条（位于顶栏与消息区之间，不参与消息滚动）。 */
+.chat-page__pinned {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--ec-space-2);
+  padding: var(--ec-space-1) var(--ec-space-2) var(--ec-space-1) var(--ec-space-3);
+  background: var(--ec-brand-050);
+  border-bottom: 1px solid var(--ec-border);
+}
+
+.chat-page__pinned-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--ec-space-2);
+  min-width: 0;
+  padding: var(--ec-space-1) 0;
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.chat-page__pinned-text {
+  overflow: hidden;
+  color: var(--ec-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-page__pinned-clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--ec-text-secondary);
+  background: none;
+  border: 0;
+  border-radius: var(--ec-radius-sm, 6px);
+  cursor: pointer;
+}
+
+.chat-page__pinned-clear:hover {
+  color: var(--ec-text-primary);
+  background: var(--ec-surface-hover);
 }
 
 .chat-page__main {
@@ -1810,5 +2111,33 @@ function onWindowDrop(event: DragEvent): void {
   margin: 0;
   color: var(--ec-danger);
   font-size: var(--ec-font-size-secondary);
+}
+.chat-page__locate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ec-space-3);
+  margin: 0 var(--ec-space-4);
+  padding: var(--ec-space-2) var(--ec-space-3);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  border-radius: var(--ec-radius-panel);
+  font-size: 12px;
+}
+
+.chat-page__locate-back {
+  flex: none;
+  padding: 4px var(--ec-space-3);
+  border: 1px solid var(--ec-brand-600);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-bg-surface);
+  color: var(--ec-brand-600);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-page__locate-back:hover {
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
 }
 </style>

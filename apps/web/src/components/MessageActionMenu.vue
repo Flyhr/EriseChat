@@ -19,10 +19,21 @@ const props = withDefaults(
     senderName?: string
     /** F-26：该消息是否已被收藏（决定「收藏」/「取消收藏」）。 */
     favorited?: boolean
+    /** F-36：是否可管理群置顶（群主）。 */
+    canManagePinned?: boolean
+    /** F-36：该消息是否为当前群置顶消息。 */
+    pinned?: boolean
     /** 触发位置（视口坐标；移动端贴底时忽略）。 */
     position: { x: number; y: number }
   }>(),
-  { isGroup: false, senderName: '', favorited: false, position: () => ({ x: 0, y: 0 }) },
+  {
+    isGroup: false,
+    senderName: '',
+    favorited: false,
+    canManagePinned: false,
+    pinned: false,
+    position: () => ({ x: 0, y: 0 }),
+  },
 )
 
 const emit = defineEmits<{
@@ -44,6 +55,8 @@ const actions = computed(() => {
     isGroup: props.isGroup,
     senderName: props.senderName,
     favorited: props.favorited,
+    canManagePinned: props.canManagePinned,
+    pinned: props.pinned,
   }
   return buildMessageActions(props.message, options)
 })
