@@ -102,7 +102,8 @@ CREATE INDEX idx_files_owner_id ON files (owner_id);
 -- avatar_file_id: 群头像 files.id 便利引用（无外键；NULL = 未设置；单聊恒为 NULL；F-23）
 -- direct_key   : 单聊唯一键（两个用户 ID 排序后拼接，如 "u1:u2"）；群聊为 NULL
 -- last_seq     : 会话最新消息序号，只增不减（未读与补拉基数）
--- last_message_id 为便利引用（指向 messages.id），不加外键以避免 conversations ↔ messages 循环依赖
+-- last_message_id / pinned_message_id 为便利引用（指向 messages.id），不加外键以避免循环依赖
+-- pinned_message_id: 群置顶消息 ID（仅 group、NULL = 无置顶；F-36）
 -- ------------------------------------------------------------
 CREATE TABLE conversations (
     id              TEXT PRIMARY KEY NOT NULL,
@@ -110,6 +111,7 @@ CREATE TABLE conversations (
     title           TEXT,
     announcement    TEXT,
     avatar_file_id  TEXT,
+    pinned_message_id TEXT,
     direct_key      TEXT UNIQUE,
     created_by      TEXT NOT NULL,
     created_at      INTEGER NOT NULL,
@@ -271,3 +273,21 @@ CREATE UNIQUE INDEX ux_friend_requests_pending
     WHERE status = 'pending';
 CREATE INDEX idx_friend_requests_to_status ON friend_requests (to_user_id, status);
 CREATE INDEX idx_friend_requests_from_status ON friend_requests (from_user_id, status);
+
+-- ------------------------------------------------------------
+-- favorites：个人收藏（F-38，跨设备同步）
+-- user_id    : 收藏归属账号；message_id: 原消息引用；created_at: 收藏时间（UTC 毫秒）
+-- 说明：只保存引用不复制内容，原消息编辑/撤回在读取时反映；单账号上限 500 由服务端校验；
+--       不随消息撤回或退出会话自动删除，由用户手动移除。
+-- ------------------------------------------------------------
+CREATE TABLE favorites (
+    user_id    TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, message_id),
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_favorites_user_created ON favorites (user_id, created_at);
+CREATE INDEX idx_favorites_message ON favorites (message_id);

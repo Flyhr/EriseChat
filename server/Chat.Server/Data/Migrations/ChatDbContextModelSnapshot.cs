@@ -105,6 +105,10 @@ namespace Chat.Server.Data.Migrations
                         .HasDefaultValue(0L)
                         .HasColumnName("last_seq");
 
+                    b.Property<string>("PinnedMessageId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("pinned_message_id");
+
                     b.Property<string>("Title")
                         .HasColumnType("TEXT")
                         .HasColumnName("title");
@@ -239,6 +243,31 @@ namespace Chat.Server.Data.Migrations
                         {
                             t.HasCheckConstraint("ck_email_codes_purpose", "purpose IN ('register', 'login', 'reset')");
                         });
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.Favorite", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("MessageId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("message_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.HasKey("UserId", "MessageId");
+
+                    b.HasIndex("MessageId")
+                        .HasDatabaseName("idx_favorites_message");
+
+                    b.HasIndex("UserId", "CreatedAt")
+                        .HasDatabaseName("idx_favorites_user_created");
+
+                    b.ToTable("favorites", (string)null);
                 });
 
             modelBuilder.Entity("Chat.Server.Data.Entities.Friend", b =>
@@ -611,6 +640,21 @@ namespace Chat.Server.Data.Migrations
                     b.HasOne("Chat.Server.Data.Entities.Conversation", null)
                         .WithMany()
                         .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.Favorite", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.Message", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

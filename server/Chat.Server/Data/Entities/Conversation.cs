@@ -23,6 +23,9 @@ public sealed class Conversation
     /// <summary>群头像 files.id（便利引用，无外键）；NULL = 未设置；单聊恒为 NULL（F-23）。</summary>
     public string? AvatarFileId { get; set; }
 
+    /// <summary>群置顶消息 messages.id（便利引用，无外键）；NULL = 无置顶；单聊恒为 NULL（F-36）。</summary>
+    public string? PinnedMessageId { get; set; }
+
     /// <summary>单聊唯一键（两个用户 ID 排序后拼接，如 "u1:u2"）；群聊为空。</summary>
     public string? DirectKey { get; set; }
 

@@ -63,6 +63,9 @@ public static class FrameTypes
     /// <summary>在线状态（S→C）。</summary>
     public const string Presence = "presence";
 
+    /// <summary>个人收藏变更推送（S→C，F-38）：同账号全部在线连接。</summary>
+    public const string FavoriteChanged = "favorite.changed";
+
     /// <summary>好友/申请变更推送（S→C，F-17）。</summary>
     public const string FriendChanged = "friend.changed";
 

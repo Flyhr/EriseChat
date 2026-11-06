@@ -33,6 +33,7 @@ public sealed record ConversationMember(
 /// <param name="AvatarFileId">群头像 files.id（F-23）；null 表示未设置；单聊恒为 null。</param>
 /// <param name="Unread">当前用户的未读数（F-26）：只统计他人发送且 seq 大于 lastReadSeq 的消息，自己发送的消息不计入；按收件人计算。</param>
 /// <param name="MarkedUnread">当前用户是否手动标为未读：只影响未读筛选与提示，不改 lastReadSeq、不增加 unread。</param>
+/// <param name="PinnedMessage">群置顶消息快照（F-36）：仅 group 且消息存在、未撤回时下发；null = 无置顶。</param>
 public sealed record Conversation(
     string ConversationId,
     ConversationType Type,
@@ -47,4 +48,5 @@ public sealed record Conversation(
     string? Announcement = null,
     string? AvatarFileId = null,
     long Unread = 0,
-    bool MarkedUnread = false);
+    bool MarkedUnread = false,
+    Message? PinnedMessage = null);

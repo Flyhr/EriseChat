@@ -29,6 +29,12 @@ public static class MessageEndpoints
             .RequireAuthorization()
             .Produces<MessageSearchPageResponse>();
 
+        // F-36：按目标消息定位上下文（置顶/搜索跳转超出缓存范围时使用），只读历史、不推进同步游标。
+        app.MapGet("/api/conversations/{conversationId}/messages/context", GetContextAsync)
+            .WithName("GetMessageContext")
+            .RequireAuthorization()
+            .Produces<MessageContextResponse>();
+
         return app;
     }
 
@@ -54,6 +60,11 @@ public static class MessageEndpoints
         long? beforeSeq,
         long? beforeCreatedAt,
         string? beforeMessageId,
+        string? senderId,
+        long? from,
+        long? to,
+        bool? timeCursor,
+        bool? linkOnly,
         int? limit,
         ClaimsPrincipal principal,
         MessageService messages,
@@ -61,7 +72,19 @@ public static class MessageEndpoints
     {
         var userId = principal.UserId();
         var page = await messages.SearchAsync(
-            userId, q, conversationId, beforeSeq, limit, cancellationToken, beforeCreatedAt, beforeMessageId);
+            userId,
+            q,
+            conversationId,
+            beforeSeq,
+            limit,
+            cancellationToken,
+            beforeCreatedAt,
+            beforeMessageId,
+            senderId,
+            from,
+            to,
+            timeCursor ?? false,
+            linkOnly ?? false);
         return Results.Json(new MessageSearchPageResponse(
             page.Messages,
             page.HasMore,
@@ -69,6 +92,34 @@ public static class MessageEndpoints
                 ? null
                 : new MessageSearchCursorResponse(page.NextCursor.CreatedAt, page.NextCursor.MessageId)));
     }
+
+    private static async Task<IResult> GetContextAsync(
+        string conversationId,
+        string? messageId,
+        long? seq,
+        int? before,
+        int? after,
+        ClaimsPrincipal principal,
+        MessageService messages,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        var result = await messages.GetMessageContextAsync(
+            userId,
+            conversationId,
+            messageId,
+            seq,
+            before,
+            after,
+            cancellationToken);
+        return Results.Json(new MessageContextResponse(result.Messages, result.HasOlder, result.HasNewer));
+    }
+
+    /// <summary>F-36：按目标消息定位的上下文窗口响应（非协议帧）。</summary>
+    public sealed record MessageContextResponse(
+        IReadOnlyList<Message> Messages,
+        bool HasOlder,
+        bool HasNewer);
 
     /// <summary>
     /// 搜索响应（F-11/F-34，非协议帧）：会话内按 seq 降序，全局按 createdAt/id 倒序；

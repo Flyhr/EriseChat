@@ -184,7 +184,8 @@ public sealed class FileService
         if (!isOwner)
         {
             var isReferencedMember = await _db.Messages.AsNoTracking()
-                .Where(message => message.FileId == fileId)
+                // F-38 收尾：已撤回消息不再作为会话成员的文件访问依据；上传者与头像等独立授权不受影响。
+                .Where(message => message.FileId == fileId && message.DeletedAt == null)
                 .AnyAsync(
                     message => _db.ConversationMembers.Any(
                         member => member.ConversationId == message.ConversationId && member.UserId == userId),

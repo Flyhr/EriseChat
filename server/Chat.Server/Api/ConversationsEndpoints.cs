@@ -59,6 +59,17 @@ public static class ConversationsEndpoints
             .RequireAuthorization()
             .Produces<Conversation>();
 
+        // F-36：群置顶消息（仅群主；每群最多一条；单聊不支持）。
+        app.MapPut("/api/conversations/{conversationId}/pinned-message", SetPinnedMessageAsync)
+            .WithName("SetConversationPinnedMessage")
+            .RequireAuthorization()
+            .Produces<Conversation>();
+
+        app.MapDelete("/api/conversations/{conversationId}/pinned-message", ClearPinnedMessageAsync)
+            .WithName("ClearConversationPinnedMessage")
+            .RequireAuthorization()
+            .Produces<Conversation>();
+
         // F-15：会话共享图片/文件汇总（只读分页；type=image|file、beforeSeq、limit）。
         app.MapGet("/api/conversations/{conversationId}/files", GetSharedFilesAsync)
             .WithName("ListConversationFiles")
@@ -268,6 +279,51 @@ public static class ConversationsEndpoints
         return Results.Json(perRecipient[currentUserId]);
     }
 
+
+    /// <summary>群置顶消息设置/替换（F-36）：仅群主，body { messageId }；成功后按收件人视角推 conv.updated。</summary>
+    private static async Task<IResult> SetPinnedMessageAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        PinnedMessageRequest request,
+        ConversationService conversations,
+        ConversationRealtimeNotifier notifier,
+        CancellationToken cancellationToken)
+    {
+        var currentUserId = principal.UserId();
+        var result = await conversations.SetPinnedMessageAsync(
+            currentUserId,
+            conversationId,
+            request.MessageId,
+            cancellationToken);
+        var perRecipient = await conversations.BuildPerRecipientAsync(
+            result.Conversation,
+            result.MemberUserIds,
+            cancellationToken);
+        notifier.PushUpdatedPerRecipient(perRecipient);
+        return Results.Json(perRecipient[currentUserId]);
+    }
+
+    /// <summary>群置顶消息取消（F-36）：仅群主，无置顶时幂等；成功后按收件人视角推 conv.updated。</summary>
+    private static async Task<IResult> ClearPinnedMessageAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        ConversationService conversations,
+        ConversationRealtimeNotifier notifier,
+        CancellationToken cancellationToken)
+    {
+        var currentUserId = principal.UserId();
+        var result = await conversations.ClearPinnedMessageAsync(
+            currentUserId,
+            conversationId,
+            cancellationToken);
+        var perRecipient = await conversations.BuildPerRecipientAsync(
+            result.Conversation,
+            result.MemberUserIds,
+            cancellationToken);
+        notifier.PushUpdatedPerRecipient(perRecipient);
+        return Results.Json(perRecipient[currentUserId]);
+    }
+
     /// <summary>
     /// 会话共享图片/文件汇总（F-15）：type=image|file 必填、beforeSeq 排他游标、limit 1~100 默认 50；
     /// 只统计 messages.file_id 非空的 image/file 消息，按文件去重取最新引用 seq 倒序分页。
@@ -317,6 +373,9 @@ public static class ConversationsEndpoints
 
     /// <summary>群资料更新请求（F-14 / F-23）：title/announcement/avatarFileId 至少一个非 null；announcement/avatarFileId 传空串表示清空。</summary>
     public sealed record GroupProfileRequest(string? Title = null, string? Announcement = null, string? AvatarFileId = null);
+
+    /// <summary>F-36：群置顶消息请求（PUT body）。</summary>
+    public sealed record PinnedMessageRequest(string? MessageId = null);
 
     /// <summary>群主转让请求（F-24）：目标成员用户 ID。</summary>
     public sealed record TransferOwnerRequest(string? UserId);

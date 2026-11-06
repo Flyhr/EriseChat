@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
@@ -20,7 +21,11 @@ namespace Chat.Server.Modules.Messages;
 public sealed record MessageSendResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds, bool Created);
 
 /// <summary>message.recall 处理结果（F-18）：协议消息 + 会话成员（用于广播）+ 是否实际撤回（幂等重发为 false）。</summary>
-public sealed record MessageRecallResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds, bool Changed);
+public sealed record MessageRecallResult(
+    ProtocolMessage Message,
+    IReadOnlyList<string> MemberUserIds,
+    bool Changed,
+    string? PinnedClearedConversationId = null);
 
 /// <summary>message.edit 处理结果（F-18）：协议消息 + 会话成员（用于广播）。</summary>
 public sealed record MessageEditResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds);
@@ -39,6 +44,8 @@ public sealed record MessageSearchPage(
     IReadOnlyList<ProtocolMessage> Messages,
     bool HasMore,
     MessageSearchCursor? NextCursor = null);
+/// <summary>F-36：按目标消息定位的上下文窗口（不推进同步游标）。</summary>
+public sealed record MessageContextResult(IReadOnlyList<ProtocolMessage> Messages, bool HasOlder, bool HasNewer);
 
 /// <summary>全局搜索翻页游标：按发送时间倒序、消息 ID 作为同时间排序条件（F-34）。</summary>
 public sealed record MessageSearchCursor(long CreatedAt, string MessageId);
@@ -85,6 +92,11 @@ public sealed class MessageService
     private const int SearchMaxCandidateRounds = 4;
 
     private const int SearchMaxCandidateWindow = 200;
+
+    /// <summary>定位上下文：默认前后各 25 条，最多 50 条（F-36）。</summary>
+    private const int MessageContextDefaultWindow = 25;
+
+    private const int MessageContextMaxWindow = 50;
 
     private const int MaxIdLength = 64;
 
@@ -275,9 +287,11 @@ public sealed class MessageService
         message.DeletedAt = now;
         // 撤回后不再暴露原文与文件信息（协议 §4.3 规则 4）；file_id 保留供孤儿清理引用。
         message.ContentJson = "\"\"";
+        // F-36：撤回的是群置顶消息时清空置顶引用，由 MessageHub 在 message.recalled 之后推送 conv.updated。
+        var pinnedClearedConversationId = await ClearPinnedMessageIfMatchesAsync(message, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
 
-        return new MessageRecallResult(ToProtocolMessage(message), memberUserIds, Changed: true);
+        return new MessageRecallResult(ToProtocolMessage(message), memberUserIds, Changed: true, pinnedClearedConversationId);
     }
 
     /// <summary>
@@ -346,6 +360,23 @@ public sealed class MessageService
     }
 
     /// <summary>读取会话全部成员用户 ID（撤回/编辑广播用）。</summary>
+    /// <summary>F-36：若撤回的是群置顶消息，清空 conversations.pinned_message_id 并返回会话 ID。</summary>
+    private async Task<string?> ClearPinnedMessageIfMatchesAsync(
+        MessageEntity message,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(row => row.Id == message.ConversationId, cancellationToken);
+        if (conversation is null ||
+            !string.Equals(conversation.PinnedMessageId, message.Id, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        conversation.PinnedMessageId = null;
+        return conversation.Id;
+    }
+
     private async Task<IReadOnlyList<string>> LoadMemberUserIdsAsync(
         string conversationId,
         CancellationToken cancellationToken) =>
@@ -527,6 +558,81 @@ public sealed class MessageService
     }
 
     /// <summary>
+    /// F-36：按 messageId 或 seq 一次性加载目标消息附近窗口，用于置顶/搜索定位超出缓存范围的旧消息。
+    /// 只读取历史，不推进 lastSeq / 同步水位；窗口默认前后各 25 条（最大 50）。
+    /// </summary>
+    public async Task<MessageContextResult> GetMessageContextAsync(
+        string userId,
+        string conversationId,
+        string? messageId,
+        long? seq,
+        int? before,
+        int? after,
+        CancellationToken cancellationToken)
+    {
+        var scopeId = ValidateId(conversationId, "conversationId");
+        await EnsureMemberAsync(userId, scopeId, cancellationToken);
+
+        var hasMessageId = !string.IsNullOrWhiteSpace(messageId);
+        if (hasMessageId == (seq is not null))
+        {
+            throw ApiException.ValidationFailed("messageId 与 seq 必须且只能提供一个");
+        }
+
+        MessageEntity? target;
+        if (hasMessageId)
+        {
+            var id = ValidateId(messageId!, "messageId");
+            target = await _db.Messages.AsNoTracking()
+                .FirstOrDefaultAsync(m => m.ConversationId == scopeId && m.Id == id, cancellationToken);
+        }
+        else
+        {
+            if (seq is <= 0)
+            {
+                throw ApiException.ValidationFailed("seq 必须为正整数");
+            }
+
+            target = await _db.Messages.AsNoTracking()
+                .FirstOrDefaultAsync(m => m.ConversationId == scopeId && m.Seq == seq, cancellationToken);
+        }
+
+        if (target is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "消息不存在", 404);
+        }
+
+        var beforeCount = Math.Clamp(before ?? MessageContextDefaultWindow, 0, MessageContextMaxWindow);
+        var afterCount = Math.Clamp(after ?? MessageContextDefaultWindow, 0, MessageContextMaxWindow);
+
+        var older = await _db.Messages.AsNoTracking()
+            .Where(m => m.ConversationId == scopeId && m.Seq <= target.Seq)
+            .OrderByDescending(m => m.Seq)
+            .Take(beforeCount + 1)
+            .ToListAsync(cancellationToken);
+        var newer = await _db.Messages.AsNoTracking()
+            .Where(m => m.ConversationId == scopeId && m.Seq > target.Seq)
+            .OrderBy(m => m.Seq)
+            .Take(afterCount)
+            .ToListAsync(cancellationToken);
+
+        older.Reverse();
+        var window = older.Concat(newer).ToList();
+        var minSeq = window[0].Seq;
+        var maxSeq = window[^1].Seq;
+        var hasOlder = await _db.Messages.AsNoTracking()
+            .AnyAsync(m => m.ConversationId == scopeId && m.Seq < minSeq, cancellationToken);
+        var hasNewer = await _db.Messages.AsNoTracking()
+            .AnyAsync(m => m.ConversationId == scopeId && m.Seq > maxSeq, cancellationToken);
+
+        var replies = await LoadRepliesAsync(window, cancellationToken);
+        return new MessageContextResult(
+            window.Select(m => ToProtocolMessage(m, ReplyOf(m, replies))).ToList(),
+            hasOlder,
+            hasNewer);
+    }
+
+    /// <summary>
     /// F-11 消息搜索（REST）：只搜本人所在会话、仅 text 且未删除，按 seq 降序返回。
     /// 实现分两层：先用 SQLite 的 json_extract 取出解码后的文本做 LIKE 粗筛（中文按字面、
     /// ASCII 大小写不敏感），再在内存中 OrdinalIgnoreCase 复核原文，纠正 %/_ 通配符造成的假命中；
@@ -543,7 +649,12 @@ public sealed class MessageService
         int? limit,
         CancellationToken cancellationToken,
         long? beforeCreatedAt = null,
-        string? beforeMessageId = null)
+        string? beforeMessageId = null,
+        string? senderId = null,
+        long? from = null,
+        long? to = null,
+        bool timeCursor = false,
+        bool linkOnly = false)
     {
         var keyword = (query ?? string.Empty).Trim();
         if (keyword.Length == 0)
@@ -567,55 +678,89 @@ public sealed class MessageService
             throw ApiException.ValidationFailed("beforeSeq 必须为正整数");
         }
 
+        if (from is < 0 || to is < 0)
+        {
+            throw ApiException.ValidationFailed("from/to 必须为非负毫秒时间戳");
+        }
+
+        if (from is not null && to is not null && from > to)
+        {
+            throw ApiException.ValidationFailed("起始时间不能晚于结束时间");
+        }
+
         string? scopeConversationId = null;
+        string? senderUserId = null;
+        if (!string.IsNullOrWhiteSpace(senderId))
+        {
+            senderUserId = ValidateId(senderId, "senderId");
+        }
+
         MessageSearchCursor? cursor = null;
+        var timeCursorMode = false;
         if (!string.IsNullOrWhiteSpace(conversationId))
         {
             scopeConversationId = ValidateId(conversationId, "conversationId");
             await EnsureMemberAsync(userId, scopeConversationId, cancellationToken);
-            if (beforeCreatedAt is not null || beforeMessageId is not null)
+            if (beforeCreatedAt is not null || beforeMessageId is not null || timeCursor)
             {
                 throw ApiException.ValidationFailed("会话内搜索只支持 beforeSeq 翻页");
             }
         }
-        else if (beforeCreatedAt is not null || beforeMessageId is not null)
+        else if (timeCursor)
         {
-            if (beforeCreatedAt is null || string.IsNullOrWhiteSpace(beforeMessageId))
+            // 新客户端全局搜索：显式启用发送时间游标（F-36），按 (created_at, id) 排序翻页。
+            timeCursorMode = true;
+            if (beforeSeq is not null)
+            {
+                throw ApiException.ValidationFailed("时间游标模式不支持 beforeSeq");
+            }
+
+            if ((beforeCreatedAt is null) != string.IsNullOrWhiteSpace(beforeMessageId))
             {
                 throw ApiException.ValidationFailed("beforeCreatedAt 与 beforeMessageId 必须同时提供");
             }
 
-            cursor = new MessageSearchCursor(beforeCreatedAt.Value, beforeMessageId);
+            if (beforeCreatedAt is not null)
+            {
+                cursor = new MessageSearchCursor(beforeCreatedAt.Value, beforeMessageId!);
+            }
+        }
+        else if (beforeCreatedAt is not null || beforeMessageId is not null)
+        {
+            throw ApiException.ValidationFailed("全局时间游标需显式传 timeCursor=true");
         }
 
         // LIKE 只做粗筛（%q%）；q 中的 % / _ 会被当通配符，内存复核会按字面 Contains 纠正误命中。
+        // 普通模式匹配正文/文件名；显式链接模式（linkOnly）只匹配识别出的 HTTP/HTTPS URL。
         var pattern = $"%{keyword}%";
-        var collected = new List<MessageEntity>();
+        var collected = new List<(MessageEntity Entity, (string Id, long Seq, long CreatedAt) Candidate)>();
         long? seqCursor = beforeSeq;
         var hasMore = false;
-        var lastExamined = (Id: string.Empty, Seq: 0L, CreatedAt: 0L);
 
-        for (var round = 0; round < SearchMaxCandidateRounds && collected.Count < pageSize; round++)
+        while (true)
         {
             var windowSize = Math.Min(pageSize * 4, SearchMaxCandidateWindow);
             var candidates = await SearchCandidateIdsAsync(
                 userId,
                 pattern,
                 scopeConversationId,
-                scopeConversationId is null ? null : seqCursor,
-                scopeConversationId is null ? cursor : null,
+                seqCursor,
+                timeCursorMode ? cursor : null,
+                legacyGlobalSeq: scopeConversationId is null && !timeCursorMode,
+                senderUserId,
+                from,
+                to,
                 windowSize + 1,
                 cancellationToken);
 
-            hasMore = candidates.Count > windowSize;
-            if (hasMore)
+            var windowTruncated = candidates.Count > windowSize;
+            if (windowTruncated)
             {
                 candidates.RemoveAt(candidates.Count - 1);
             }
 
             if (candidates.Count == 0)
             {
-                hasMore = false;
                 break;
             }
 
@@ -627,47 +772,139 @@ public sealed class MessageService
 
             foreach (var candidate in candidates)
             {
-                lastExamined = candidate;
                 if (!byId.TryGetValue(candidate.Id, out var entity))
                 {
                     continue;
                 }
 
-                var text = ExtractTextContent(entity.ContentJson);
-                if (text is not null && text.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                if (!MessageMatchesSearch(entity, keyword, linkOnly))
                 {
-                    collected.Add(entity);
-                    if (collected.Count >= pageSize)
-                    {
-                        // 窗口内可能仍有未复核的候选，保守返回 hasMore=true 供客户端继续翻页。
-                        hasMore = true;
-                        break;
-                    }
+                    continue;
+                }
+
+                collected.Add((entity, candidate));
+                if (collected.Count > pageSize)
+                {
+                    // 多读一条实际命中：确认还有下一页，同时保证游标仍指向本页最后一条。
+                    hasMore = true;
+                    break;
                 }
             }
 
-            // 游标只推进到「已实际复核过」的候选，避免跳过同窗口内未复核的命中。
-            if (scopeConversationId is null)
+            if (hasMore)
             {
-                cursor = new MessageSearchCursor(lastExamined.CreatedAt, lastExamined.Id);
+                break;
+            }
+
+            // 游标只推进到「已实际复核过」的候选，避免跳过同窗口内未复核的命中。
+            var lastCandidate = candidates[^1];
+            if (timeCursorMode)
+            {
+                cursor = new MessageSearchCursor(lastCandidate.CreatedAt, lastCandidate.Id);
             }
             else
             {
-                seqCursor = lastExamined.Seq;
+                seqCursor = lastCandidate.Seq;
             }
 
-            if (!hasMore)
+            if (!windowTruncated)
             {
                 break;
             }
         }
 
+        if (collected.Count > pageSize)
+        {
+            collected.RemoveRange(pageSize, collected.Count - pageSize);
+        }
+
+        MessageSearchCursor? nextCursor = null;
+        if (timeCursorMode && hasMore && collected.Count > 0)
+        {
+            var last = collected[^1].Candidate;
+            nextCursor = new MessageSearchCursor(last.CreatedAt, last.Id);
+        }
+
         // F-09：搜索结果同样批量加载被引用消息，返回 reply 摘要（一次查询，避免 N+1）。
-        var replies = await LoadRepliesAsync(collected, cancellationToken);
+        var messages = collected.Select(item => item.Entity).ToList();
+        var replies = await LoadRepliesAsync(messages, cancellationToken);
         return new MessageSearchPage(
-            collected.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
+            messages.Select(row => ToProtocolMessage(row, ReplyOf(row, replies))).ToList(),
             hasMore,
-            scopeConversationId is null ? cursor : null);
+            nextCursor);
+    }
+
+    /// <summary>HTTP/HTTPS URL 识别（链接搜索只在这些 URL 内匹配关键词）。</summary>
+    private static readonly Regex HttpUrlPattern = new(
+        @"https?://[^\s<>`）】]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>从正文中提取 HTTP/HTTPS URL，并去掉常见的尾部标点。</summary>
+    private static IEnumerable<string> ExtractHttpUrls(string text)
+    {
+        foreach (Match match in HttpUrlPattern.Matches(text))
+        {
+            var url = match.Value.TrimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '。', '，', '；', '：', '！', '？', '）', '】');
+            if (url.Length > "https://".Length)
+            {
+                yield return url;
+            }
+        }
+    }
+
+    /// <summary>
+    /// F-37：搜索命中复核——普通模式匹配 text 正文（含正文里的链接字样）或 image/file 文件名；
+    /// 显式链接模式（linkOnly）只匹配识别出的 HTTP/HTTPS URL，不匹配普通正文或文件名。
+    /// </summary>
+    private static bool MessageMatchesSearch(MessageEntity message, string keyword, bool linkOnly)
+    {
+        if (linkOnly)
+        {
+            if (message.MsgType != MessageType.Text)
+            {
+                return false;
+            }
+
+            var linkText = ExtractTextContent(message.ContentJson);
+            return linkText is not null &&
+                ExtractHttpUrls(linkText).Any(url => url.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (message.MsgType == MessageType.Text)
+        {
+            var text = ExtractTextContent(message.ContentJson);
+            return text is not null && text.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (message.MsgType is MessageType.Image or MessageType.File)
+        {
+            var name = ExtractContentName(message.ContentJson);
+            return name is not null && name.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    /// <summary>从 content_json 的对象里取 name（文件消息文件名）；非对象/缺字段返回 null。</summary>
+    private static string? ExtractContentName(string contentJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return document.RootElement.TryGetProperty("name", out var name) &&
+                   name.ValueKind == JsonValueKind.String
+                ? name.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>从 content_json 中取出文本原文；非文本（对象/非法 JSON）返回 null。</summary>
@@ -687,9 +924,9 @@ public sealed class MessageService
     }
 
     /// <summary>
-    /// LIKE 粗筛候选（按 seq 降序，最多 take 条）：json_extract 取出解码后的文本再匹配
-    /// （content_json 里中文被转义为 \uXXXX，直接 LIKE JSON 列会漏掉中文），
-    /// 同时限定当前用户所在会话；返回 (id, seq) 供上层复核与游标推进。
+    /// LIKE 粗筛候选：text 匹配正文（链接同样在正文中），image/file 匹配文件名；
+    /// 限定当前用户所在会话并排除已撤回。会话内按 seq 倒序；全局新客户端按 (created_at, id)
+    /// 倒序，旧客户端只传 beforeSeq 时保持 seq 游标兼容（F-36）。
     /// </summary>
     private async Task<List<(string Id, long Seq, long CreatedAt)>> SearchCandidateIdsAsync(
         string userId,
@@ -697,8 +934,14 @@ public sealed class MessageService
         string? conversationId,
         long? beforeSeq,
         MessageSearchCursor? cursor,
+        bool legacyGlobalSeq,
+        string? senderId,
+        long? from,
+        long? to,
         int take,
         CancellationToken cancellationToken)
+
+
     {
         var connection = _db.Database.GetDbConnection();
         var shouldClose = connection.State != System.Data.ConnectionState.Open;
@@ -713,13 +956,35 @@ public sealed class MessageService
             // 全局：seq 只在单会话内可比，改用 (created_at, id) 复合游标，保证多会话翻页不重不漏。
             var isGlobal = conversationId is null;
             await using var command = (SqliteCommand)connection.CreateCommand();
-            command.CommandText = isGlobal
+            command.CommandText = legacyGlobalSeq
                 ? """
                   SELECT m.id, m.seq, m.created_at
                   FROM messages AS m
-                  WHERE m.msg_type = 'text'
+                  WHERE m.msg_type IN ('text', 'image', 'file')
                     AND m.deleted_at IS NULL
-                    AND json_extract(m.content_json, '$') LIKE @pattern
+                    AND (json_extract(m.content_json, '$') LIKE @pattern
+                         OR json_extract(m.content_json, '$.name') LIKE @pattern)
+                    AND (@senderId IS NULL OR m.sender_id = @senderId)
+                    AND (@from IS NULL OR m.created_at >= @from)
+                    AND (@to IS NULL OR m.created_at <= @to)
+                    AND EXISTS (
+                        SELECT 1 FROM conversation_members AS cm
+                        WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
+                    AND (@beforeSeq IS NULL OR m.seq < @beforeSeq)
+                  ORDER BY m.seq DESC, m.created_at DESC, m.id DESC
+                  LIMIT @take
+                  """
+                : isGlobal
+                ? """
+                  SELECT m.id, m.seq, m.created_at
+                  FROM messages AS m
+                  WHERE m.msg_type IN ('text', 'image', 'file')
+                    AND m.deleted_at IS NULL
+                    AND (json_extract(m.content_json, '$') LIKE @pattern
+                         OR json_extract(m.content_json, '$.name') LIKE @pattern)
+                    AND (@senderId IS NULL OR m.sender_id = @senderId)
+                    AND (@from IS NULL OR m.created_at >= @from)
+                    AND (@to IS NULL OR m.created_at <= @to)
                     AND EXISTS (
                         SELECT 1 FROM conversation_members AS cm
                         WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
@@ -732,9 +997,13 @@ public sealed class MessageService
                 : """
                   SELECT m.id, m.seq, m.created_at
                   FROM messages AS m
-                  WHERE m.msg_type = 'text'
+                  WHERE m.msg_type IN ('text', 'image', 'file')
                     AND m.deleted_at IS NULL
-                    AND json_extract(m.content_json, '$') LIKE @pattern
+                    AND (json_extract(m.content_json, '$') LIKE @pattern
+                         OR json_extract(m.content_json, '$.name') LIKE @pattern)
+                    AND (@senderId IS NULL OR m.sender_id = @senderId)
+                    AND (@from IS NULL OR m.created_at >= @from)
+                    AND (@to IS NULL OR m.created_at <= @to)
                     AND EXISTS (
                         SELECT 1 FROM conversation_members AS cm
                         WHERE cm.conversation_id = m.conversation_id AND cm.user_id = @userId)
@@ -754,6 +1023,9 @@ public sealed class MessageService
             command.Parameters.AddWithValue(
                 "@beforeMessageId",
                 (object?)cursor?.MessageId ?? DBNull.Value);
+            command.Parameters.AddWithValue("@senderId", (object?)senderId ?? DBNull.Value);
+            command.Parameters.AddWithValue("@from", (object?)from ?? DBNull.Value);
+            command.Parameters.AddWithValue("@to", (object?)to ?? DBNull.Value);
 
             var candidates = new List<(string Id, long Seq, long CreatedAt)>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);

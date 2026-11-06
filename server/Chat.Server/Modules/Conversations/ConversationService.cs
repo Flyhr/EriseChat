@@ -768,6 +768,133 @@ public sealed class ConversationService
         return new GroupProfileUpdateResult(conversation, memberUserIds);
     }
 
+
+    /// <summary>读取会话实体（不校验成员）：供置顶消息变更后按收件人视角重建 conv.updated。</summary>
+    public async Task<ConversationEntity?> GetConversationEntityAsync(
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            return null;
+        }
+
+        return await _db.Conversations.FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+    }
+
+    /// <summary>
+    /// 群置顶消息（F-36）：仅群主、单聊不支持；每群最多一条；目标消息必须属于本群且未撤回。
+    /// 成功后由调用方按收件人视角构建并推送 conv.updated。
+    /// </summary>
+    public async Task<GroupProfileUpdateResult> SetPinnedMessageAsync(
+        string currentUserId,
+        string conversationId,
+        string? messageId,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await GetEditableGroupConversationAsync(currentUserId, conversationId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            throw ApiException.ValidationFailed("messageId 不能为空");
+        }
+
+        var messageIdValue = messageId.Trim();
+        if (messageIdValue.Length > 128)
+        {
+            throw ApiException.ValidationFailed("messageId 格式不正确");
+        }
+
+        var message = await _db.Messages.AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.Id == messageIdValue && item.ConversationId == conversation.Id,
+                cancellationToken);
+        if (message is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "消息不存在或不属于该群", StatusCodes.Status404NotFound);
+        }
+
+        if (message.DeletedAt is not null)
+        {
+            throw ApiException.ValidationFailed("已撤回的消息不能置顶");
+        }
+
+        conversation.PinnedMessageId = messageIdValue;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var memberUserIds = await LoadGroupMemberUserIdsAsync(conversation.Id, cancellationToken);
+        _logger.LogInformation(
+            "群置顶消息设置：会话 {ConversationId}，消息 {MessageId}，操作者 {UserId}",
+            conversation.Id,
+            messageIdValue,
+            currentUserId);
+        return new GroupProfileUpdateResult(conversation, memberUserIds);
+    }
+
+    /// <summary>群置顶消息取消（F-36）：仅群主；无置顶时保持 NULL（幂等）。</summary>
+    public async Task<GroupProfileUpdateResult> ClearPinnedMessageAsync(
+        string currentUserId,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await GetEditableGroupConversationAsync(currentUserId, conversationId, cancellationToken);
+        conversation.PinnedMessageId = null;
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var memberUserIds = await LoadGroupMemberUserIdsAsync(conversation.Id, cancellationToken);
+        _logger.LogInformation(
+            "群置顶消息取消：会话 {ConversationId}，操作者 {UserId}",
+            conversation.Id,
+            currentUserId);
+        return new GroupProfileUpdateResult(conversation, memberUserIds);
+    }
+
+    /// <summary>群置顶/群资料操作的前置校验：会话存在、群聊、成员、群主。</summary>
+    private async Task<ConversationEntity> GetEditableGroupConversationAsync(
+        string currentUserId,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(conversationId))
+        {
+            throw ApiException.ValidationFailed("conversationId 不能为空");
+        }
+
+        var conversation = await _db.Conversations
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        if (conversation.Type != ConversationType.Group)
+        {
+            throw ApiException.ValidationFailed("仅群聊支持置顶消息");
+        }
+
+        var member = await _db.ConversationMembers.FirstOrDefaultAsync(
+            item => item.ConversationId == conversation.Id && item.UserId == currentUserId,
+            cancellationToken);
+        if (member is null)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不在此会话中", StatusCodes.Status403Forbidden);
+        }
+
+        if (member.Role != MemberRole.Owner)
+        {
+            throw new ApiException(ErrorCodes.Forbidden, "仅群主可以置顶消息", StatusCodes.Status403Forbidden);
+        }
+
+        return conversation;
+    }
+
+    private async Task<IReadOnlyList<string>> LoadGroupMemberUserIdsAsync(
+        string conversationId,
+        CancellationToken cancellationToken) =>
+        await _db.ConversationMembers.AsNoTracking()
+            .Where(member => member.ConversationId == conversationId)
+            .Select(member => member.UserId)
+            .ToListAsync(cancellationToken);
+
     /// <summary>
     /// 群头像（F-23）：空串=清空（返回 null）；非空时必须是存在、本人上传且 MIME 为图片的文件。
     /// </summary>
@@ -917,6 +1044,28 @@ public sealed class ConversationService
             }
         }
 
+        // F-36：群置顶消息快照（已撤回的不下发，防止刷新/重连后恢复旧内容）。
+        var pinnedMessageIds = conversations
+            .Where(conversation => conversation.PinnedMessageId is not null)
+            .Select(conversation => conversation.PinnedMessageId!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var pinnedMessages = new Dictionary<string, Message>(StringComparer.Ordinal);
+        if (pinnedMessageIds.Count > 0)
+        {
+            var pinnedRows = await _db.Messages.AsNoTracking()
+                .Where(message => pinnedMessageIds.Contains(message.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var row in pinnedRows)
+            {
+                if (row.DeletedAt is null)
+                {
+                    pinnedMessages[row.Id] = ToProtocolMessage(row);
+                }
+            }
+        }
+
         // F-26：未读数只统计他人发送且 seq 大于我的 lastReadSeq 的消息（自己发送的消息不计入，
         // 例如把消息转发到未打开的会话后，自己的未读徽标不会被自己的消息撑起来）。
         var unreadRows = await (
@@ -967,6 +1116,13 @@ public sealed class ConversationService
                 lastMessage = message;
             }
 
+            Message? pinnedMessage = null;
+            if (conversation.PinnedMessageId is not null &&
+                pinnedMessages.TryGetValue(conversation.PinnedMessageId, out var pinned))
+            {
+                pinnedMessage = pinned;
+            }
+
             result.Add(new Conversation(
                 conversation.Id,
                 conversation.Type,
@@ -981,7 +1137,8 @@ public sealed class ConversationService
                 conversation.Announcement,
                 conversation.AvatarFileId,
                 unreadByConversation.GetValueOrDefault(conversation.Id),
-                myMarkedUnread));
+                myMarkedUnread,
+                pinnedMessage));
         }
 
         return result

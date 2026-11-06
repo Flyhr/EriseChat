@@ -1,6 +1,7 @@
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
+using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Messages;
 using Microsoft.Extensions.Logging;
 
@@ -14,12 +15,21 @@ namespace Chat.Server.Realtime;
 public sealed class MessageHub
 {
     private readonly MessageService _messages;
+    private readonly ConversationService _conversations;
+    private readonly ConversationRealtimeNotifier _notifier;
     private readonly ConnectionManager _connections;
     private readonly ILogger<MessageHub> _logger;
 
-    public MessageHub(MessageService messages, ConnectionManager connections, ILogger<MessageHub> logger)
+    public MessageHub(
+        MessageService messages,
+        ConversationService conversations,
+        ConversationRealtimeNotifier notifier,
+        ConnectionManager connections,
+        ILogger<MessageHub> logger)
     {
         _messages = messages;
+        _conversations = conversations;
+        _notifier = notifier;
         _connections = connections;
         _logger = logger;
     }
@@ -129,6 +139,15 @@ public sealed class MessageHub
                     message.Seq,
                     message.MessageId,
                     sent);
+
+                // F-36：撤回的是置顶消息 → 先广播 message.recalled，再推按收件人视角的 conv.updated。
+                if (result.PinnedClearedConversationId is not null)
+                {
+                    await PushPinnedMessageUpdatedAsync(
+                        result.PinnedClearedConversationId,
+                        result.MemberUserIds,
+                        connectionAborted);
+                }
             }
             else
             {
@@ -288,6 +307,22 @@ public sealed class MessageHub
     }
 
     /// <summary>向会话全部成员的所有在线连接发送帧（含操作者本人，F-18 撤回/编辑广播语义）。</summary>
+    /// <summary>F-36：置顶消息被撤回后，按收件人视角重建会话并推送 conv.updated。</summary>
+    private async Task PushPinnedMessageUpdatedAsync(
+        string conversationId,
+        IReadOnlyList<string> memberUserIds,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await _conversations.GetConversationEntityAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return;
+        }
+
+        var perRecipient = await _conversations.BuildPerRecipientAsync(conversation, memberUserIds, cancellationToken);
+        _notifier.PushUpdatedPerRecipient(perRecipient);
+    }
+
     private async Task<int> BroadcastToAllAsync(IReadOnlyList<string> memberUserIds, FrameEnvelope frame)
     {
         var sent = 0;

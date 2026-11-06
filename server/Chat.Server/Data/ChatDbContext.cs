@@ -36,6 +36,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<FriendRequest> FriendRequests => Set<FriendRequest>();
 
+    public DbSet<Favorite> Favorites => Set<Favorite>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -52,6 +54,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureAppSettings(modelBuilder);
         ConfigureFriends(modelBuilder);
         ConfigureFriendRequests(modelBuilder);
+        ConfigureFavorites(modelBuilder);
     }
 
     /// <summary>枚举 ↔ TEXT 小写转换（与 schema.sql 的 CHECK 值域一致）。</summary>
@@ -159,6 +162,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(conversation => conversation.Title).HasColumnName("title");
             entity.Property(conversation => conversation.Announcement).HasColumnName("announcement");
             entity.Property(conversation => conversation.AvatarFileId).HasColumnName("avatar_file_id");
+            // F-36：群置顶消息 ID（便利引用、无外键）；NULL = 无置顶。
+            entity.Property(conversation => conversation.PinnedMessageId).HasColumnName("pinned_message_id");
             entity.Property(conversation => conversation.DirectKey).HasColumnName("direct_key");
             entity.HasIndex(conversation => conversation.DirectKey).IsUnique();
             entity.Property(conversation => conversation.CreatedBy).HasColumnName("created_by").IsRequired();
@@ -329,6 +334,28 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.HasKey(setting => setting.Key);
             entity.Property(setting => setting.Key).HasColumnName("key");
             entity.Property(setting => setting.Value).HasColumnName("value").IsRequired();
+        });
+    }
+
+    private static void ConfigureFavorites(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Favorite>(entity =>
+        {
+            entity.ToTable("favorites");
+            entity.HasKey(favorite => new { favorite.UserId, favorite.MessageId });
+            entity.Property(favorite => favorite.UserId).HasColumnName("user_id");
+            entity.Property(favorite => favorite.MessageId).HasColumnName("message_id");
+            entity.Property(favorite => favorite.CreatedAt).HasColumnName("created_at");
+
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(favorite => favorite.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Message>().WithMany()
+                .HasForeignKey(favorite => favorite.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(favorite => new { favorite.UserId, favorite.CreatedAt })
+                .HasDatabaseName("idx_favorites_user_created");
+            entity.HasIndex(favorite => favorite.MessageId).HasDatabaseName("idx_favorites_message");
         });
     }
 

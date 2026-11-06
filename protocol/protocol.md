@@ -47,7 +47,7 @@
 - 认证完成前只接受 `auth` 帧；收到其它帧 → `error`（`AUTH_REQUIRED`）并关闭 `4002`。
 - `seq` 由服务端在事务内分配，客户端不得携带、不得修改；消息落库后不可变。
 
-## 3. 帧总表（与计划 §4.2 一一对应，共 22 个 type）
+## 3. 帧总表（与计划 §4.2 一一对应，共 23 个 type）
 
 | type | 方向 | 用途 | 备注 |
 |---|---|---|---|
@@ -65,12 +65,13 @@
 | `sync.request` | C→S | 补拉请求 | 每会话携带 `lastSeq` |
 | `sync.response` | S→C | 补拉响应 | 每会话每批 ≤200 条 |
 | `conv.list` | 双向 | 会话列表 | C→S 请求 / S→C 返回全量 |
-| `conv.updated` | S→C | 会话变更推送 | 新建、标题/公告/群头像变更、成员、最新消息变化 |
+| `conv.updated` | S→C | 会话变更推送 | 新建、标题/公告/群头像变更、群置顶消息变更、成员、最新消息变化 |
 | `read.update` | C→S | 上报已读游标 | 打开会话滚到底部时上报 |
 | `read.updated` | S→C | 已读广播 | 单聊推对方成员；本人其他连接也同步（多端已读） |
 | `typing` | 双向 | 正在输入 | 3 秒节流，不落库 |
 | `presence` | S→C | 在线状态 | 有共同会话或好友关系 |
 | `friend.changed` | S→C | 好友/申请变更推送 | 客户端按 `kind` 更新本地好友与申请状态 |
+| `favorite.changed` | S→C | 个人收藏变更推送 | 同账号全部在线连接；客户端重新拉取收藏列表（F-38） |
 | `kicked` | S→C | 被踢下线 | 随后关闭连接 |
 | `error` | S→C | 统一错误 | 错误码见 §5 |
 
@@ -340,7 +341,7 @@ batch 对象：
 | `conversations` | array | 是 | 发生变化的 Conversation 数组；被移出/主动退出场景可为空数组 |
 | `removedConversationIds` | string[] | 否 | 当前连接用户被移出/主动退出群聊时，服务端推送该帧，`conversations` 可为空数组，`removedConversationIds` 列出被移除的会话；客户端收到后移除对应会话的本地状态（列表项、消息缓存、游标） |
 
-规则：触发场景为「新建会话、标题变更、公告变更、群头像变更、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化、当前用户手动标为未读/已读」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。被移出/主动退出场景下，该用户只收到 `removedConversationIds` 帧，不再收到该会话的 `conv.updated`。群资料（标题/公告）变更时服务端按**收件人视角**逐连接下发 `conv.updated`（每个成员的 `pinned` / `muted` / `lastReadSeq` 只反映自己），不会互相覆盖。
+规则：触发场景为「新建会话、标题变更、公告变更、群头像变更、群置顶消息设置/替换/取消（含置顶消息被撤回）、成员加入/退出、新消息导致 `lastSeq` / `lastMessage` 变化、当前用户手动标为未读/已读」。客户端按 `conversationId` 合并（upsert）；同一变化可能同时收到 `message.new` 与 `conv.updated`，客户端需去重。被移出/主动退出场景下，该用户只收到 `removedConversationIds` 帧，不再收到该会话的 `conv.updated`。群资料（标题/公告）变更时服务端按**收件人视角**逐连接下发 `conv.updated`（每个成员的 `pinned` / `muted` / `lastReadSeq` 只反映自己），不会互相覆盖。
 
 群聊创建与成员管理走 REST（见计划 §7）；成功后服务端在同一事务内写一条 `msgType=system` 消息（`seq` 严格 +1），并推送 `message.new`（在线成员）与 `conv.updated`（含全体成员的最新 Conversation）；客户端对 `message.new` 按 `messageId` 去重。
 
@@ -356,6 +357,7 @@ batch 对象：
 | `lastReadSeq` | integer | 是 | 当前用户在该会话的已读游标 |
 | `unread` | integer | 否 | 当前用户的未读数：只统计**他人发送**且 `seq > lastReadSeq` 的消息（自己发送的消息不计入）；服务端实时计算，客户端可直接展示；旧客户端忽略 |
 | `markedUnread` | bool | 否 | 当前用户是否手动「标为未读」（成员级设置，默认 `false`）：只影响未读筛选与提示，**不改** `lastReadSeq`、不撤销对端已读回执、不增加 `unread`；旧客户端忽略 |
+| `pinnedMessage` | object / null | 否 | 群置顶消息快照（Message）；仅 `group` 可能有值，单聊恒为 `null`；服务端只在消息存在且未撤回时下发，`null` 表示无置顶（F-36）；旧客户端忽略 |
 | `pinned` | bool | 否 | 当前用户是否置顶该会话（成员级设置，默认 `false`；旧客户端忽略） |
 | `muted` | bool | 否 | 当前用户是否对该会话免打扰（成员级设置，默认 `false`；旧客户端忽略） |
 | `announcement` | string / null | 否 | 群公告（≤500 字符，支持换行）；`null` / 缺省表示无公告；单聊恒为 `null`；旧客户端忽略 |
@@ -377,6 +379,8 @@ batch 对象：
 > 未读数由服务端在会话对象 `unread` 字段实时计算并下发：只统计他人发送、`seq > lastReadSeq` 的消息，自己发送的消息不计入（例如向未打开的会话转发消息后，自己不会收到未读徽标）。客户端不应再用 `lastSeq − lastReadSeq` 估算（会把本人消息误计为未读）；该字段可由旧客户端忽略（旧客户端仍会按旧公式展示）。
 
 > `pinned` / `muted` / `markedUnread` 是**当前登录用户自己的成员级设置**（`conversation_members` 行上的列）：服务端在 `conv.list`、`conv.updated`、`GET /api/conversations` 中按各自收件人填充，不广播给其他成员的其它设备；改动入口为 `PATCH /api/conversations/{conversationId}/member-settings`（body `{pinned?, muted?, markedUnread?}`，至少一项）。其中 `markedUnread` 变更时，服务端向**该用户本人的全部在线连接**推送一次按本人视角构建的 `conv.updated`（同账号多端同步），不向会话其他成员推送；`read.update` 不清除 `markedUnread`，只有当客户端显式 PATCH `markedUnread=false`（打开会话或「标为已读」）时清除。会话排序规则属客户端展示层：`conv.list` 仍按最近消息时间倒序，客户端可将置顶会话排在前面（置顶组内保持时间倒序）。
+
+> `pinnedMessage` 为群置顶消息（F-36）。设置/替换入口为 `PUT /api/conversations/{conversationId}/pinned-message`（body `{ "messageId": "<messages.id>" }`，仅群主，单聊不支持），取消入口为 `DELETE /api/conversations/{conversationId}/pinned-message`（仅群主）；成功后按收件人视角逐连接推送 `conv.updated`。每个群最多一条置顶；目标消息必须属于该群且未撤回。置顶消息被撤回时服务端自动清空并在 `message.recalled` 之后推送 `conv.updated`，客户端不得继续展示旧快照。与会话级 `pinned`（F-10）互不影响。错误：会话不存在 `NOT_FOUND`（404）、非群聊 `VALIDATION_FAILED`（400）、非成员 `NOT_MEMBER`（403）、非群主 `FORBIDDEN`（403）、消息不存在或不属于该群 `NOT_FOUND`（404）、已撤回 `VALIDATION_FAILED`（400）。
 >
 > `announcement` 为群公告，只有 `group` 会话可能有值；修改入口为 `PATCH /api/conversations/{conversationId}`（body `{title?, announcement?, avatarFileId?}`，仅群主可用，空串表示清空（落库 `null`））。
 >
@@ -513,6 +517,24 @@ batch 对象：
 4. `request.accepted` 推给申请人（附 `friend`），`request.rejected` 推给申请人；`request.cancelled` 推给被申请人；`friend.added` / `friend.removed` 推给双方；`friend.updated` 仅推给发起修改的一方。
 5. 好友关系与申请数据由服务端维护，客户端不得仅本地修改（数据归属见 `AGENTS.md` §2.8）。
 
+### 4.10 `favorite.changed`（个人收藏变更推送）
+
+`favorite.changed`（S→C，F-38）：当前账号在某台设备新增/取消收藏后，服务端向该账号全部在线连接推送，
+用于多端同步收藏列表与消息菜单状态；不落库、离线用户不补推，客户端登录/重连后用 `GET /api/favorites` 全量恢复。
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `favorite.changed` |
+| `messageId` | string | 是 | 发生变化的原消息 ID |
+| `favorited` | boolean | 是 | `true`=新增收藏；`false`=取消收藏 |
+| `changedAt` | integer | 是 | 变更时间（UTC 毫秒） |
+
+规则：
+
+1. 只推送给**收藏归属账号本人**的全部连接，不推送给会话其他成员。
+2. 客户端收到后可重新拉取收藏列表（幂等），不要仅凭帧增删本地快照，以免错过编辑/撤回导致的不可用状态。
+3. 未知字段忽略；旧客户端忽略未知 type。
+
 ## 5. 错误码
 
 错误码枚举的唯一来源为本表；实现放 `server/Chat.Protocol/Enums.cs`，前端 `apps/web/src/types/frames.d.ts` 镜像。REST 错误响应复用同一 `code` 枚举（响应体 `{ code, message, traceId }` 由 M1 的 API 层实现，`traceId` 用于排查，不返回敏感信息）。
@@ -609,7 +631,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | `size` | integer | 是 | 文件大小（字节） |
 | `mime` | string | 是 | MIME 类型 |
 
-3. **下载**：`GET /api/files/{fileId}`，需登录且请求者必须是引用该文件的会话成员；流式返回，不暴露磁盘路径。
+3. **下载**：`GET /api/files/{fileId}`，需登录且请求者必须是引用该文件的会话成员；流式返回，不暴露磁盘路径。只认**未撤回**的引用消息作为会话成员访问依据（F-38 收尾）；上传者本人、个人/群头像等独立授权仍按原规则放行。
 4. **图片**：客户端发送前压缩（最长边 1280px、约 ≤300KB）；图片消息与文件消息共用 FileContent。
 5. **存储**：`/data/files/yyyyMM/{fileId}{ext}`（逻辑路径，实际目录见 `appsettings.json`）；孤儿文件由后台任务清理。
 6. **引用持久化**：服务端在 `messages.file_id` 保存 image/file 消息引用的文件 ID（可空支撑列，不属于帧字段），用于下载时的会话成员鉴权与孤儿文件清理；帧格式不变。
@@ -627,6 +649,39 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - `artifacts`：object，固定含 `desktop` 与 `android` 两个键，值可能为 `null`（该平台暂无产物）；非 null 时结构为 `{ version, fileName, url, size, sha256, modifiedAt }`：`fileName` 为安装包文件名（供客户端保存下载文件用）、`url` 为同源相对地址 `/download/files/{fileName}`（客户端必须与当前服务器地址拼接后使用，禁止跨源下载）、`size` 为字节数、`sha256` 为小写十六进制摘要（客户端下载完成后必须校验一致才可执行/安装）、`modifiedAt` 为最近修改时间（UTC 毫秒）。
     - 产物只认 `EiseChat-Setup-x.y.z.exe` 与 `EiseChat-x.y.z.apk`（文件名版本号必须为三段数字），同平台存在多个合法版本时取最近修改的一个；`/download` 下载页行为不变。
     - 该接口不新增帧、不改库表，`protocolVersion` 仍为 1；Web 浏览器端只提示刷新页面，桌面/APK 壳负责下载与安装。
+
+11. **消息搜索（REST，v1，F-36）**：`GET /api/messages/search`，需登录，参数：
+    - `q`（必填，1~50 字符）：普通模式匹配文本内容与图片/文件名（image/file 消息的 `content.name`，正文里的 URL 字样按普通文本处理）；`linkOnly=true` 的链接模式只匹配文本消息中识别出的 HTTP/HTTPS URL，不匹配普通正文或文件名；不搜索附件正文、不抓取网页；
+    - `conversationId`（可选）：限定会话内搜索，需为会话成员；
+    - `senderId`（可选）：按发送人过滤；
+    - `from` / `to`（可选，UTC 毫秒）：按发送时间筛选，包含端点；客户端按用户本地日历换算（本地日期 00:00:00.000 ~ 23:59:59.999）后传入；
+    - `limit`（1~50，默认 20）；只返回未撤回消息，且必须属于当前用户所在会话。
+    - 分页共三种模式，客户端按请求参数选择：
+      - **会话内**（带 `conversationId`）：使用 `beforeSeq`，按 `seq` 倒序翻页；不接受 `timeCursor` / `beforeCreatedAt` / `beforeMessageId`。
+      - **旧全局**（不带 `conversationId`）：`timeCursor` 缺省或 `false`，使用 `beforeSeq` 按原 `seq` 倒序规则翻页（兼容旧客户端，不重复返回第一页）。
+      - **新全局**（不带 `conversationId` 且 `timeCursor=true`）：首页不传游标；之后用上一页响应 `nextCursor` 的 `beforeCreatedAt` + `beforeMessageId`，按 `(createdAt, messageId)` 倒序翻页，同一时间戳的消息不会重复或漏掉。
+    - `timeCursor` 为可选布尔参数，缺省按 `false` 处理（HTTP 请求入口不得要求必填）。
+    - `linkOnly` 为可选布尔参数，缺省 `false`（普通搜索）；为 `true` 时只匹配识别出的 HTTP/HTTPS URL，分页模式与 `hasMore` 口径不变。
+    - `hasMore` 表示按实际匹配结果是否还有下一页：多取一条实际命中判断，最后一页恰好填满时为 `false`；剩余候选被关键词复核过滤后同样为 `false`（普通模式与链接模式一致）。
+    - 切换关键词、筛选项或搜索范围时客户端应从首页重新查询。不新增帧、不改库表，`protocolVersion` 仍为 1。
+
+12. **按目标消息定位上下文（REST，v1，F-36）**：`GET /api/conversations/{conversationId}/messages/context`，需登录且为会话成员。参数：
+    - `messageId` 或 `seq`（二选一，必须且只能提供一个）：目标消息；
+    - `before` / `after`（可选，0~50，默认 25）：目标前后各返回多少条；返回消息按 `seq` 升序，响应 `hasOlder` / `hasNewer` 表示窗口外是否还有更早/更新消息。
+    - 用途：置顶消息、搜索结果的跳转定位；只读取历史，不推进客户端的 `lastSeq` / 同步水位，不得以「从最新消息逐页补拉」代替。目标不存在或不属于该会话返回 404。
+
+13. **个人收藏（REST，v1，F-38）**：收藏由服务端保存（SQLite 为事实源），同账号跨 Web/Windows/Android 同步。均为个人数据，只对当前登录账号生效。
+
+    - `GET /api/favorites`：返回当前账号的收藏列表（按收藏时间倒序），响应为数组；元素：
+      - `messageId`、`conversationId`、`conversationTitle`、`senderName`：收藏时的来源信息（标题/昵称取当前值）；
+      - `favoritedAt`（UTC 毫秒）；`available`（boolean，原消息当前是否仍可访问）；
+      - `message`（object|null）：`available=true` 时为原消息最新快照（含编辑后的 `content`/`editedAt`；格式同 `message.new.message`）；`available=false` 时恒为 `null`，客户端不得展示正文、文件名或附件预览，只显示「原消息不可用」。
+      - 不可用原因：原消息已撤回、原消息不存在、或当前账号已失去该会话访问权。收藏条目不随消息撤回/退出会话自动删除，由用户手动移除。
+    - `POST /api/favorites`：body `{ "messageId": "..." }`，新增收藏。要求原消息存在、当前账号仍为会话成员、消息未撤回且类型为 text/image/file/voice；单账号最多 500 条（超出返回 `VALIDATION_FAILED`，文案「收藏已达上限（最多 500 条）」）。**幂等**：已收藏时直接返回现有条目，不重复写入，可安全重试。
+    - `DELETE /api/favorites/{messageId}`：取消收藏。**幂等**：不存在时同样返回 `204`，可安全重试。
+    - 成功后服务端向本人全部在线连接推送 `favorite.changed`（§4.10）。收藏只保存「账号 + 原消息引用 + 收藏时间」，不复制消息内容；原消息编辑后列表显示新内容，撤回/失去访问权后转为不可用。
+    - 附件仍走 `GET /api/files/{fileId}` 的会话成员鉴权下载，收藏不绕过文件访问权限。旧版仅存本机 IndexedDB 的收藏由客户端提供显式导入入口，逐条提交原消息引用并由服务端逐条校验；导入成功的客户端记录迁移来源，避免重复导入。
+    - 客户端登录或重连认证成功后重新拉取列表，同账号多端通过 `favorite.changed` 刷新；500 条上限与新增写入在同一条 SQL 内原子判断（并发不会超过上限），重复收藏幂等成功。
 
 示例（图片消息）：
 
@@ -703,7 +758,9 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-15 共享文件） | 2026-10-28 | 新增 `GET /api/conversations/{conversationId}/files`（type=image 或 file、beforeSeq、limit）共享文件汇总接口：只统计 `messages.file_id` 非空的 image/file 消息、按文件去重取最新引用 seq、按 seq 降序分页（beforeSeq 排他）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-18 撤回与编辑） | 2026-10-28 | 新增 4 个帧（共 22 个 type）：`message.recall` / `message.recalled` / `message.edit` / `message.edited`（§4.3）；撤回窗口 120s、编辑窗口 900s，仅发送者本人，撤回后 content 为空且不再返回文件信息，编辑仅 text、内容 1..4096；Message 新增可选 `editedAt`，`deletedAt` 语义改为「非空=已撤回」；messages 新增 `edited_at INTEGER` 列（`protocol/schema.sql` 同步）；无新 REST 端点，历史/同步返回最新状态；`protocolVersion` 仍为 1 |
 | v1（标为未读） | 2026-11-04 | Conversation 新增可选字段 `markedUnread`（成员级设置，默认 `false`）；`conversation_members` 新增 `marked_unread` 列（`protocol/schema.sql` 同步）；`PATCH /api/conversations/{conversationId}/member-settings` body 增加可选 `markedUnread`（至少一项），变更时仅向本人其他在线连接推送按本人视角构建的 `conv.updated`；不改 `last_read_seq`、不撤销对端已读回执、不增加 `unread`；无新帧，`protocolVersion` 仍为 1 |
+| v1（群置顶消息） | 2026-11-04 | Conversation 新增可选字段 `pinnedMessage`（群置顶消息快照，仅 group、消息存在且未撤回时下发，null=无置顶）；`conversations` 新增 `pinned_message_id TEXT` 列（`protocol/schema.sql` 同步）；新增 REST `PUT/DELETE /api/conversations/{conversationId}/pinned-message`（仅群主、单聊不支持）；置顶消息被撤回时自动清空并推 `conv.updated`；与会话级 `pinned` 无关；无新帧，`protocolVersion` 仍为 1 |
 | v1（F-26 未读口径） | 2026-10-28 | Conversation 新增可选字段 `unread`（当前用户未读数，只统计他人发送且 `seq > lastReadSeq` 的消息，自己发送的消息不计入；服务端实时计算，客户端可直接展示；旧客户端忽略）；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（F-38 收藏跨设备同步） | 2026-11-04 | 新增服务端个人收藏（`favorites` 表：账号 + 原消息引用 + 收藏时间，单账号上限 500）与 REST `GET/POST /api/favorites`、`DELETE /api/favorites/{messageId}`（新增/取消幂等）；新增推送帧 `favorite.changed`（共 23 个 type，§4.10），向本人全部在线连接同步；收藏列表只展示仍可访问的原消息，撤回/失去会话访问权显示不可用；收尾：500 上限与新增写入原子执行（并发不超限）、下载鉴权不再以已撤回消息作为成员访问依据、客户端重连后自动刷新；`protocolVersion` 仍为 1 |
 
 | v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-22 多端在线） | 2026-11-01 | 连接策略由「单活动连接」改为「每账号最多 3 个连接」（`App:MaxConnectionsPerUser` 可配，裁到 1~10），超限踢「最早建立」的连接；`read.updated` 增加下发给本人其他连接（多端已读同步），群聊仍不向其他成员广播；`kicked` 帧结构与 `4001` 关闭码不变，仅语义/文案扩展；无新帧、不改库表、`protocolVersion` 仍为 1 |

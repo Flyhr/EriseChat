@@ -11,6 +11,7 @@ using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
+using Chat.Server.Modules.Favorites;
 using Chat.Server.Modules.Friends;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Modules.Release;
@@ -88,6 +89,9 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<SystemMessageWriter>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddSingleton<ConversationRealtimeNotifier>();
+
+// F-38：个人收藏（SQLite 事实源，跨设备同步）；变更经 WS favorite.changed 推本人全部连接。
+builder.Services.AddScoped<FavoritesService>();
 
 // F-17：好友关系（好友申请/好友列表/备注分组）与 friend.changed 推送。
 builder.Services.AddScoped<FriendService>();
@@ -277,6 +281,8 @@ app.MapUserEndpoints();
 // 登录会话（F-13）：GET /api/sessions 与 DELETE /api/sessions/{sessionId}（软撤销 + WS 踢下线）。
 app.MapSessionEndpoints();
 app.MapFriendEndpoints();
+// 个人收藏（F-38）：GET/POST /api/favorites、DELETE /api/favorites/{messageId}。
+app.MapFavoriteEndpoints();
 
 // 会话 REST（M1-07）：创建单聊、会话列表、单会话读取。
 app.MapConversationsEndpoints();
