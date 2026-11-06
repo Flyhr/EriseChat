@@ -22,6 +22,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 后台消息提醒：应用退到后台后保持一条 WebSocket 连接，收到新消息时发系统通知。 -->
+        <service
+            android:name=".ChatSocketService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -41,4 +47,8 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- F-29：应用内下载 APK 后调起系统安装器；Android 8+ 需声明该权限，Android 11+ 仍需用户允许「安装未知应用」。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 后台消息提醒：Android 13+ 通知运行时权限；前台服务类型 dataSync 需对应权限。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 </manifest>
