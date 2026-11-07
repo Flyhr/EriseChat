@@ -1,10 +1,12 @@
 package com.eisechat.mobile;
 
 import android.Manifest;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.JSObject;
@@ -51,6 +53,15 @@ public class BackgroundNotifyPlugin extends Plugin {
             requestPermissionForAlias("notifications", call, "notificationsPermissionCallback");
             return;
         }
+        String blocked = blockedNotificationReason();
+        if (blocked != null) {
+            JSObject result = new JSObject();
+            result.put("started", false);
+            result.put("permission", true);
+            result.put("reason", blocked);
+            call.resolve(result);
+            return;
+        }
         startService(call, wsUrl, apiBase, token, deviceId, userId);
     }
 
@@ -70,6 +81,15 @@ public class BackgroundNotifyPlugin extends Plugin {
         String userId = call.getString("userId");
         if (wsUrl == null || apiBase == null || token == null || deviceId == null || userId == null) {
             call.reject("缺少连接参数");
+            return;
+        }
+        String blocked = blockedNotificationReason();
+        if (blocked != null) {
+            JSObject result = new JSObject();
+            result.put("started", false);
+            result.put("permission", true);
+            result.put("reason", blocked);
+            call.resolve(result);
             return;
         }
         startService(call, wsUrl, apiBase, token, deviceId, userId);
@@ -101,13 +121,23 @@ public class BackgroundNotifyPlugin extends Plugin {
     public void isRunning(PluginCall call) {
         JSObject result = new JSObject();
         result.put("running", ChatSocketService.isRunning());
+        result.put("connected", ChatSocketService.isConnected());
+        String stopReason = ChatSocketService.getLastStopReason();
+        if (stopReason != null) {
+            result.put("stopReason", stopReason);
+        }
         call.resolve(result);
     }
 
     @PluginMethod
     public void setState(PluginCall call) {
-        Boolean foreground = call.getBoolean("foreground", true);
-        ChatSocketService.setAppForeground(foreground == null || foreground);
+        // 前后台由 Android 原生生命周期决定；Web 只更新当前会话，避免延迟调用把后台误标为前台。
+        if (call.hasOption("foreground")) {
+            Boolean foreground = call.getBoolean("foreground");
+            if (foreground != null) {
+                ChatSocketService.setAppForeground(foreground);
+            }
+        }
         ChatSocketService.setForegroundConversation(call.getString("conversationId"));
         call.resolve();
     }
@@ -122,8 +152,29 @@ public class BackgroundNotifyPlugin extends Plugin {
         call.resolve(result);
     }
 
-    private boolean needsNotificationPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+    /** 系统通知开关或消息渠道被关闭时返回原因，避免「开关为开但收不到通知」。 */
+    private String blockedNotificationReason() {
+        Context context = getContext();
+        if (context == null) {
+            return "context_unavailable";
+        }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            return "notifications_disabled";
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = context.getSystemService(NotificationManager.class);
+            if (manager != null) {
+                android.app.NotificationChannel channel =
+                    manager.getNotificationChannel(ChatSocketService.CHANNEL_MESSAGES);
+                if (channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE) {
+                    return "channel_disabled";
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean needsNotificationPermission() {        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             return false;
         }
         Context context = getContext();
