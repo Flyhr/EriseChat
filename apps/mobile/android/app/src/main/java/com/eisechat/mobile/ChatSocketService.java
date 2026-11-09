@@ -220,6 +220,8 @@ public class ChatSocketService extends Service {
             NotificationManager.IMPORTANCE_HIGH
         );
         messages.setDescription("收到新消息时提醒");
+        // 锁屏时显示完整内容（不因锁屏隐藏摘要）；锁屏是否弹出仍取决于系统锁屏通知/横幅设置。
+        messages.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         manager.createNotificationChannel(messages);
     }
 
@@ -953,6 +955,8 @@ public class ChatSocketService extends Service {
             .setOnlyAlertOnce(update)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setWhen(System.currentTimeMillis())
             .build();
         NotificationManagerCompat.from(this).notify(
             messageTag(conversationId),
@@ -978,6 +982,8 @@ public class ChatSocketService extends Service {
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setWhen(System.currentTimeMillis())
             .build();
         NotificationManagerCompat.from(this).notify(
             messageTag(conversationId),
