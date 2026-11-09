@@ -33,11 +33,13 @@ RUN dotnet publish server/Chat.Server/Chat.Server.csproj -c Release -o /out \
 FROM ${DOTNET_REGISTRY}/dotnet/aspnet:10.0 AS runtime
 ARG APP_UID=1000
 ARG APP_GID=1000
+# 基础镜像（Ubuntu 24.04）自带的 ubuntu 用户已占用 1000:1000；
+# 已存在时复用该数字 UID/GID（USER 使用数字，不依赖 eisechat 账号名）。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid "${APP_GID}" eisechat \
-    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --no-create-home --shell /usr/sbin/nologin eisechat
+    && (getent group "${APP_GID}" >/dev/null || groupadd --gid "${APP_GID}" eisechat) \
+    && (getent passwd "${APP_UID}" >/dev/null || useradd --uid "${APP_UID}" --gid "${APP_GID}" --no-create-home --shell /usr/sbin/nologin eisechat)
 WORKDIR /app
 COPY --from=build /out ./
 # 数据目录由数据卷挂载覆盖；这里先建好并授权，保证容器在无卷/首次启动时也可写

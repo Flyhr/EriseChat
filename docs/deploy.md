@@ -487,6 +487,12 @@ SQLite 已启用 WAL；备份用 `VACUUM INTO`。确认没有第二个进程直�
 4. `curl http://127.0.0.1:6580/api/version`：404 表示仍是旧镜像，200 且带 artifacts 表示已是新代码；
 5. 浏览器硬刷新（Ctrl+F5）；Electron/Android 壳内嵌静态资源，需要重打对应 exe/APK 才能看到新界面。
 
+### 10.9 Docker 构建报 `groupadd: GID '1000' already exists`
+
+`mcr.microsoft.com/dotnet/aspnet:10.0` 基于 Ubuntu 24.04，自带 `ubuntu` 用户已占用 `1000:1000`。当前 `infra/docker/Dockerfile` 已改为“已存在则复用该数字 UID/GID”，正常情况下不会再出现。
+
+若仍报错，通常是 `src/` 仍是旧源码（见 §3.1.4）：确认解压后 `grep -n 'getent group' /opt/eisechat/src/infra/docker/Dockerfile` 能看到按存在性建用户的逻辑，再执行部署。
+
 ---
 
 ## 11. 上线检查清单
