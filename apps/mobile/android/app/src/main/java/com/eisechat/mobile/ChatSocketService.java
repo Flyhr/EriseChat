@@ -23,6 +23,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -60,6 +61,7 @@ public class ChatSocketService extends Service {
     public static final String CHANNEL_MESSAGES = "messages";
     private static final int NOTIFICATION_ID_SERVICE = 10101;
     private static final int NOTIFICATION_ID_MESSAGE = 10102;
+    private static final String MESSAGE_TAG_PREFIX = "eisechat-conv:";
     private static final int MAX_PREVIEW_LENGTH = 120;
 
     /** 协议版本（protocol/protocol.md §1，当前为 1）。 */
@@ -78,20 +80,37 @@ public class ChatSocketService extends Service {
 
     /** 通知点击回调：由插件在 load 时注册，用于把 conversationId 转发给 WebView。 */
     public interface ClickReporter {
-        void onNotificationClick(String conversationId);
+        void onNotificationClick(String conversationId, @Nullable String userId, @Nullable String serverUrl);
+    }
+
+    /** 服务状态回调：由插件在 load 时注册，实时更新设置页显示。 */
+    public interface StateReporter {
+        void onStateChanged(boolean running, boolean connected, @Nullable String stopReason);
     }
 
     private static volatile ClickReporter clickReporter;
+    private static volatile StateReporter stateReporter;
     private static volatile boolean lifecycleInstalled;
     private static volatile boolean running;
     private static volatile boolean connected;
     private static volatile boolean appForeground = true;
     private static volatile String foregroundConversationId;
     private static volatile String pendingConversationId;
+    /** 通知点击携带的来源账号与服务器，用于冷启动后校验是否仍属当前登录。 */
+    private static volatile String pendingClickUserId;
+    private static volatile String pendingClickServer;
     /** 因被踢/认证失败等原因主动终止后，忽略同参数的系统自动重建，避免互踢循环。 */
     private static volatile boolean terminalStopped;
     /** 最近一次致命终止原因（auth_failed/protocol_mismatch/kicked/auth_closed），供状态展示使用。 */
     private static volatile String lastStopReason;
+    /** 终止原因所属的会话（userId|wsUrl）；跨服务实例/进程保留，防止 WebView 重载后自动恢复。 */
+    private static volatile String lastStopSessionKey;
+    /** 当前服务实例已配置的会话键；切换账号/服务器时据此清理旧的终止标记。 */
+    private static volatile String configuredSessionKey;
+
+    private static final String STATE_PREFS = "eisechat_background_state";
+    private static final String PREF_TERMINAL_SESSION = "terminal_session";
+    private static final String PREF_TERMINAL_REASON = "terminal_reason";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
@@ -120,6 +139,16 @@ public class ChatSocketService extends Service {
     private final Map<String, String> conversationTitles = new HashMap<>();
     private final Map<String, Boolean> mutedConversations = new HashMap<>();
     private final Map<String, String> memberNames = new HashMap<>();
+    /** 每个会话已展示通知对应的消息（用于去重、编辑与撤回匹配）。 */
+    private final Map<String, String> notifiedMessageIds = new HashMap<>();
+    private final Map<String, Long> notifiedMessageSeqs = new HashMap<>();
+    private final Map<String, String> notifiedTitles = new HashMap<>();
+    /** 会话状态就绪前到达的最新消息候选（每会话仅保留最新一条）。 */
+    private final Map<String, JSONObject> pendingCandidates = new HashMap<>();
+    /** 每个会话已应用状态的版本：事件更新递增，用于 GET 响应按会话合并。 */
+    private final Map<String, Long> conversationVersions = new HashMap<>();
+    private long conversationVersionCounter;
+    private static volatile ChatSocketService currentInstance;
     private final Runnable reconnectRunnable = this::connect;
 
     private final Runnable heartbeatRunnable = new Runnable() {
@@ -143,14 +172,15 @@ public class ChatSocketService extends Service {
         }
     };
 
-    /** 启动前台服务（应用在前台时由 Web 侧调用）；同参数重复调用会复用现有连接。 */
+    /** 启动前台服务（用户显式开启或登录态自动同步）；同参数重复调用会复用现有连接。 */
     public static void start(
         Context context,
         String wsUrl,
         String apiBase,
         String token,
         String deviceId,
-        String userId
+        String userId,
+        boolean userInitiated
     ) {
         Intent intent = new Intent(context, ChatSocketService.class);
         intent.putExtra(EXTRA_WS_URL, wsUrl);
@@ -158,7 +188,7 @@ public class ChatSocketService extends Service {
         intent.putExtra(EXTRA_TOKEN, token);
         intent.putExtra(EXTRA_DEVICE_ID, deviceId);
         intent.putExtra(EXTRA_USER_ID, userId);
-        intent.putExtra(EXTRA_USER_INITIATED, true);
+        intent.putExtra(EXTRA_USER_INITIATED, userInitiated);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
         } else {
@@ -166,10 +196,85 @@ public class ChatSocketService extends Service {
         }
     }
 
+    /** 首次启动服务前创建通知渠道（幂等）；供插件在权限检查前预先创建。 */
+    public static void ensureChannels(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (manager == null) {
+            return;
+        }
+        NotificationChannel service = new NotificationChannel(
+            CHANNEL_SERVICE,
+            "后台消息服务",
+            NotificationManager.IMPORTANCE_LOW
+        );
+        service.setDescription("应用在后台时接收新消息");
+        service.setShowBadge(false);
+        manager.createNotificationChannel(service);
+
+        NotificationChannel messages = new NotificationChannel(
+            CHANNEL_MESSAGES,
+            "新消息",
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        messages.setDescription("收到新消息时提醒");
+        manager.createNotificationChannel(messages);
+    }
+
     /** 停止后台提醒服务（关闭常驻通知并断开连接）。显式停止允许下次重新启动。 */
     public static void stop(Context context) {
         terminalStopped = false;
+        lastStopReason = null;
+        lastStopSessionKey = null;
+        configuredSessionKey = null;
+        context
+            .getApplicationContext()
+            .getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .remove(PREF_TERMINAL_SESSION)
+            .remove(PREF_TERMINAL_REASON)
+            .apply();
         context.stopService(new Intent(context, ChatSocketService.class));
+    }
+
+    private static String sessionKeyOf(String userId, String wsUrl) {
+        return (userId == null ? "" : userId) + "|" + (wsUrl == null ? "" : wsUrl);
+    }
+
+    private String persistedTerminalReason(String sessionKey) {
+        if (!sessionKey.equals(lastStopSessionKey) && lastStopSessionKey != null) {
+            return null;
+        }
+        String storedSession = getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+            .getString(PREF_TERMINAL_SESSION, null);
+        if (!sessionKey.equals(storedSession)) {
+            return null;
+        }
+        return getSharedPreferences(STATE_PREFS, MODE_PRIVATE).getString(PREF_TERMINAL_REASON, null);
+    }
+
+    private void rememberTerminalState(String reason) {
+        String sessionKey = sessionKeyOf(userId, wsUrl);
+        lastStopReason = reason;
+        lastStopSessionKey = sessionKey;
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+            .edit()
+            .putString(PREF_TERMINAL_SESSION, sessionKey)
+            .putString(PREF_TERMINAL_REASON, reason)
+            .apply();
+    }
+
+    private void clearTerminalState() {
+        terminalStopped = false;
+        lastStopReason = null;
+        lastStopSessionKey = null;
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE)
+            .edit()
+            .remove(PREF_TERMINAL_SESSION)
+            .remove(PREF_TERMINAL_REASON)
+            .apply();
     }
 
     public static boolean isRunning() {
@@ -189,6 +294,17 @@ public class ChatSocketService extends Service {
 
     public static void setClickReporter(ClickReporter reporter) {
         clickReporter = reporter;
+    }
+
+    public static void setStateReporter(StateReporter reporter) {
+        stateReporter = reporter;
+    }
+
+    private void publishState() {
+        StateReporter reporter = stateReporter;
+        if (reporter != null) {
+            reporter.onStateChanged(running, connected, lastStopReason);
+        }
     }
 
     /**
@@ -250,10 +366,29 @@ public class ChatSocketService extends Service {
 
     /** 读取并清除冷启动由通知带起的待打开会话。 */
     @Nullable
-    public static String consumePendingClick() {
-        String value = pendingConversationId;
+    public static JSONObject consumePendingClick() {
+        String conversationId = pendingConversationId;
+        String userId = pendingClickUserId;
+        String serverUrl = pendingClickServer;
         pendingConversationId = null;
-        return value;
+        pendingClickUserId = null;
+        pendingClickServer = null;
+        if (conversationId == null || conversationId.trim().isEmpty()) {
+            return null;
+        }
+        JSONObject result = new JSONObject();
+        try {
+            result.put("conversationId", conversationId);
+            if (userId != null && !userId.trim().isEmpty()) {
+                result.put("userId", userId);
+            }
+            if (serverUrl != null && !serverUrl.trim().isEmpty()) {
+                result.put("serverUrl", serverUrl);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+        return result;
     }
 
     /** MainActivity 在 onCreate/onNewIntent 调用：处理通知点击带起的会话。 */
@@ -265,11 +400,17 @@ public class ChatSocketService extends Service {
         if (conversationId == null || conversationId.trim().isEmpty()) {
             return;
         }
+        String clickUserId = intent.getStringExtra("eisechat_click_user_id");
+        String clickServer = intent.getStringExtra("eisechat_click_server");
         intent.removeExtra("eisechat_conversation_id");
+        intent.removeExtra("eisechat_click_user_id");
+        intent.removeExtra("eisechat_click_server");
         pendingConversationId = conversationId;
+        pendingClickUserId = clickUserId;
+        pendingClickServer = clickServer;
         ClickReporter reporter = clickReporter;
         if (reporter != null) {
-            reporter.onNotificationClick(conversationId);
+            reporter.onNotificationClick(conversationId, clickUserId, clickServer);
         }
     }
 
@@ -282,6 +423,7 @@ public class ChatSocketService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        currentInstance = this;
         createChannels();
     }
 
@@ -306,8 +448,14 @@ public class ChatSocketService extends Service {
             && nextToken.equals(token)
             && nextDeviceId.equals(deviceId)
             && nextUserId.equals(userId);
-        if (sameSession && terminalStopped && !userInitiated) {
-            // 被踢/认证失败后已被主动终止：忽略系统重建，避免互踢循环；仅用户在前台重新开启时允许恢复。
+        String sessionKey = sessionKeyOf(nextUserId, nextWsUrl);
+        String storedTerminalReason = persistedTerminalReason(sessionKey);
+        if (!userInitiated && storedTerminalReason != null) {
+            // 被踢/认证失败/超时终止后仅允许用户主动开启恢复；WebView 重载、系统重建和服务新实例的
+            // 空连接字段都不能绕过（会话键持久化，跨进程实例有效）。
+            lastStopReason = storedTerminalReason;
+            lastStopSessionKey = sessionKey;
+            publishState();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -315,6 +463,13 @@ public class ChatSocketService extends Service {
             // 账号/令牌/服务器变化：先让旧连接与回调失效并清理旧状态，再按新参数认证。
             resetConnectionState();
         }
+        if (userInitiated) {
+            clearTerminalState();
+        } else if (configuredSessionKey != null && !configuredSessionKey.equals(sessionKey)) {
+            // 自动同步切换到另一个账号/服务器：旧会话的终止标记不再适用。
+            clearTerminalState();
+        }
+        configuredSessionKey = sessionKey;
         wsUrl = nextWsUrl;
         token = nextToken;
         deviceId = nextDeviceId;
@@ -323,21 +478,44 @@ public class ChatSocketService extends Service {
         terminalStopped = false;
         stopped = false;
         running = true;
-        updateForegroundNotification(connected ? "正在接收新消息" : "正在连接");
+        publishState();
+        if (!promoteForeground(connected ? "正在接收新消息" : "正在连接")) {
+            return START_NOT_STICKY;
+        }
         if (!sameSession || webSocket == null) {
             connect();
         }
         return START_STICKY;
     }
 
+    /** 首次提升前台服务失败时明确终止并回传原因，避免留下「运行中」的错误状态。 */
+    private boolean promoteForeground(String text) {
+        try {
+            startForeground(NOTIFICATION_ID_SERVICE, buildServiceNotification(text));
+            return true;
+        } catch (Exception error) {
+            lastStopReason = "foreground_start_failed";
+            terminalStopped = true;
+            stopped = true;
+            running = false;
+            connected = false;
+            handler.removeCallbacksAndMessages(null);
+            closeSocket("foreground_start_failed");
+            clearRuntimeState();
+            publishState();
+            stopSelf();
+            return false;
+        }
+    }
+
     @Override
     public void onDestroy() {
+        currentInstance = null;
         stopped = true;
         running = false;
-        connected = false;
-        handler.removeCallbacksAndMessages(null);
         closeSocket("service_destroyed");
-        resetConnectionState();
+        clearRuntimeState();
+        publishState();
         super.onDestroy();
     }
 
@@ -346,39 +524,16 @@ public class ChatSocketService extends Service {
     public void onTimeout(int startId, int fgsType) {
         stopped = true;
         running = false;
-        connected = false;
         lastStopReason = "foreground_service_timeout";
-        handler.removeCallbacksAndMessages(null);
         closeSocket("foreground_service_timeout");
-        resetConnectionState();
+        clearRuntimeState();
+        publishState();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
 
     private void createChannels() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
-        NotificationManager manager = getSystemService(NotificationManager.class);
-        if (manager == null) {
-            return;
-        }
-        NotificationChannel service = new NotificationChannel(
-            CHANNEL_SERVICE,
-            "后台消息服务",
-            NotificationManager.IMPORTANCE_LOW
-        );
-        service.setDescription("应用在后台时接收新消息");
-        service.setShowBadge(false);
-        manager.createNotificationChannel(service);
-
-        NotificationChannel messages = new NotificationChannel(
-            CHANNEL_MESSAGES,
-            "新消息",
-            NotificationManager.IMPORTANCE_HIGH
-        );
-        messages.setDescription("收到新消息时提醒");
-        manager.createNotificationChannel(messages);
+        ensureChannels(this);
     }
 
     private Notification buildServiceNotification(String text) {
@@ -406,6 +561,13 @@ public class ChatSocketService extends Service {
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (conversationId != null) {
             intent.putExtra("eisechat_conversation_id", conversationId);
+            // 通知携带来源账号与服务器：冷启动/旧通知可据登录态判断是否仍应打开。
+            if (userId != null) {
+                intent.putExtra("eisechat_click_user_id", userId);
+            }
+            if (apiBase != null) {
+                intent.putExtra("eisechat_click_server", apiBase);
+            }
         }
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -446,62 +608,78 @@ public class ChatSocketService extends Service {
         WebSocket socket = httpClient.newWebSocket(request, new WebSocketListener() {
             @Override
             public void onOpen(WebSocket webSocket, Response response) {
-                if (connectGeneration != generation || webSocket != socketRef[0]) {
-                    return;
-                }
-                // protocol §4.1：连接建立后立即发送 auth 首帧（10 秒内必须完成认证）。
-                sendAuthFrame(webSocket);
+                handler.post(() -> {
+                    if (connectGeneration != generation || webSocket != socketRef[0]) {
+                        return;
+                    }
+                    // protocol §4.1：连接建立后立即发送 auth 首帧（10 秒内必须完成认证）。
+                    sendAuthFrame(webSocket);
+                });
             }
 
             @Override
             public void onMessage(WebSocket webSocket, String text) {
-                if (connectGeneration != generation || webSocket != socketRef[0]) {
-                    return;
-                }
-                handler.removeCallbacks(authTimeout);
-                lastInboundAt = System.currentTimeMillis();
-                handleFrame(text, webSocket);
+                // 统一回到服务 Handler 线程：连接状态与通知缓存只在主线程读写。
+                handler.post(() -> {
+                    if (connectGeneration != generation || webSocket != socketRef[0]) {
+                        return;
+                    }
+                    handler.removeCallbacks(authTimeout);
+                    lastInboundAt = System.currentTimeMillis();
+                    handleFrame(text, webSocket);
+                });
             }
 
             @Override
             public void onFailure(WebSocket webSocket, Throwable t, @Nullable Response response) {
-                if (connectGeneration != generation || webSocket != socketRef[0]) {
-                    return;
-                }
-                handler.removeCallbacks(authTimeout);
-                handler.removeCallbacks(heartbeatRunnable);
-                ChatSocketService.this.webSocket = null;
-                authenticated = false;
-                scheduleReconnect();
+                handler.post(() -> {
+                    if (connectGeneration != generation || webSocket != socketRef[0]) {
+                        return;
+                    }
+                    handler.removeCallbacks(authTimeout);
+                    handler.removeCallbacks(heartbeatRunnable);
+                    ChatSocketService.this.webSocket = null;
+                    authenticated = false;
+                    scheduleReconnect();
+                });
             }
 
             @Override
             public void onClosing(WebSocket webSocket, int code, String reason) {
-                if (connectGeneration != generation || webSocket != socketRef[0]) {
-                    return;
-                }
-                // 完成关闭握手；重连/终止由 onClosed 统一处理，避免出现第二套恢复机制。
-                webSocket.close(1000, null);
+                handler.post(() -> {
+                    if (connectGeneration != generation || webSocket != socketRef[0]) {
+                        return;
+                    }
+                    // 服务端以 4001/4002 关闭时在 onClosing 已能拿到终止语义，不能因客户端回 1000 完成握手而丢失。
+                    if (code == 4001 || code == 4002) {
+                        terminalStop(code == 4001 ? "kicked" : "auth_closed");
+                        return;
+                    }
+                    // 普通关闭：完成握手；重连由 onClosed 统一处理，避免出现第二套恢复机制。
+                    webSocket.close(1000, null);
+                });
             }
 
             @Override
             public void onClosed(WebSocket webSocket, int code, String reason) {
-                if (connectGeneration != generation || webSocket != socketRef[0]) {
-                    return;
-                }
-                handler.removeCallbacks(authTimeout);
-                handler.removeCallbacks(heartbeatRunnable);
-                ChatSocketService.this.webSocket = null;
-                authenticated = false;
-                if (stopped) {
-                    return;
-                }
-                // 4002：认证失败/协议不兼容；4001：被服务端踢下线。两者均不再自动重连。
-                if (code == 4001 || code == 4002) {
-                    terminalStop(code == 4001 ? "kicked" : "auth_closed");
-                    return;
-                }
-                scheduleReconnect();
+                handler.post(() -> {
+                    if (connectGeneration != generation || webSocket != socketRef[0]) {
+                        return;
+                    }
+                    handler.removeCallbacks(authTimeout);
+                    handler.removeCallbacks(heartbeatRunnable);
+                    ChatSocketService.this.webSocket = null;
+                    authenticated = false;
+                    if (stopped) {
+                        return;
+                    }
+                    // 4002：认证失败/协议不兼容；4001：被服务端踢下线。两者均不再自动重连。
+                    if (code == 4001 || code == 4002) {
+                        terminalStop(code == 4001 ? "kicked" : "auth_closed");
+                        return;
+                    }
+                    scheduleReconnect();
+                });
             }
         });
         socketRef[0] = socket;
@@ -587,6 +765,8 @@ public class ChatSocketService extends Service {
                 connected = true;
                 reconnectAttempt = 0;
                 lastStopReason = null;
+                pendingCandidates.clear();
+                publishState();
                 updateForegroundNotification("正在接收新消息");
                 startHeartbeat();
                 fetchConversations();
@@ -602,8 +782,17 @@ public class ChatSocketService extends Service {
             case "message.new":
                 handleIncomingMessage(frame.optJSONObject("message"));
                 break;
+            case "message.edited":
+                handleEditedMessage(frame);
+                break;
+            case "message.recalled":
+                handleRecalledMessage(frame);
+                break;
             case "conv.updated":
-                applyConversations(frame.optJSONArray("conversations"));
+                applyConversations(
+                    frame.optJSONArray("conversations"),
+                    frame.optJSONArray("removedConversationIds")
+                );
                 break;
             case "error":
                 if (!authenticated) {
@@ -633,7 +822,18 @@ public class ChatSocketService extends Service {
         }
         String conversationId = message.optString("conversationId", "");
         String senderId = message.optString("senderId", "");
-        if (conversationId.isEmpty() || senderId.equals(userId)) {
+        String messageId = message.optString("messageId", "");
+        long seq = message.optLong("seq", 0L);
+        if (conversationId.isEmpty() || messageId.isEmpty() || senderId.equals(userId)) {
+            return;
+        }
+        if (messageId.equals(notifiedMessageIds.get(conversationId))
+            || seq <= notifiedMessageSeqs.getOrDefault(conversationId, 0L)) {
+            return;
+        }
+        if (!hasConversationState(conversationId)) {
+            // 该会话标题/免打扰未知时不能按「允许提醒」处理：每会话只保留最新候选，状态就绪后复核。
+            pendingCandidates.put(conversationId, message);
             return;
         }
         if (Boolean.TRUE.equals(mutedConversations.get(conversationId))) {
@@ -642,16 +842,170 @@ public class ChatSocketService extends Service {
         if (appForeground) {
             return;
         }
+        showMessageNotification(conversationId, message);
+    }
+
+    /** 会话状态就绪后复核初始化期间暂存的最新候选；未知会话继续保留等待状态到达。 */
+    private void flushPendingCandidates() {
+        if (pendingCandidates.isEmpty()) {
+            return;
+        }
+        java.util.Iterator<Map.Entry<String, JSONObject>> iterator = pendingCandidates.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, JSONObject> entry = iterator.next();
+            String conversationId = entry.getKey();
+            if (!hasConversationState(conversationId)) {
+                continue;
+            }
+            iterator.remove();
+            if (Boolean.TRUE.equals(mutedConversations.get(conversationId))) {
+                continue;
+            }
+            if (!appForeground) {
+                showMessageNotification(conversationId, entry.getValue());
+            }
+        }
+    }
+
+    /** 会话状态（标题/免打扰）是否已知；未知不能按允许提醒处理。 */
+    private boolean hasConversationState(String conversationId) {
+        return mutedConversations.containsKey(conversationId);
+    }
+
+    /** 已展示通知的摘要更新（message.edited）：同 tag/ID 原地更新，不再播放提示音。 */
+    private void handleEditedMessage(@Nullable JSONObject message) {
+        if (message == null) {
+            return;
+        }
+        String conversationId = message.optString("conversationId", "");
+        String messageId = message.optString("messageId", "");
+        if (conversationId.isEmpty() || messageId.isEmpty()) {
+            return;
+        }
+        // 初始化期间暂存的候选同样按编辑更新，避免随后复核时仍展示旧内容。
+        JSONObject candidate = pendingCandidates.get(conversationId);
+        if (candidate != null && messageId.equals(candidate.optString("messageId", ""))) {
+            try {
+                candidate.put("content", message.optString("content", ""));
+            } catch (Exception ignored) {
+                pendingCandidates.remove(conversationId);
+            }
+        }
+        if (!messageId.equals(notifiedMessageIds.get(conversationId))) {
+            return;
+        }
+        String title = notifiedTitles.get(conversationId);
+        if (title == null) {
+            return;
+        }
+        String senderId = message.optString("operatorId", "");
+        String preview = truncate(message.optString("content", "").replace('\n', ' ').trim());
+        String content = conversationTitles.containsKey(conversationId)
+            ? memberNames.getOrDefault(senderId, "成员") + "：" + preview
+            : preview;
+        updateMessageNotification(conversationId, title, content);
+    }
+
+    /** 当前通知对应消息被撤回：取消该通知，避免继续展示已撤回正文。 */
+    private void handleRecalledMessage(@Nullable JSONObject message) {
+        if (message == null) {
+            return;
+        }
+        String conversationId = message.optString("conversationId", "");
+        String messageId = message.optString("messageId", "");
+        if (conversationId.isEmpty() || messageId.isEmpty()) {
+            return;
+        }
+        // 候选被撤回后不再进入通知队列，避免初始化完成后弹出已撤回内容。
+        JSONObject candidate = pendingCandidates.get(conversationId);
+        if (candidate != null && messageId.equals(candidate.optString("messageId", ""))) {
+            pendingCandidates.remove(conversationId);
+        }
+        if (!messageId.equals(notifiedMessageIds.get(conversationId))) {
+            // 撤回的是更早的消息：保留该会话较新消息的通知。
+            return;
+        }
+        cancelMessageNotification(conversationId);
+    }
+
+    private void showMessageNotification(String conversationId, JSONObject message) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            return;
+        }
+        String senderId = message.optString("senderId", "");
         String title = conversationTitles.get(conversationId);
         if (title == null || title.isEmpty()) {
             title = memberNames.getOrDefault(senderId, "新消息");
         }
-        String senderName = memberNames.getOrDefault(senderId, "成员");
-        String preview = previewOf(message);
         String content = conversationTitles.containsKey(conversationId)
-            ? senderName + "：" + preview
-            : preview;
-        showMessageNotification(conversationId, title, content);
+            ? memberNames.getOrDefault(senderId, "成员") + "：" + previewOf(message)
+            : previewOf(message);
+        String messageId = message.optString("messageId", "");
+        long seq = message.optLong("seq", 0L);
+        boolean update = notifiedMessageIds.containsKey(conversationId);
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_message)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(content))
+            .setContentIntent(buildOpenAppIntent(conversationId))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(update)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build();
+        NotificationManagerCompat.from(this).notify(
+            messageTag(conversationId),
+            messageNotificationId(conversationId),
+            notification
+        );
+        notifiedMessageIds.put(conversationId, messageId);
+        notifiedMessageSeqs.put(conversationId, seq);
+        notifiedTitles.put(conversationId, title);
+    }
+
+    private void updateMessageNotification(String conversationId, String title, String content) {
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            return;
+        }
+        Notification notification = new NotificationCompat.Builder(this, CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_message)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(content))
+            .setContentIntent(buildOpenAppIntent(conversationId))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build();
+        NotificationManagerCompat.from(this).notify(
+            messageTag(conversationId),
+            messageNotificationId(conversationId),
+            notification
+        );
+    }
+
+    private void cancelMessageNotification(String conversationId) {
+        try {
+            NotificationManagerCompat.from(this).cancel(
+                messageTag(conversationId),
+                messageNotificationId(conversationId)
+            );
+        } catch (Exception ignored) {
+            // 通知不存在或系统限制：忽略。
+        }
+        notifiedMessageIds.remove(conversationId);
+        notifiedMessageSeqs.remove(conversationId);
+        notifiedTitles.remove(conversationId);
+    }
+
+    private static String messageTag(String conversationId) {
+        return MESSAGE_TAG_PREFIX + conversationId;
+    }
+
+    private static int messageNotificationId(String conversationId) {
+        return NOTIFICATION_ID_MESSAGE + (conversationId.hashCode() & 0x00FFFFFF);
     }
 
     private String previewOf(JSONObject message) {
@@ -685,28 +1039,12 @@ public class ChatSocketService extends Service {
         return text.length() > MAX_PREVIEW_LENGTH ? text.substring(0, MAX_PREVIEW_LENGTH) + "…" : text;
     }
 
-    private void showMessageNotification(String conversationId, String title, String content) {
-        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
-            return;
-        }
-        Notification notification = new NotificationCompat.Builder(this, CHANNEL_MESSAGES)
-            .setSmallIcon(R.drawable.ic_stat_message)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(content))
-            .setContentIntent(buildOpenAppIntent(conversationId))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .build();
-        NotificationManagerCompat.from(this).notify(NOTIFICATION_ID_MESSAGE, notification);
-    }
-
     /** 拉取会话列表：用于通知标题、免打扰状态与成员昵称（失败静默，不阻塞消息提醒）。 */
     private void fetchConversations() {
         final String base = apiBase;
         final String bearer = token;
         final int connectGeneration = generation;
+        final Map<String, Long> versionsAtRequest = new HashMap<>(conversationVersions);
         if (base == null || bearer == null) {
             return;
         }
@@ -728,27 +1066,29 @@ public class ChatSocketService extends Service {
 
             @Override
             public void onResponse(okhttp3.Call call, Response response) {
-                if (connectGeneration != generation || !bearer.equals(token)) {
-                    // 旧连接/旧账号的迟到响应直接丢弃，避免影响新会话。
-                    response.close();
-                    return;
-                }
+                // 网络读取与 JSON 解析留在 OkHttp 回调线程；只把解析结果交给 Handler 修改共享状态。
+                JSONArray conversations;
                 try (Response r = response) {
                     if (!r.isSuccessful() || r.body() == null) {
                         return;
                     }
-                    applyConversations(new JSONArray(r.body().string()));
+                    conversations = new JSONArray(r.body().string());
                 } catch (Exception ignored) {
-                    // 忽略解析失败。
+                    return;
                 }
+                handler.post(() -> {
+                    if (connectGeneration != generation || !bearer.equals(token)) {
+                        // 旧连接/旧账号的迟到响应直接丢弃，避免影响新会话。
+                        return;
+                    }
+                    applyFetchedConversations(conversations, versionsAtRequest);
+                });
             }
         });
     }
 
-    private synchronized void applyConversations(@Nullable JSONArray conversations) {
-        if (conversations == null) {
-            return;
-        }
+    /** GET 结果按会话合并：请求后被事件更新过的会话跳过，其余会话用它完成初始化。 */
+    private void applyFetchedConversations(JSONArray conversations, Map<String, Long> versionsAtRequest) {
         for (int i = 0; i < conversations.length(); i++) {
             JSONObject conversation = conversations.optJSONObject(i);
             if (conversation == null) {
@@ -758,27 +1098,89 @@ public class ChatSocketService extends Service {
             if (conversationId.isEmpty()) {
                 continue;
             }
-            String title = conversation.optString("title", "");
-            if (!title.isEmpty()) {
-                conversationTitles.put(conversationId, title);
-            }
-            mutedConversations.put(conversationId, conversation.optBoolean("muted", false));
-            JSONArray members = conversation.optJSONArray("members");
-            if (members == null) {
-                continue;
-            }
-            for (int j = 0; j < members.length(); j++) {
-                JSONObject member = members.optJSONObject(j);
-                if (member == null) {
+            Long versionAtRequest = versionsAtRequest.get(conversationId);
+            Long versionNow = conversationVersions.get(conversationId);
+            if (versionAtRequest != null || versionNow != null) {
+                if (versionAtRequest == null || !versionAtRequest.equals(versionNow)) {
+                    // 该会话在请求期间已收到更新：保留事件里的新状态。
                     continue;
                 }
-                String memberId = member.optString("userId", "");
-                String displayName = member.optString("displayName", "");
-                if (!memberId.isEmpty() && !displayName.isEmpty()) {
-                    memberNames.put(memberId, displayName);
+            }
+            applyConversation(conversation);
+        }
+        flushPendingCandidates();
+    }
+
+    /** 应用事件中的会话变更；removedConversationIds 同时清理缓存、候选与通知。 */
+    private void applyConversations(
+        @Nullable JSONArray conversations,
+        @Nullable JSONArray removedConversationIds
+    ) {
+        if (removedConversationIds != null) {
+            for (int i = 0; i < removedConversationIds.length(); i++) {
+                String conversationId = removedConversationIds.optString(i, "");
+                if (conversationId.isEmpty()) {
+                    continue;
                 }
+                conversationVersions.put(conversationId, ++conversationVersionCounter);
+                conversationTitles.remove(conversationId);
+                mutedConversations.remove(conversationId);
+                pendingCandidates.remove(conversationId);
+                cancelMessageNotification(conversationId);
             }
         }
+        if (conversations != null) {
+            for (int i = 0; i < conversations.length(); i++) {
+                JSONObject conversation = conversations.optJSONObject(i);
+                if (conversation == null) {
+                    continue;
+                }
+                String conversationId = conversation.optString("conversationId", "");
+                if (conversationId.isEmpty()) {
+                    continue;
+                }
+                applyConversation(conversation);
+                conversationVersions.put(conversationId, ++conversationVersionCounter);
+            }
+        }
+        flushPendingCandidates();
+    }
+
+    /** 应用单个会话的标题、免打扰与成员昵称（调用方在 Handler 线程）。 */
+    private void applyConversation(JSONObject conversation) {
+        String conversationId = conversation.optString("conversationId", "");
+        if (conversationId.isEmpty()) {
+            return;
+        }
+        String title = conversation.optString("title", "");
+        if (!title.isEmpty()) {
+            conversationTitles.put(conversationId, title);
+        }
+        mutedConversations.put(conversationId, conversation.optBoolean("muted", false));
+        JSONArray members = conversation.optJSONArray("members");
+        if (members == null) {
+            return;
+        }
+        for (int j = 0; j < members.length(); j++) {
+            JSONObject member = members.optJSONObject(j);
+            if (member == null) {
+                continue;
+            }
+            String memberId = member.optString("userId", "");
+            String displayName = member.optString("displayName", "");
+            if (!memberId.isEmpty() && !displayName.isEmpty()) {
+                memberNames.put(memberId, displayName);
+            }
+        }
+    }
+
+    /** Web 端同步已确认的会话状态（本人修改免打扰等），统一投递到服务 Handler 线程处理。 */
+    public static void updateConversationsJson(@Nullable JSONArray conversations) {
+        ChatSocketService service = currentInstance;
+        if (service == null || conversations == null) {
+            return;
+        }
+        service.handler.post(() -> service.applyConversations(conversations, null));
     }
 
     private static String trimTrailingSlash(String value) {
@@ -795,6 +1197,7 @@ public class ChatSocketService extends Service {
         handler.removeCallbacks(heartbeatRunnable);
         handler.removeCallbacks(reconnectRunnable);
         connected = false;
+        publishState();
         if (running) {
             updateForegroundNotification("正在重新连接");
         }
@@ -803,7 +1206,7 @@ public class ChatSocketService extends Service {
 
     /** 终止当前原生连接并停止服务：用于认证失败、协议不兼容、被踢等不可重连场景。 */
     private void terminalStop(String reason) {
-        lastStopReason = reason;
+        rememberTerminalState(reason);
         terminalStopped = true;
         stopped = true;
         running = false;
@@ -811,32 +1214,33 @@ public class ChatSocketService extends Service {
         handler.removeCallbacksAndMessages(null);
         closeSocket(reason);
         clearRuntimeState();
+        publishState();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
 
-    /** 清理随连接存在的会话缓存、去重状态、通知与待点击数据（账号/服务器切换、终止、销毁时调用）。 */
+    /** 清理随连接存在的会话缓存、去重状态与通知（账号/服务器切换、终止、销毁时调用）。 */
     private void clearRuntimeState() {
+        for (String conversationId : new ArrayList<>(notifiedMessageIds.keySet())) {
+            cancelMessageNotification(conversationId);
+        }
+        notifiedMessageIds.clear();
+        notifiedMessageSeqs.clear();
+        notifiedTitles.clear();
         conversationTitles.clear();
         mutedConversations.clear();
         memberNames.clear();
-        pendingConversationId = null;
-        try {
-            NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID_MESSAGE);
-        } catch (Exception ignored) {
-            // 通知不存在或系统限制：忽略清理失败。
-        }
+        pendingCandidates.clear();
+        conversationVersions.clear();
+        conversationVersionCounter = 0;
+        // 待点击数据独立于连接缓存：只在消费或明确判定来源不匹配时清除，服务重建不得丢失。
     }
 
     /** 参数变化时使旧连接与回调失效，并清理旧会话状态，避免旧结果污染新会话。 */
     private void resetConnectionState() {
-        generation += 1;
-        handler.removeCallbacksAndMessages(null);
         closeSocket("session_reset");
-        authenticated = false;
-        connected = false;
-        reconnectAttempt = 0;
         clearRuntimeState();
+        reconnectAttempt = 0;
     }
 
     private void closeSocket(String reason) {

@@ -7,6 +7,7 @@ import { chatWs } from '../core/ws'
 import { unreadCount } from '../core/sync'
 import { deleteRecord, getConversations, saveConversation, STORE_CONVERSATIONS } from '../core/db'
 import { readStorage, removeStorage, writeStorage } from '../core/safeStorage'
+import { syncBackgroundConversations } from '../core/backgroundNotifications'
 import { useAuthStore } from './auth'
 
 /** 本地已读游标持久化 key：用于页面内即时展示与服务端上报兜底；服务端 last_read_seq 是事实源（read.update）。 */
@@ -419,6 +420,20 @@ export const useConversationsStore = defineStore('conversations', () => {
   ): Promise<Conversation> {
     const updated = await conversationsApi.updateMemberSettings(conversationId, settings)
     upsert([updated])
+    if (settings.muted !== undefined) {
+      // 免打扰直接影响原生通知决策：复用插件入口同步已确认的会话状态（不影响其它字段）。
+      syncBackgroundConversations([
+        {
+          conversationId: updated.conversationId,
+          title: updated.title,
+          muted: updated.muted ?? false,
+          members: updated.members.map((member) => ({
+            userId: member.userId,
+            displayName: member.displayName,
+          })),
+        },
+      ])
+    }
     return updated
   }
 

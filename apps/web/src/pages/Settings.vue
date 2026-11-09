@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
 import { filesApi } from '../api/files'
@@ -42,10 +42,13 @@ import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { downloadAndInstallApk, isAndroidUpdaterAvailable, subscribeApkUpdateProgress } from '../core/updateAndroid'
 import {
+  getBackgroundNotifyStatus,
   isAndroidBackgroundAvailable,
   startBackgroundNotifications,
   stopBackgroundNotifications,
+  subscribeBackgroundStateChange,
 } from '../core/backgroundNotifications'
+import type { BackgroundNotifyStatus } from '../core/backgroundNotifications'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useDraftsStore } from '../stores/drafts'
@@ -134,6 +137,22 @@ function goBackToIndex(): void {
   activeSectionId.value = null
 }
 
+// Android 后台消息提醒：偏好（用户意图）与实际服务状态分开显示，避免「开关为开」被误认为正在接收。
+const androidBackgroundAvailable = isAndroidBackgroundAvailable()
+const backgroundStatus = ref<BackgroundNotifyStatus | null>(null)
+const backgroundStopped = ref(false)
+/** 读取原生状态失败：保留未知状态，不据此关闭用户偏好，允许重试。 */
+const backgroundStatusUnknown = ref(false)
+let backgroundStatusUnsubscribe: (() => void) | null = null
+const backgroundStatusText = computed(() => {
+  if (!androidBackgroundAvailable) return ''
+  if (backgroundStatusUnknown.value) return '状态未知，请重试'
+  const status = backgroundStatus.value
+  if (status?.running) return status.connected ? '正在接收新消息' : '正在连接'
+  if (backgroundStopped.value) return '后台消息提醒已停止'
+  return settings.androidBackgroundNotificationsEnabled ? '正在连接' : '后台消息提醒已关闭'
+})
+
 /** 移动端分类列表的右侧摘要：只展示真实状态，不展示未保存的编辑值。 */
 function sectionSummaryOf(id: SectionId): string {
   switch (id) {
@@ -143,7 +162,7 @@ function sectionSummaryOf(id: SectionId): string {
       return auth.user?.email ?? '未登录'
     case 'notifications':
       if (androidBackgroundAvailable) {
-        return `后台消息提醒${settings.androidBackgroundNotificationsEnabled ? '开' : '关'} · 提示音${settings.soundEnabled ? '开' : '关'}`
+        return `${backgroundStatusText.value} · 提示音${settings.soundEnabled ? '开' : '关'}`
       }
       return `桌面通知${settings.desktopNotificationsEnabled ? '开' : '关'} · 提示音${settings.soundEnabled ? '开' : '关'}`
     case 'appearance':
@@ -156,7 +175,6 @@ function sectionSummaryOf(id: SectionId): string {
 // 桌面通知开关请求进行中（防止重复点击/重复申请权限）。
 const notificationBusy = ref(false)
 // Android 前台服务后台消息提醒：仅原生壳内可用。
-const androidBackgroundAvailable = isAndroidBackgroundAvailable()
 const backgroundBusy = ref(false)
 
 const wsState = ref<WsState>(chatWs.state)
@@ -498,8 +516,12 @@ async function confirmKickSession(): Promise<void> {
   }
 }
 
-// 进入「账号与安全」时懒加载密码状态与登录设备（只请求一次，手动操作后局部刷新）。
+// 进入「账号与安全」时懒加载密码状态与登录设备；进入「通知与提醒」时刷新后台提醒实际状态。
 watch(activeSectionId, (next) => {
+  if (next === 'notifications' && androidBackgroundAvailable) {
+    void loadBackgroundStatus()
+    return
+  }
   if (next !== 'account') return
   void loadPasswordState()
   void loadSessions()
@@ -544,6 +566,8 @@ async function toggleAndroidBackgroundNotifications(): Promise<void> {
     try {
       await stopBackgroundNotifications()
       settings.setAndroidBackgroundNotificationsEnabled(false)
+      backgroundStopped.value = false
+      backgroundStatus.value = { running: false, connected: false }
       showToast('后台消息提醒已关闭', 'success')
     } finally {
       backgroundBusy.value = false
@@ -562,17 +586,73 @@ async function toggleAndroidBackgroundNotifications(): Promise<void> {
       token: auth.accessToken,
       deviceId: auth.deviceId,
       userId: auth.user.userId,
+      // 设置页开关是用户明确操作：服务被终止后允许用户在下次操作时重新开启。
+      userInitiated: true,
     })
     if (!result.started) {
-      showToast(result.permission === false ? '通知权限未开启' : '后台消息提醒开启失败', 'error')
+      const message =
+        result.permission === false
+          ? '通知权限未开启'
+          : result.reason === 'notifications_disabled'
+            ? '系统通知已关闭，请在系统设置中开启'
+            : result.reason === 'channel_disabled'
+              ? '消息通知渠道已关闭，请在系统设置中开启'
+              : '后台消息提醒开启失败'
+      showToast(message, 'error')
       return
     }
     settings.setAndroidBackgroundNotificationsEnabled(true)
+    backgroundStopped.value = false
     showToast('后台消息提醒已开启', 'success')
+    // 状态以原生实际连接为准，避免页面写入与真实状态不一致。
+    void loadBackgroundStatus()
   } finally {
     backgroundBusy.value = false
   }
 }
+
+/** 合并原生状态写入：运行中清除停止态；否则在偏好仍开启时回退，避免页面长期显示过期状态。 */
+function applyBackgroundStatus(status: BackgroundNotifyStatus): void {
+  backgroundStatusUnknown.value = false
+  backgroundStatus.value = status
+  if (status.running) {
+    backgroundStopped.value = false
+    return
+  }
+  if (settings.androidBackgroundNotificationsEnabled && !backgroundBusy.value) {
+    // 服务未运行（被踢/认证失败/超时/系统回收）：偏好回到关闭，需用户在前台重新开启。
+    settings.setAndroidBackgroundNotificationsEnabled(false)
+    backgroundStopped.value = true
+  }
+}
+
+/** 读取原生服务的实际状态；读取失败保留未知状态，不把用户偏好改成关闭。 */
+async function loadBackgroundStatus(): Promise<void> {
+  if (!androidBackgroundAvailable) return
+  const status = await getBackgroundNotifyStatus()
+  if (status === null) {
+    backgroundStatusUnknown.value = true
+    return
+  }
+  applyBackgroundStatus(status)
+}
+
+/** 状态未知时的手动重试入口。 */
+function retryBackgroundStatus(): void {
+  void loadBackgroundStatus()
+}
+
+onMounted(() => {
+  if (androidBackgroundAvailable) {
+    void loadBackgroundStatus()
+    backgroundStatusUnsubscribe = subscribeBackgroundStateChange(applyBackgroundStatus)
+  }
+})
+
+onBeforeUnmount(() => {
+  backgroundStatusUnsubscribe?.()
+  backgroundStatusUnsubscribe = null
+})
 
 /** 切换提示音（即时生效并持久化）。 */
 function toggleSound(): void {
@@ -947,7 +1027,15 @@ async function saveProfile(): Promise<void> {
                 @update:model-value="toggleDesktopNotifications"
               />
             </SettingsRow>
-            <SettingsRow v-else label="后台消息提醒">
+            <SettingsRow v-else label="后台消息提醒" :hint="backgroundStatusText">
+              <button
+                v-if="backgroundStatusUnknown"
+                type="button"
+                class="settings-text-btn"
+                @click="retryBackgroundStatus"
+              >
+                重试
+              </button>
               <SettingsSwitch
                 :model-value="settings.androidBackgroundNotificationsEnabled"
                 label="后台消息提醒"

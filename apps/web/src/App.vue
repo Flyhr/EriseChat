@@ -10,12 +10,16 @@ import { chatWs, type WsState } from './core/ws'
 import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
 import { resolveApiBase, resolveWsUrl } from './core/config'
 import {
+  checkBackgroundNotificationsAvailability,
+  consumePendingBackgroundClick,
+  getBackgroundNotifyStatus,
   isAndroidBackgroundAvailable,
   setBackgroundConversation,
   startBackgroundNotifications,
   stopBackgroundNotifications,
   subscribeBackgroundNotificationClick,
   type BackgroundNotifyConfig,
+  type PendingBackgroundClick,
 } from './core/backgroundNotifications'
 import { useAuthStore } from './stores/auth'
 import { useConversationsStore } from './stores/conversations'
@@ -61,6 +65,33 @@ function openConversationFromNotification(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
 }
 
+function sameServerOrigin(serverUrl: string): boolean {
+  try {
+    return new URL(serverUrl).origin === new URL(resolveApiBase()).origin
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 通知点击：来源账号与服务器必须完整且仍属当前登录，否则丢弃（升级前缺少来源的旧通知直接失效）。
+ * 原生侧冷/热启动统一走缓存，消费一次后清除。
+ */
+function handleBackgroundClick(click: PendingBackgroundClick): void {
+  if (!auth.isLoggedIn) return
+  if (!click.userId || !click.serverUrl) return
+  if (click.userId !== auth.user?.userId) return
+  if (!sameServerOrigin(click.serverUrl)) return
+  openConversationFromNotification(click.conversationId)
+}
+
+/** 冷启动点击先由原生缓存；登录与路由就绪后消费一次。 */
+async function consumeAndroidPendingClick(): Promise<void> {
+  if (!isAndroidBackgroundAvailable() || !auth.isLoggedIn) return
+  const click = await consumePendingBackgroundClick()
+  if (click) handleBackgroundClick(click)
+}
+
 /** Android 后台消息提醒：登录态与服务器地址就绪后启动原生前台服务，否则停止。 */
 function backgroundNotifyConfig(): BackgroundNotifyConfig | null {
   if (!auth.isLoggedIn || !auth.accessToken || !auth.user) return null
@@ -70,6 +101,8 @@ function backgroundNotifyConfig(): BackgroundNotifyConfig | null {
     token: auth.accessToken,
     deviceId: auth.deviceId,
     userId: auth.user.userId,
+    // 登录/切账号触发的自动同步不是用户主动开启：服务被终止后不得自动重建。
+    userInitiated: false,
   }
 }
 
@@ -77,9 +110,38 @@ async function syncAndroidBackgroundNotifications(): Promise<void> {
   if (!isAndroidBackgroundAvailable()) return
   const config = backgroundNotifyConfig()
   if (settings.androidBackgroundNotificationsEnabled && config) {
-    await startBackgroundNotifications(config)
+    const result = await startBackgroundNotifications(config)
+    if (!result.started && result.permission !== false) {
+      // 系统通知/渠道被关闭等导致未启动：偏好回到关闭，避免设置页误显示为正在接收。
+      settings.setAndroidBackgroundNotificationsEnabled(false)
+    }
   } else {
     await stopBackgroundNotifications()
+  }
+}
+
+/**
+ * 恢复前台时复核通知权限、渠道与实际服务状态（覆盖聊天页、设置页等所有已登录页面）。
+ * 原生停止不影响 Web 登录态；只有确认服务已不可用时才回退用户偏好。
+ */
+async function reconcileAndroidBackgroundNotifications(): Promise<void> {
+  if (!isAndroidBackgroundAvailable() || !auth.isLoggedIn) return
+  if (!settings.androidBackgroundNotificationsEnabled) return
+  const availability = await checkBackgroundNotificationsAvailability()
+  if (availability && !availability.available) {
+    await stopBackgroundNotifications()
+    settings.setAndroidBackgroundNotificationsEnabled(false)
+    return
+  }
+  const status = await getBackgroundNotifyStatus()
+  if (status !== null && !status.running) {
+    settings.setAndroidBackgroundNotificationsEnabled(false)
+  }
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') {
+    void reconcileAndroidBackgroundNotifications()
   }
 }
 
@@ -99,19 +161,36 @@ onMounted(() => {
   // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
   unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)
   // Android：原生前台服务通知点击回传（WebView 内无浏览器 Notification API）。
-  unsubscribeBackgroundClick = subscribeBackgroundNotificationClick(openConversationFromNotification)
+  // 冷热启动统一走消费入口：事件只通知去消费，避免热启动点击后 pending 残留再次导航。
+  unsubscribeBackgroundClick = subscribeBackgroundNotificationClick(() => {
+    void consumeAndroidPendingClick()
+  })
+  void consumeAndroidPendingClick()
   void syncAndroidBackgroundNotifications()
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
-// Android 后台消息提醒：登录/退出或切换账号时同步原生前台服务状态。
+// Android 后台消息提醒：账号、令牌或服务器地址变化时同步原生前台服务状态。
 watch(
-  () => auth.user?.userId ?? '',
+  () =>
+    [
+      auth.user?.userId ?? '',
+      auth.accessToken ?? '',
+      auth.isLoggedIn ? resolveApiBase() : '',
+    ].join('|'),
   () => {
     void syncAndroidBackgroundNotifications()
   },
 )
 
 // Android 后台消息提醒：记录当前打开的会话，供原生服务在前台时抑制通知。
+watch(
+  () => auth.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) void consumeAndroidPendingClick()
+  },
+  { immediate: true },
+)
 watch(
   () => (route.name === 'chat' && typeof route.params.conversationId === 'string'
     ? route.params.conversationId
@@ -140,6 +219,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   unsubscribe?.()
   unsubscribeNotificationClick?.()
   unsubscribeBackgroundClick?.()

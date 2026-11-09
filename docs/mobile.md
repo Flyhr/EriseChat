@@ -2,7 +2,7 @@
 
 > 本文是 Android 客户端（Capacitor 壳 + `apps/web` 构建产物）的安装、配置、构建、签名与真机联调说明。
 > 协议与表结构见 `protocol/protocol.md`、`protocol/schema.sql`；服务器部署见 `docs/deploy.md`；项目介绍以 `README.md` 为准。
-> 本文最近更新：2026-11-06（F-39：新增 Android 后台消息提醒说明与平台限制）。
+> 本文最近更新：2026-11-09（F-39：补充任务 E 构建结果与真机验收状态）。
 
 ## 1. 交付物
 
@@ -11,7 +11,7 @@
 | `EiseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
 | 下载地址 | 服务端 `GET /download` 下载页（`data/downloads/` 放安装包） |
 
-- 当前产物（F-39 重打，2026-11-06）：`data/downloads/EiseChat-1.1.0.apk`（3,781,039 B，SHA256 `4b4f2fe4ce88c0cbce86e680d4ea5709bb5f043b9605181ade602046843ed4b1`，含后台消息提醒前台服务与 OkHttp；此前 F-31 重打为 3,358,404 B / `634425b2…74a72`、F-29 重打为 3,357,072 B / `cba771aa…2f3d`、F-27 首次为 3,351,022 B / `703656ce…180d5b`，均已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
+- 当前产物（F-39 任务 E 重打，2026-11-09）：`data/downloads/EiseChat-1.1.0.apk`（3,789,395 B，SHA256 `86cd03566b2b8c75a30d9ccc66f065d322117d0b2b6e2aacf392a873a8cf05e1`，含后台消息提醒前台服务与 OkHttp；此前 F-31 重打为 3,358,404 B / `634425b2…74a72`、F-29 重打为 3,357,072 B / `cba771aa…2f3d`、F-27 首次为 3,351,022 B / `703656ce…180d5b`，均已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
 - 历史基线（已保留，用于回滚）：`data/downloads/EiseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EiseChat-1.0.0.apk` 下载
 - 包名：`com.eisechat.mobile`（与 Windows 壳 `com.eisechat.desktop` 区分）
 - 版本：`versionName` 为 `1.1.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.1.0 → 10100）
@@ -40,9 +40,10 @@
 ### 3.1 后台消息提醒（Android）
 
 - 开启方式：设置 → 消息提醒 → 后台消息提醒；首次开启需允许系统通知权限（Android 13+ 为运行时权限）。关闭后常驻通知消失、原生连接断开。
+- 验收状态（2026-11-09）：代码、编译与发行 APK 构建已通过；首轮真机验收**尚未执行**，目标设备为 OPPO（ColorOS 16.0.10 / Android 16），场景见 §5.7。构建成功不代表通知已在真机验证。
 - 实现：原生前台服务（`ChatSocketService`，`foregroundServiceType=dataSync`）使用当前登录令牌连接 `ws`，收到 `message.new` 时发系统通知；应用在前台时由页面内提醒负责，不重复通知；免打扰会话不通知；自己发送的消息不通知。
 - 连接占用服务端「每账号最多 3 条连接」中的一条；同时开启前台服务与 Web 页面时共占用 2 条，其余设备仍有 1 条可用。
-- 点击通知会打开 EiseChat 并进入对应会话；应用被系统清理后重新打开仍可用通知进入对应会话。
+- 点击通知会打开 EiseChat 并进入对应会话：冷热启动统一由原生缓存点击，Web 只消费一次，待登录与路由就绪后跳转。通知携带来源账号与服务器，来源不完整、账号或服务器已切换时直接丢弃；未登录时保留缓存，登录成功后再打开对应会话。
 
 #### 3.1.1 平台限制
 

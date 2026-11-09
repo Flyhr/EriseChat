@@ -49,6 +49,7 @@ import { buildVoiceContent, isVoiceContent, voicePreviewText } from '../core/voi
 import { useConversationsStore } from './conversations'
 import { useAuthStore } from './auth'
 import { useSettingsStore } from './settings'
+import { isAndroidBackgroundAvailable } from '../core/backgroundNotifications'
 
 /** 历史分页大小（服务端默认 50、上限 200；AGENTS.md §5.5 每会话每批 ≤200）。 */
 const PAGE_SIZE = 50
@@ -896,12 +897,21 @@ export const useMessagesStore = defineStore('messages', () => {
     if (message.senderId === selfUserId) return
 
     const settings = useSettingsStore()
+    const documentVisible = document.visibilityState === 'visible'
+    if (
+      !documentVisible &&
+      settings.androidBackgroundNotificationsEnabled &&
+      isAndroidBackgroundAvailable()
+    ) {
+      // Android 后台由原生前台服务负责系统通知；WebView 内不再播放声音或重复弹通知。
+      return
+    }
     if (!settings.soundEnabled && !settings.desktopNotificationsEnabled) return
 
     const conversationStore = useConversationsStore()
     const state = {
       isSelf: false,
-      documentVisible: document.visibilityState === 'visible',
+      documentVisible,
       activeConversationId: conversationStore.activeConversationId,
       conversationId: message.conversationId,
       // F-10：免打扰会话不提示音、不弹系统通知（未读数不受影响）。

@@ -1,6 +1,7 @@
 package com.eisechat.mobile;
 
 import android.Manifest;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -17,6 +18,9 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 /**
  * 后台消息提醒的 Capacitor 插件：启动/停止前台服务、同步前台状态与当前会话、回传通知点击。
  * Web 侧入口见 apps/web/src/core/backgroundNotifications.ts。
@@ -31,10 +35,25 @@ public class BackgroundNotifyPlugin extends Plugin {
     @Override
     public void load() {
         ChatSocketService.installLifecycleCallbacks(getContext());
-        ChatSocketService.setClickReporter(conversationId -> {
+        ChatSocketService.setClickReporter((conversationId, userId, serverUrl) -> {
             JSObject data = new JSObject();
             data.put("conversationId", conversationId);
+            if (userId != null && !userId.trim().isEmpty()) {
+                data.put("userId", userId);
+            }
+            if (serverUrl != null && !serverUrl.trim().isEmpty()) {
+                data.put("serverUrl", serverUrl);
+            }
             notifyListeners("notificationClick", data);
+        });
+        ChatSocketService.setStateReporter((running, connected, stopReason) -> {
+            JSObject data = new JSObject();
+            data.put("running", running);
+            data.put("connected", connected);
+            if (stopReason != null) {
+                data.put("stopReason", stopReason);
+            }
+            notifyListeners("stateChange", data);
         });
     }
 
@@ -53,6 +72,10 @@ public class BackgroundNotifyPlugin extends Plugin {
             requestPermissionForAlias("notifications", call, "notificationsPermissionCallback");
             return;
         }
+        Context context = getContext();
+        if (context != null) {
+            ChatSocketService.ensureChannels(context);
+        }
         String blocked = blockedNotificationReason();
         if (blocked != null) {
             JSObject result = new JSObject();
@@ -62,7 +85,7 @@ public class BackgroundNotifyPlugin extends Plugin {
             call.resolve(result);
             return;
         }
-        startService(call, wsUrl, apiBase, token, deviceId, userId);
+        startService(call, wsUrl, apiBase, token, deviceId, userId, Boolean.TRUE.equals(call.getBoolean("userInitiated", false)));
     }
 
     @com.getcapacitor.annotation.PermissionCallback
@@ -92,16 +115,24 @@ public class BackgroundNotifyPlugin extends Plugin {
             call.resolve(result);
             return;
         }
-        startService(call, wsUrl, apiBase, token, deviceId, userId);
+        startService(call, wsUrl, apiBase, token, deviceId, userId, Boolean.TRUE.equals(call.getBoolean("userInitiated", false)));
     }
 
-    private void startService(PluginCall call, String wsUrl, String apiBase, String token, String deviceId, String userId) {
+    private void startService(
+        PluginCall call,
+        String wsUrl,
+        String apiBase,
+        String token,
+        String deviceId,
+        String userId,
+        boolean userInitiated
+    ) {
         Context context = getContext();
         if (context == null) {
             call.reject("应用上下文不可用");
             return;
         }
-        ChatSocketService.start(context, wsUrl, apiBase, token, deviceId, userId);
+        ChatSocketService.start(context, wsUrl, apiBase, token, deviceId, userId, userInitiated);
         JSObject result = new JSObject();
         result.put("started", true);
         result.put("permission", true);
@@ -142,12 +173,44 @@ public class BackgroundNotifyPlugin extends Plugin {
         call.resolve();
     }
 
+    /** Web 端同步已确认的会话标题、成员与免打扰状态（本人修改免打扰后调用）。 */
+    @PluginMethod
+    public void updateConversations(PluginCall call) {
+        JSONArray conversations = call.getArray("conversations");
+        if (conversations != null) {
+            ChatSocketService.updateConversationsJson(conversations);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void checkAvailability(PluginCall call) {        Context context = getContext();
+        if (context != null) {
+            ChatSocketService.ensureChannels(context);
+        }
+        String blocked = blockedNotificationReason();
+        JSObject result = new JSObject();
+        result.put("available", blocked == null);
+        if (blocked != null) {
+            result.put("reason", blocked);
+        }
+        call.resolve(result);
+    }
+
     @PluginMethod
     public void consumePendingClick(PluginCall call) {
+        JSONObject pending = ChatSocketService.consumePendingClick();
+        if (pending == null) {
+            call.resolve(new JSObject());
+            return;
+        }
         JSObject result = new JSObject();
-        String conversationId = ChatSocketService.consumePendingClick();
-        if (conversationId != null) {
-            result.put("conversationId", conversationId);
+        result.put("conversationId", pending.optString("conversationId", ""));
+        if (pending.has("userId")) {
+            result.put("userId", pending.optString("userId", ""));
+        }
+        if (pending.has("serverUrl")) {
+            result.put("serverUrl", pending.optString("serverUrl", ""));
         }
         call.resolve(result);
     }
@@ -164,9 +227,9 @@ public class BackgroundNotifyPlugin extends Plugin {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager manager = context.getSystemService(NotificationManager.class);
             if (manager != null) {
-                android.app.NotificationChannel channel =
+                NotificationChannel channel =
                     manager.getNotificationChannel(ChatSocketService.CHANNEL_MESSAGES);
-                if (channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE) {
+                if (channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE) {
                     return "channel_disabled";
                 }
             }
