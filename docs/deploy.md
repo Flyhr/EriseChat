@@ -100,12 +100,21 @@ docker run --rm hello-world          # 能拉取并运行即网络正常（国�
 
 Docker 构建需要完整源码（含 `server/`、`apps/web/`）。**源码包名固定**，后续更新命令不再随提交号变化。
 
-开发机（仓库根目录）出包并上传：
+开发机（仓库根目录）出包并上传。**Windows 必须在 Git Bash 中执行**：cmd 里的 `bash` 实际是 WSL 转接器，会报 `execvpe(/bin/bash) failed: No such file or directory`。
 
 ```bash
+# Git Bash（Windows）或 Linux/macOS shell
 bash infra/package-src.sh                          # 产出 dist/eisechat-src.zip（固定路径/名称，同名覆盖）
 scp dist/eisechat-src.zip chat:~/eisechat-src.zip  # chat = ~/.ssh/config 里的服务器别名；目标名固定
 ```
+
+Windows 也可用完整路径直接调用：
+
+```powershell
+& 'D:\Git\bin\bash.exe' infra/package-src.sh
+```
+
+**打包前提：工作区必须完全干净**（`git status --short` 无任何输出，包含未跟踪文件、测试改动与临时文件）；脚本检测到脏工作区会直接拒绝打包。测试文件统一放根级 `tests/`（已 gitignore），不要留在 `apps/`、`server/` 源码目录里。
 
 - `infra/package-src.sh` = `git archive HEAD` + LF 行尾自检（`.sh`/`Dockerfile`/compose 混入 CRLF 会直接失败；Windows `core.autocrlf` 曾导致部署脚本报错）；
 - 产物固定为 `dist/eisechat-src.zip`（`dist/` 已 gitignore）；服务器目标固定为 `/home/ggbond/eisechat-src.zip`；

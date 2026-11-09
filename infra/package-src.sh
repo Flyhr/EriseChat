@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # EiseChat 源码包打包脚本（固定路径 + 固定文件名，覆盖旧包）
 #
-# 用法（开发机仓库根目录）：
-#   bash infra/package-src.sh              # 输出 <仓库>/dist/eisechat-src.zip
-#   bash infra/package-src.sh /tmp/a.zip   # 指定输出路径（仍建议保持固定名）
+# 用法（开发机仓库根目录，Windows 必须用 Git Bash；不要用 cmd 的 bash/WSL）：
+#   "D:\Git\bin\bash.exe" infra/package-src.sh   # 输出 <仓库>/dist/eisechat-src.zip
+#   bash infra/package-src.sh /tmp/a.zip         # 指定输出路径（仍建议保持固定名）
+#
+# 前置：工作区必须完全干净（git status --short 无任何输出，含未跟踪文件/测试改动）；
+#       测试文件统一放根级 tests/（已 gitignore），否则脚本会拒绝打包。
 #
 # 产物：dist/eisechat-src.zip（dist/ 已 gitignore），始终覆盖同名旧文件，
 #       服务器侧上传目标固定为 ~/eisechat-src.zip，部署命令因此无需随提交变化。
@@ -17,7 +20,7 @@ OUT="${1:-$ROOT/dist/eisechat-src.zip}"
 cd "$ROOT"
 
 if [ -n "$(git status --short)" ]; then
-  echo "[package] 错误：工作区不干净，先提交改动再打包（git status --short）" >&2
+  echo "[package] 错误：工作区不干净，先提交改动再打包（git status --short 必须为空，含未跟踪/测试文件；测试放根级 tests/）" >&2
   exit 1
 fi
 

@@ -82,6 +82,14 @@ apps/mobile/android/app/src/main/assets/public/
 # ==== 测试与临时文件（AGENTS §4/§11：测试文件统一放 docs/test/，不入库，可随时删除） ====
 /docs/test/
 
+# ==== 测试文件（AGENTS §11.1：统一放根级 tests/，按内容分目录，不入库；新增测试子目录须经用户同意） ====
+/tests/
+# 源码目录内不再新增单元测试与测试夹具；既有已入库测试作为历史保留
+apps/web/src/**/*.test.ts
+apps/web/src/**/*.spec.ts
+apps/web/src/test/
+server/Chat.Server.Tests/
+
 # ==== 计划与过程文档（AGENTS §2.11/§4：只提交说明类文档，计划/报告/截图等本地保留不入库） ====
 /docs/internal-plan.md
 /docs/chat-capability-plan.md
