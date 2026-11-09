@@ -96,31 +96,53 @@ docker run --rm hello-world          # 能拉取并运行即网络正常（国�
 
 ## 3. 一键部署
 
-### 3.1 出源码包并上传（固定路径/固定名称，覆盖旧包）
+### 3.1 更新服务器代码：出包 → 上传 → 解压（三步缺一不可）
+
+> **`deploy.sh` 不会解压 `~/eisechat-src.zip`**，它只构建 `/opt/eisechat/src` 中已有的源码。只上传 ZIP 就直接执行部署脚本，会继续使用旧代码。
 
 Docker 构建需要完整源码（含 `server/`、`apps/web/`）。**源码包名固定**，后续更新命令不再随提交号变化。
 
-开发机（仓库根目录）出包并上传。**Windows 必须在 Git Bash 中执行**：cmd 里的 `bash` 实际是 WSL 转接器，会报 `execvpe(/bin/bash) failed: No such file or directory`。
-
-```bash
-# Git Bash（Windows）或 Linux/macOS shell
-bash infra/package-src.sh                          # 产出 dist/eisechat-src.zip（固定路径/名称，同名覆盖）
-scp dist/eisechat-src.zip chat:~/eisechat-src.zip  # chat = ~/.ssh/config 里的服务器别名；目标名固定
-```
-
-Windows 也可用完整路径直接调用：
-
-```powershell
-& 'D:\Git\bin\bash.exe' infra/package-src.sh
-```
+#### 3.1.1 出源码包（Windows 用 Git Bash）
 
 **打包前提：工作区必须完全干净**（`git status --short` 无任何输出，包含未跟踪文件、测试改动与临时文件）；脚本检测到脏工作区会直接拒绝打包。测试文件统一放根级 `tests/`（已 gitignore），不要留在 `apps/`、`server/` 源码目录里。
 
-- `infra/package-src.sh` = `git archive HEAD` + LF 行尾自检（`.sh`/`Dockerfile`/compose 混入 CRLF 会直接失败；Windows `core.autocrlf` 曾导致部署脚本报错）；
-- 产物固定为 `dist/eisechat-src.zip`（`dist/` 已 gitignore）；服务器目标固定为 `/home/ggbond/eisechat-src.zip`；
-- 需要其他输出路径时：`bash infra/package-src.sh /tmp/eisechat-src.zip`。
+```powershell
+cd D:\Code\EriseChat
+& 'D:\Git\bin\bash.exe' infra/package-src.sh
+Get-FileHash .\dist\eisechat-src.zip -Algorithm SHA256
+```
 
-服务器上解压并原子替换部署目录（服务器无 `unzip`，用 `python3`；旧源码保留为 `src.old` 便于排查/回滚）。**以下命令固定不变**：
+- 必须用 Git Bash（或完整路径调用 `D:\Git\bin\bash.exe`）；cmd 里的 `bash` 是 WSL 转接器，会报 `execvpe(/bin/bash) failed: No such file or directory`。
+- 产物固定为 `dist/eisechat-src.zip`（`dist/` 已 gitignore）；Linux/macOS 可直接 `bash infra/package-src.sh`。
+- `infra/package-src.sh` = `git archive HEAD` + LF 行尾自检（`.sh`/`Dockerfile`/compose 混入 CRLF 会直接失败）；需要其他输出路径时：`bash infra/package-src.sh /tmp/eisechat-src.zip`。
+
+#### 3.1.2 上传（Windows 用 PowerShell，不要用 Git Bash）
+
+Git Bash 默认不会复用 Windows 的 ssh-agent；私钥带口令时会连续提示 `Enter passphrase`，最终 `Permission denied (publickey)`。上传与 SSH 统一用 **Windows PowerShell**：
+
+```powershell
+cd D:\Code\EriseChat
+scp .\dist\eisechat-src.zip chat:~/eisechat-src.zip
+```
+
+`chat` 为 `~/.ssh/config` 中的服务器别名（也可直接用 Tailscale IP，如 `ggbond@100.115.90.9`）。
+
+#### 3.1.3 登录服务器并校验压缩包
+
+```powershell
+ssh chat
+```
+
+进入 Ubuntu 后（提示符应为 `ggbond@chat-server:~$`）：
+
+```bash
+ls -lh ~/eisechat-src.zip
+sha256sum ~/eisechat-src.zip    # 与 3.1.1 本地 Get-FileHash 对比
+```
+
+#### 3.1.4 解压并原子替换源码（必做）
+
+服务器无 `unzip` 时用 `python3`；旧源码保留为 `src.old` 便于排查/回滚。**以下命令固定不变**：
 
 ```bash
 sudo bash -c 'set -e
@@ -134,9 +156,34 @@ sudo bash -c 'set -e
   echo "src 已更新"'
 ```
 
+解压后核对版本，确认不是旧源码：
+
+```bash
+grep -m1 '版本' /opt/eisechat/src/AGENTS.md
+ls /opt/eisechat/src/server/Chat.Server | head
+```
+
+> 服务器已安装 `unzip` 时可用：`sudo rm -rf /opt/eisechat/src.new && sudo mkdir -p /opt/eisechat/src.new && sudo unzip -o ~/eisechat-src.zip -d /opt/eisechat/src.new`，再按上面的 `mv`/`chown` 步骤替换。
+>
 > `tar.gz` 替代方案（不推荐，包名/命令需另改）：`git archive --format=tar.gz -o /tmp/eisechat-src.tar.gz HEAD` → `sudo tar -xzf /tmp/eisechat-src.tar.gz -C /opt/eisechat/src`。
 
+#### 3.1.5 执行部署
+
+必须在 **Ubuntu SSH 终端**里执行，不要在 Windows 的 `PS D:\Code\EriseChat>` 下执行（Windows 会提示「已在此计算机上禁用 Sudo」）：
+
+```bash
+sudo bash /opt/eisechat/src/infra/docker/deploy.sh
+```
+
+已登录过服务器时，也可从 PowerShell 一步远程执行（前提：3.1.4 已完成）：
+
+```powershell
+ssh -t chat "sudo bash /opt/eisechat/src/infra/docker/deploy.sh"
+```
+
 ### 3.2 执行一键部署脚本
+
+先确认 §3.1.4 已完成（ZIP 已解压替换源码）；否则脚本只会用旧代码重新构建镜像。
 
 ```bash
 sudo bash /opt/eisechat/src/infra/docker/deploy.sh
@@ -162,14 +209,24 @@ sudo SKIP_BUILD=1 bash /opt/eisechat/src/infra/docker/deploy.sh              # �
 ### 3.3 验证
 
 ```bash
+# 1) 健康检查
 curl -s http://127.0.0.1:6580/api/health
 # {"status":"ok","serverTime":...,"version":"1.1.0","protocolVersion":1,"db":"ok"}
 
+# 2) 版本/构建核对：新代码应返回 200；404 说明仍是旧镜像（2026-11-02 之前的构建）
+curl -s http://127.0.0.1:6580/api/version
+
+# 3) 容器与镜像时间，确认是本次重建而不是复用旧镜像
 docker compose -f /opt/eisechat/src/docker-compose.yml ps      # STATUS 应为 healthy
+docker inspect eisechat-server --format '{{.Created}}'
+docker compose -f /opt/eisechat/src/docker-compose.yml images
+
+# 4) 端口与日志
 sudo ss -ltnp | grep 6580                                      # 必须只有 127.0.0.1:6580
 sudo docker logs --tail=30 eisechat-server
 ```
 
+> 若 `docker inspect` 的创建时间远早于本次部署，说明用了 `SKIP_BUILD=1` 或源码未替换（回到 §3.1.4 / §3.2）；`/api/version` 返回 404 是“旧镜像”的明确信号。
 > 2026-10-29 首次一键部署实测通过：`docker compose ps` 中 `eisechat-server` 为 `healthy`，`/api/health` 返回 `{"status":"ok","version":"1.1.0","protocolVersion":1,"db":"ok"}`。
 
 ### 3.4 配置 HTTPS：Tailscale Serve（内测推荐，无需域名）
@@ -407,6 +464,28 @@ sudo DOTNET_REGISTRY=mcr.m.daocloud.io \
 ### 10.5 数据库被锁定 / WAL 文件增大
 
 SQLite 已启用 WAL；备份用 `VACUUM INTO`。确认没有第二个进程直接打开 `chat.db`（例如本机开发时又启动了服务端连到同一数据目录）。
+
+### 10.6 SSH/SCP 提示 `Enter passphrase` 或 `Permission denied (publickey)`
+
+- Git Bash 默认不共享 Windows 的 ssh-agent，私钥带口令时无法自动解锁；服务器与公钥本身没有问题。
+- 上传与远程执行优先用 **Windows PowerShell**（`scp`/`ssh` 均正常）。
+- 必须在 Git Bash 用时：启动 Windows OpenSSH Authentication Agent 服务并在 PowerShell 执行 `ssh-add $env:USERPROFILE\.ssh\id_ed25519`（无需口令，后续复用）；或在 Git Bash 内 `eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519` 后重试。
+- 不要为了这个错误去重新生成或重配服务器公钥。
+
+### 10.7 Windows 提示「已在此计算机上禁用 Sudo」
+
+- 说明命令在 Windows 本机执行了；`sudo` 和 `/opt/eisechat/...` 都属于 Ubuntu 服务器。
+- 先 `ssh chat`（提示符变为 `ggbond@chat-server:~$`）再执行；或从 PowerShell 用 `ssh -t chat "sudo ..."`。
+
+### 10.8 部署命令成功但页面/功能没更新
+
+按顺序核对：
+
+1. ZIP 是否真的解压替换（§3.1.4）——`grep -m1 '版本' /opt/eisechat/src/AGENTS.md` 应是本次版本；
+2. 是否误用了 `SKIP_BUILD=1`（只重启旧镜像）；
+3. `docker inspect eisechat-server --format '{{.Created}}'` 是否为本次构建时间；
+4. `curl http://127.0.0.1:6580/api/version`：404 表示仍是旧镜像，200 且带 artifacts 表示已是新代码；
+5. 浏览器硬刷新（Ctrl+F5）；Electron/Android 壳内嵌静态资源，需要重打对应 exe/APK 才能看到新界面。
 
 ---
 
