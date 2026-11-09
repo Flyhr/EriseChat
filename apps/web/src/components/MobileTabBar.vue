@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import { type AppIconName } from '../core/icons'
+import { useConversationsStore } from '../stores/conversations'
 
 // 移动端底部导航（UI-04，计划 §4.2 / §4.3 / §16.5）：
 // 仅 ≤800 显示（CSS 控制，桌面不占布局）；进入会话详情时由 App.vue 隐藏。
@@ -23,6 +24,10 @@ const items: TabItem[] = [
 ]
 
 const route = useRoute()
+const conversations = useConversationsStore()
+
+/** 全部会话未读总和（服务端 unread + 本地已读优化）；消息页签角标。 */
+const unreadTotal = computed(() => conversations.totalUnread)
 
 /** 与 SideNav 相同的高亮规则：群聊筛选优先于消息。 */
 const activeKey = computed(() => {
@@ -47,6 +52,11 @@ const activeKey = computed(() => {
       :aria-current="activeKey === item.key ? 'page' : undefined"
     >
       <AppIcon :name="item.icon" :size="20" />
+      <span
+        v-if="item.key === 'chat' && unreadTotal > 0"
+        class="ec-tabbar__badge"
+        :aria-label="`${unreadTotal} 条未读消息`"
+      >{{ unreadTotal > 99 ? '99+' : unreadTotal }}</span>
       <span class="ec-tabbar__label">{{ item.label }}</span>
     </RouterLink>
   </nav>
@@ -120,6 +130,25 @@ const activeKey = computed(() => {
 
   .ec-tabbar__label {
     line-height: 14px;
+  }
+
+  /* 未读角标：红色胶囊，位置对齐图标右上角；超过 99 显示 99+。 */
+  .ec-tabbar__badge {
+    position: absolute;
+    top: 4px;
+    left: calc(50% + 6px);
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border: 2px solid var(--ec-surface);
+    border-radius: var(--ec-radius-full);
+    background: var(--ec-danger);
+    color: var(--ec-text-inverse);
+    font-size: 11px;
+    font-weight: var(--ec-font-weight-semibold);
+    line-height: 14px;
+    text-align: center;
+    box-sizing: border-box;
   }
 }
 </style>
