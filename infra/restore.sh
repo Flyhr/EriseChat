@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# EiseChat 备份恢复脚本（演练或故障恢复；用 root 执行）。
+# EriseChat 备份恢复脚本（演练或故障恢复；用 root 执行）。
 #
 # 用法：
-#   sudo bash infra/restore.sh /var/backups/eisechat/eisechat-20261025-0200.tar.gz
+#   sudo bash infra/restore.sh /var/backups/erisechat/erisechat-20261025-0200.tar.gz
 #
 # 行为：停服务 → 备份当前数据到 *.pre-restore-* → 解包覆盖 → 修复权限 → 启动 → 健康检查。
-# 注意：恢复会覆盖当前 /var/lib/eisechat 下的 chat.db 与 files/，请确认归档正确。
+# 注意：恢复会覆盖当前 /var/lib/erisechat 下的 chat.db 与 files/，请确认归档正确。
 set -euo pipefail
 
-DATA_DIR="${EISECHAT_DATA_DIR:-/var/lib/eisechat}"
-SERVICE_NAME=eisechat
+DATA_DIR="${ERISECHAT_DATA_DIR:-/var/lib/erisechat}"
+SERVICE_NAME=erisechat
 ARCHIVE="${1:-}"
 
 log() { echo "[restore] $*"; }
 die() { echo "[restore] 错误：$*" >&2; exit 1; }
 
 [ "$(id -u)" = "0" ] || die "请用 root 执行"
-[ -n "$ARCHIVE" ] && [ -f "$ARCHIVE" ] || die "用法：sudo bash infra/restore.sh <eisechat-YYYYMMDD-HHMM.tar.gz>"
+[ -n "$ARCHIVE" ] && [ -f "$ARCHIVE" ] || die "用法：sudo bash infra/restore.sh <erisechat-YYYYMMDD-HHMM.tar.gz>"
 command -v systemctl >/dev/null 2>&1 || die "未找到 systemd"
 
 log "停止服务 $SERVICE_NAME"
@@ -35,13 +35,13 @@ tar -xzf "$ARCHIVE" -C "$tmp_dir"
 [ -f "$tmp_dir/chat.db" ] || die "归档中缺少 chat.db"
 
 log "恢复 chat.db 与文件目录"
-install -d -o eisechat -g eisechat -m 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
+install -d -o erisechat -g erisechat -m 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
 cp -f "$tmp_dir/chat.db" "$DATA_DIR/chat.db"
 if [ -f "$tmp_dir/files.tar.gz" ]; then
   rm -rf "$DATA_DIR/files"
   tar -xzf "$tmp_dir/files.tar.gz" -C "$DATA_DIR"
 fi
-chown -R eisechat:eisechat "$DATA_DIR"
+chown -R erisechat:erisechat "$DATA_DIR"
 chmod 600 "$DATA_DIR/chat.db"
 
 log "启动服务并等待健康检查"

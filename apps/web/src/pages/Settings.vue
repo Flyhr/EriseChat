@@ -807,7 +807,7 @@ async function saveProfile(): Promise<void> {
           </button>
         </nav>
         <div class="settings-nav__foot">
-          <span>EiseChat {{ APP_VERSION }}</span>
+          <span>EriseChat {{ APP_VERSION }}</span>
           <RouterLink class="settings-nav__link" to="/download">下载客户端</RouterLink>
         </div>
       </aside>

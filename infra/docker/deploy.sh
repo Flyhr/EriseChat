@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# EiseChat 服务器 Docker 一键部署 / 升级脚本（需 root 或 docker 组）。
+# EriseChat 服务器 Docker 一键部署 / 升级脚本（需 root 或 docker 组）。
 #
-# 用法（服务器上，源码解压到 /opt/eisechat/src 后执行）：
-#   sudo bash /opt/eisechat/src/infra/docker/deploy.sh
+# 用法（服务器上，源码解压到 /opt/erisechat/src 后执行）：
+#   sudo bash /opt/erisechat/src/infra/docker/deploy.sh
 #
 # 可选环境变量：
-#   EISECHAT_HOME    部署根目录（默认 /opt/eisechat；源码在 $EISECHAT_HOME/src，数据在 data/）
-#   APP_VERSION      镜像 tag / 发布版本（默认 1.1.0）
+#   ERISECHAT_HOME    部署根目录（默认 /opt/erisechat；源码在 $ERISECHAT_HOME/src，数据在 data/）
+#   APP_VERSION      镜像 tag / 发布版本（默认 1.2.0）
 #   DOTNET_REGISTRY  基础镜像源（默认 mcr.microsoft.com；拉取失败可换 mcr.m.daocloud.io）
 #   NODE_IMAGE       Node 构建镜像（默认 node:24-alpine；拉取失败可换 docker.m.daocloud.io/library/node:24-alpine）
 #   SKIP_BUILD=1     只重启已有镜像，不重新构建
 #
-# 首次部署会自动生成 $EISECHAT_HOME/.env（含随机 JWT 密钥，权限 600）；SMTP 等配置按需填写后重启。
+# 首次部署会自动生成 $ERISECHAT_HOME/.env（含随机 JWT 密钥，权限 600）；SMTP 等配置按需填写后重启。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-HOME_DIR="${EISECHAT_HOME:-/opt/eisechat}"
+HOME_DIR="${ERISECHAT_HOME:-/opt/erisechat}"
 DATA_DIR="$HOME_DIR/data"
 ENV_FILE="$HOME_DIR/.env"
-VERSION="${APP_VERSION:-1.1.0}"
-PORT="${EISECHAT_PORT:-6580}"
-# 容器内非 root 用户 UID/GID（默认 1000；如部署机目录属主不同可用 EISECHAT_UID 覆盖）
-APP_UID="${EISECHAT_UID:-1000}"
+VERSION="${APP_VERSION:-1.2.0}"
+PORT="${ERISECHAT_PORT:-6580}"
+# 容器内非 root 用户 UID/GID（默认 1000；如部署机目录属主不同可用 ERISECHAT_UID 覆盖）
+APP_UID="${ERISECHAT_UID:-1000}"
 
 log() { echo "[deploy] $*"; }
 die() { echo "[deploy] 错误：$*" >&2; exit 1; }
@@ -44,7 +44,7 @@ if [ ! -f "$ENV_FILE" ]; then
   (
     umask 077
     cat > "$ENV_FILE" <<EOF
-# EiseChat 部署配置（docker compose env_file）——权限 600，勿提交、勿外传
+# EriseChat 部署配置（docker compose env_file）——权限 600，勿提交、勿外传
 ASPNETCORE_ENVIRONMENT=Production
 Jwt__Key=$key
 
@@ -56,7 +56,7 @@ Jwt__Key=$key
 # Email__SmtpUser=
 # Email__SmtpPassword=
 # Email__FromAddress=
-# Email__FromName=EiseChat
+# Email__FromName=EriseChat
 EOF
   )
   chmod 600 "$ENV_FILE"
@@ -64,10 +64,10 @@ else
   log "复用已有 $ENV_FILE（改 SMTP/密钥后重新执行本脚本生效；docker compose restart 不会重读 .env）"
 fi
 
-export EISECHAT_DATA_DIR="$DATA_DIR"
-export EISECHAT_PORT="$PORT"
-export EISECHAT_UID="$APP_UID"
-export EISECHAT_ENV_FILE="$ENV_FILE"
+export ERISECHAT_DATA_DIR="$DATA_DIR"
+export ERISECHAT_PORT="$PORT"
+export ERISECHAT_UID="$APP_UID"
+export ERISECHAT_ENV_FILE="$ENV_FILE"
 export APP_VERSION="$VERSION"
 export DOTNET_REGISTRY="${DOTNET_REGISTRY:-mcr.microsoft.com}"
 export NODE_IMAGE="${NODE_IMAGE:-node:24-alpine}"
@@ -94,8 +94,8 @@ if [ "$healthy" = "1" ]; then
   log "服务已就绪：$(curl -fsS "http://127.0.0.1:${PORT}/api/health")"
 else
   log "健康检查失败，最近日志："
-  docker compose logs --tail=80 eisechat || true
-  die "部署失败，请根据上方日志排查（docker compose logs -f eisechat）"
+  docker compose logs --tail=80 erisechat || true
+  die "部署失败，请根据上方日志排查（docker compose logs -f erisechat）"
 fi
 
 docker compose ps
@@ -103,8 +103,8 @@ cat <<EOF
 
 [deploy] 完成。
   部署目录：$HOME_DIR（源码 src/，数据 data/，配置 .env）
-  端口：仅绑定 127.0.0.1:${PORT}（可用 EISECHAT_PORT 覆盖）
-  管理：docker compose ps | logs -f eisechat | restart | down
+  端口：仅绑定 127.0.0.1:${PORT}（可用 ERISECHAT_PORT 覆盖）
+  管理：docker compose ps | logs -f erisechat | restart | down
   更新：改了代码后按 docs/update-deploy.md 重新构建部署
   下一步：配置 SMTP（编辑 $ENV_FILE 后重新执行本脚本，勿用 docker compose restart）；
           HTTPS 入口用 Tailscale Serve（docs/deploy.md §3.4）；管理员提权见同文档。

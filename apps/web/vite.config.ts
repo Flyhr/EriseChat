@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// EiseChat Web 开发/构建配置（docs/project-overview.md §7.2、§13.2）。
+// EriseChat Web 开发/构建配置（docs/project-overview.md §7.2、§13.2）。
 // 开发期把 /api、/ws 代理到本机服务端（Kestrel 127.0.0.1:6580）；生产环境由服务端同域提供，
 // 不需要代理（见 docs/project-overview.md §7.4：构建产物复制到 server/Chat.Server/wwwroot/）。
 export default defineConfig({

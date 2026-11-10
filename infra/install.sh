@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EiseChat 服务器首次安装 / 升级脚本（Ubuntu 22.04/24.04，用 root 执行）。
+# EriseChat 服务器首次安装 / 升级脚本（Ubuntu 22.04/24.04，用 root 执行）。
 #
 # 前置：
 #   1) 已按 infra/publish-linux.sh 在开发机产出 chat-server-x.y.z-linux-x64.zip 并上传到服务器；
@@ -9,12 +9,12 @@
 # 用法：
 #   sudo bash infra/install.sh chat-server-1.0.0-linux-x64.zip
 #
-# 本脚本不写死任何凭据：JWT 密钥由服务端首次启动自动生成到 /opt/eisechat-server/secrets.json（权限 600）。
+# 本脚本不写死任何凭据：JWT 密钥由服务端首次启动自动生成到 /opt/erisechat-server/secrets.json（权限 600）。
 set -euo pipefail
 
-APP_DIR=/opt/eisechat-server
-DATA_DIR=/var/lib/eisechat
-SERVICE_NAME=eisechat
+APP_DIR=/opt/erisechat-server
+DATA_DIR=/var/lib/erisechat
+SERVICE_NAME=erisechat
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE="${1:-}"
@@ -28,21 +28,21 @@ command -v unzip >/dev/null 2>&1 || die "未找到 unzip，请先 apt-get instal
 [ -n "$PACKAGE" ] && [ -f "$PACKAGE" ] || die "用法：sudo bash infra/install.sh <chat-server-x.y.z-linux-x64.zip>"
 
 log "创建系统用户与目录"
-id -u eisechat >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin eisechat
-install -d -o eisechat -g eisechat -m 755 "$APP_DIR"
-install -d -o eisechat -g eisechat -m 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
+id -u erisechat >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin erisechat
+install -d -o erisechat -g erisechat -m 755 "$APP_DIR"
+install -d -o erisechat -g erisechat -m 750 "$DATA_DIR" "$DATA_DIR/files" "$DATA_DIR/downloads"
 
 log "解压应用包到 $APP_DIR（覆盖升级，保留数据目录）"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 unzip -q "$PACKAGE" -d "$tmp_dir"
 cp -a "$tmp_dir"/. "$APP_DIR"/
-chown -R eisechat:eisechat "$APP_DIR"
+chown -R erisechat:erisechat "$APP_DIR"
 chmod 755 "$APP_DIR/Chat.Server"
 
 log "安装 systemd 服务"
-[ -f "$SCRIPT_DIR/eisechat.service" ] || die "缺少 $SCRIPT_DIR/eisechat.service"
-cp "$SCRIPT_DIR/eisechat.service" "$SERVICE_FILE"
+[ -f "$SCRIPT_DIR/erisechat.service" ] || die "缺少 $SCRIPT_DIR/erisechat.service"
+cp "$SCRIPT_DIR/erisechat.service" "$SERVICE_FILE"
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
@@ -78,7 +78,7 @@ cat <<EOF
 
 [install] 完成。
   应用目录：$APP_DIR（首次启动自动生成 secrets.json，权限 600）
-  密钥文件：$APP_DIR/secrets.json（JWT/SMTP 凭据，仅 root 与 eisechat 用户可读）
+  密钥文件：$APP_DIR/secrets.json（JWT/SMTP 凭据，仅 root 与 erisechat 用户可读）
   数据目录：$DATA_DIR（chat.db / files / downloads）
   服务管理：systemctl status|restart|stop $SERVICE_NAME
   查看日志：journalctl -u $SERVICE_NAME -n 100 --no-pager

@@ -97,7 +97,7 @@ export function registerIpcHandlers(): void {
     packaged: app.isPackaged,
   }))
 
-  // preload 在注入 window.eisechatDesktop.serverUrl 时需同步取值（Web 启动即需要 apiBase/wsUrl）。
+  // preload 在注入 window.erisechatDesktop.serverUrl 时需同步取值（Web 启动即需要 apiBase/wsUrl）。
   ipcMain.on('settings:get-server-url-sync', (event) => {
     event.returnValue = loadSettings().serverUrl
   })
@@ -113,7 +113,7 @@ export function registerIpcHandlers(): void {
   // 会话 ID 在此做白名单校验（服务端统一小写 UUID），不接受任意字符串透传给渲染进程。
   ipcMain.handle('window:notify', (_event, payload: { title?: string; body?: string; conversationId?: string }) => {
     if (!Notification.isSupported()) return false
-    const title = typeof payload?.title === 'string' && payload.title ? payload.title : 'EiseChat'
+    const title = typeof payload?.title === 'string' && payload.title ? payload.title : 'EriseChat'
     const body = typeof payload?.body === 'string' ? payload.body : ''
     if (!body.trim()) return false
     const conversationId =

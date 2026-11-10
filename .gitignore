@@ -1,9 +1,11 @@
-# EiseChat 仓库忽略清单
+# EriseChat 仓库忽略清单
 # 依据：AGENTS.md §4「不提交」+ 各技术栈标准产物。
 # 原则：构建产物、运行时数据、密钥凭据、IDE/系统临时文件一律不入库。
 # 新增依赖或工具链时，同步在此补一行，不要提交二进制大文件。
 
 # ==== 通用 / 系统 ====
+# 工作区本地 AI 数据（记忆/日志等，非构建产物，不入库、不删除）
+.workbuddy-ai/
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -99,7 +101,13 @@ server/Chat.Server.Tests/
 /docs/ui/ui-00-review.md
 /docs/ui/*/
 /docs/ui/*.png
-/docs/EiseChat_UI_*/
+/docs/EriseChat_UI_*/
+# AI 实施指令与功能差距评估（AGENTS §4：AI 指令、审查报告本地保留，不入库）
+/docs/ai-doc-alignment-instructions.md
+/docs/ai-batch-a-instructions.md
+/docs/ai-naming-migration-instructions.md
+/docs/ai-direct-prompt.md
+/docs/feature-gap-assessment.md
 
 
 # ==== Docker 部署 ====

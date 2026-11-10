@@ -924,7 +924,7 @@ export const useMessagesStore = defineStore('messages', () => {
     if (!shouldShowDesktopNotification(state)) return
 
     const conversation = conversationStore.getById(message.conversationId)
-    const title = conversation ? conversationTitleOf(conversation, selfUserId) : 'EiseChat 新消息'
+    const title = conversation ? conversationTitleOf(conversation, selfUserId) : 'EriseChat 新消息'
     const body = previewOf(message)
     const notifier = getDesktopNotifier()
     if (notifier) {

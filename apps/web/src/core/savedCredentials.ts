@@ -4,7 +4,7 @@
  * 只在浏览器 localStorage 中保存邮箱与密码明文字段（内部信任模型，不做加密）；
  * 仅用于登录页回填，不参与认证、不写日志、不上传服务端。读取失败/数据损坏一律静默回退为 null。
  */
-export const SAVED_LOGIN_KEY = 'eisechat.savedLogin'
+export const SAVED_LOGIN_KEY = 'erisechat.savedLogin'
 
 export interface SavedLogin {
   email: string

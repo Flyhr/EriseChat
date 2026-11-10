@@ -27,7 +27,7 @@ export interface AppConfig {
 }
 
 /** 运行时服务器地址的 localStorage 键（只保存 origin，如 https://chat.example.com）。 */
-export const SERVER_URL_STORAGE_KEY = 'eisechat.serverUrl'
+export const SERVER_URL_STORAGE_KEY = 'erisechat.serverUrl'
 
 /**
  * 单条文本消息最大字符数（protocol/protocol.md §4.3：服务端校验同值）。
@@ -61,7 +61,7 @@ export const config: AppConfig = {
   reconnectDelaysMs: [1000, 2000, 5000, 10000, 30000],
   syncBatchSize: 200,
   requestTimeoutMs: 15000,
-  dbName: 'eisechat',
+  dbName: 'erisechat',
 }
 
 /**
@@ -86,10 +86,10 @@ function readStoredServerUrl(): string | null {
   return normalizeServerUrl(readStorage(SERVER_URL_STORAGE_KEY))
 }
 
-/** 桌面壳 preload 注入的只读服务器地址（M4-02 提供 window.eisechatDesktop.serverUrl），Web 版不存在。 */
+/** 桌面壳 preload 注入的只读服务器地址（M4-02 提供 window.erisechatDesktop.serverUrl），Web 版不存在。 */
 function readInjectedServerUrl(): string | null {
   if (typeof window === 'undefined') return null
-  const injected = (window as Window & { eisechatDesktop?: { serverUrl?: string } }).eisechatDesktop?.serverUrl
+  const injected = (window as Window & { erisechatDesktop?: { serverUrl?: string } }).erisechatDesktop?.serverUrl
   return normalizeServerUrl(injected ?? null)
 }
 

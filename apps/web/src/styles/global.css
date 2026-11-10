@@ -1,4 +1,4 @@
-/* EiseChat 全局基础样式（UI-01，依据 docs/ui-upgrade-plan.md §3.2 / §4.3 / H-12）。
+/* EriseChat 全局基础样式（UI-01，依据 docs/ui-upgrade-plan.md §3.2 / §4.3 / H-12）。
    这里只放全局生效的最小规则：重置、字体与画布、滚动条、键盘焦点、动效降级。
    业务样式一律放组件 scoped style；新组件类名使用 ec- 前缀（§16.4）。 */
 *,

@@ -69,10 +69,10 @@ public sealed class SmtpEmailSender : IEmailSender
 
     internal static string SubjectOf(EmailCodePurpose purpose) => purpose switch
     {
-        EmailCodePurpose.Register => "EiseChat 注册验证码",
-        EmailCodePurpose.Login => "EiseChat 登录验证码",
-        EmailCodePurpose.Reset => "EiseChat 密码重置验证码",
-        _ => "EiseChat 验证码",
+        EmailCodePurpose.Register => "EriseChat 注册验证码",
+        EmailCodePurpose.Login => "EriseChat 登录验证码",
+        EmailCodePurpose.Reset => "EriseChat 密码重置验证码",
+        _ => "EriseChat 验证码",
     };
 
     internal static string BodyOf(EmailCodePurpose purpose, string code)
@@ -84,6 +84,6 @@ public sealed class SmtpEmailSender : IEmailSender
             EmailCodePurpose.Reset => "重置密码",
             _ => "身份验证",
         };
-        return $"你的 EiseChat {action}验证码是：{code}\n\n验证码 10 分钟内有效，请勿转发给他人。\n若非本人操作，请忽略本邮件。";
+        return $"你的 EriseChat {action}验证码是：{code}\n\n验证码 10 分钟内有效，请勿转发给他人。\n若非本人操作，请忽略本邮件。";
     }
 }

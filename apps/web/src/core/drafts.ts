@@ -6,7 +6,7 @@ import { MAX_TEXT_LENGTH } from './config'
 import { getStorage } from './safeStorage'
 
 /** localStorage 键：结构为 `Record<conversationId, { text, updatedAt }>`。 */
-export const DRAFTS_STORAGE_KEY = 'eisechat.drafts.v1'
+export const DRAFTS_STORAGE_KEY = 'erisechat.drafts.v1'
 
 /** 最多保留最近多少个会话的草稿（避免 localStorage 无限增长）。 */
 export const DRAFTS_MAX_CONVERSATIONS = 20

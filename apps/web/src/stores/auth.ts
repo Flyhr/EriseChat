@@ -6,9 +6,9 @@ import { readStorage, removeStorage, writeStorage } from '../core/safeStorage'
 import type { AuthUser } from '../api/auth'
 
 /** deviceId localStorage key（与 core/ws.ts 共用同一 key，保证 REST 会话与 WS auth 设备标识一致）。 */
-const DEVICE_ID_STORAGE_KEY = 'eisechat.deviceId'
+const DEVICE_ID_STORAGE_KEY = 'erisechat.deviceId'
 /** 登录态持久化 key：内部信任模型下允许存 localStorage（token 不写日志、不打印）。 */
-const SESSION_STORAGE_KEY = 'eisechat.session'
+const SESSION_STORAGE_KEY = 'erisechat.session'
 
 interface StoredSession {
   accessToken: string

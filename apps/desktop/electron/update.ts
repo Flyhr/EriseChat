@@ -43,7 +43,7 @@ interface VersionManifest {
 
 const MAX_REDIRECTS = 5
 const MAX_INSTALLER_BYTES = 512 * 1024 * 1024
-const INSTALLER_DIR_NAME = 'eisechat-update'
+const INSTALLER_DIR_NAME = 'erisechat-update'
 
 let downloadedInstallerPath: string | null = null
 let downloadedInstallerSha256: string | null = null
@@ -118,7 +118,7 @@ function validateArtifact(raw: unknown, origin: URL): UpdateArtifact | null {
   const modifiedAt =
     typeof record.modifiedAt === 'number' && Number.isFinite(record.modifiedAt) ? Math.trunc(record.modifiedAt) : 0
   if (!version || !fileName || !url || !sha256) return null
-  if (!/^EiseChat-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$/i.test(fileName)) return null
+  if (!/^EriseChat-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$/i.test(fileName)) return null
   if (!/^[0-9a-f]{64}$/.test(sha256)) return null
   if (!url.toLowerCase().endsWith('.exe')) return null
   try {

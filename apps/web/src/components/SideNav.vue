@@ -71,9 +71,9 @@ const displayName = computed(() => auth.user?.displayName ?? '我的账号')
 
 <template>
   <nav class="ec-sidenav" aria-label="主导航">
-    <RouterLink class="ec-sidenav__brand" to="/chat" aria-label="EiseChat 消息">
+    <RouterLink class="ec-sidenav__brand" to="/chat" aria-label="EriseChat 消息">
       <span class="ec-sidenav__logo" aria-hidden="true">E</span>
-      <span class="ec-sidenav__brand-text">EiseChat</span>
+      <span class="ec-sidenav__brand-text">EriseChat</span>
     </RouterLink>
 
     <ul class="ec-sidenav__items">

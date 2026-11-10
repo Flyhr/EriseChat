@@ -8,14 +8,14 @@ namespace Chat.Server.Api;
 /// <summary>
 /// 下载页与安装包分发（M4-04，计划 §5.5）：
 /// - <c>GET /download</c>：静态 HTML（版本号、Windows 安装包、Android APK 占位、更新日志、SmartScreen 说明）；
-/// - <c>GET /download/files/{fileName}</c>：只允许 <c>EiseChat-Setup-*.exe</c> / <c>EiseChat-*.apk</c> 白名单文件，
+/// - <c>GET /download/files/{fileName}</c>：只允许 <c>EriseChat-Setup-*.exe</c> / <c>EriseChat-*.apk</c> 白名单文件，
 ///   经路径穿越校验后以附件下载；文件不存在或非法名一律 404。
 /// 目录来自 AppOptions.DownloadDirectory（默认仓库根 data/downloads），不暴露磁盘路径。
 /// </summary>
 public static class DownloadEndpoints
 {
     private static readonly Regex AllowedFileNamePattern = new(
-        @"^EiseChat-(?:Setup-.+\.exe|.+\.apk)$",
+        @"^EriseChat-(?:Setup-.+\.exe|.+\.apk)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static IEndpointRouteBuilder MapDownloadEndpoints(this IEndpointRouteBuilder app, string downloadDirectory)
@@ -75,8 +75,8 @@ public static class DownloadEndpoints
     private static string BuildPage(HttpRequest request, string directory)
     {
         var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "1.0.0";
-        var installer = FindNewest(directory, "EiseChat-Setup-*.exe");
-        var apk = FindNewest(directory, "EiseChat-*.apk");
+        var installer = FindNewest(directory, "EriseChat-Setup-*.exe");
+        var apk = FindNewest(directory, "EriseChat-*.apk");
         var host = WebUtility.HtmlEncode(request.Host.Value ?? string.Empty);
 
         var hasInstaller = installer is not null;
@@ -126,7 +126,7 @@ public static class DownloadEndpoints
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>EiseChat 下载 · v{{VERSION}}</title>
+  <title>EriseChat 下载 · v{{VERSION}}</title>
   <style>
     :root { color-scheme: light; }
     body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #f5f6f3; color: #1f2a24; }
@@ -146,7 +146,7 @@ public static class DownloadEndpoints
 <body>
 <main>
   <span class="tag">内部使用</span>
-  <h1>EiseChat 下载</h1>
+  <h1>EriseChat 下载</h1>
   <p class="muted">当前版本 <strong>{{VERSION}}</strong> · 服务器 <code>{{HOST}}</code></p>
 
   <section class="card">

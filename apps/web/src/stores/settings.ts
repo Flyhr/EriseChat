@@ -4,7 +4,7 @@ import { isDesktopShell } from '../core/desktop'
 import { readStorage, writeStorage } from '../core/safeStorage'
 
 /** 纯客户端偏好（提示音、桌面通知）的 localStorage key；服务端不感知，也不跨设备同步。 */
-export const SETTINGS_STORAGE_KEY = 'eisechat.settings'
+export const SETTINGS_STORAGE_KEY = 'erisechat.settings'
 
 /** 客户端本地设置集合（未来可扩展消息字号、主题等纯视觉偏好）。 */
 export interface ClientSettings {

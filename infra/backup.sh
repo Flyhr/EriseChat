@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# EiseChat 每日备份脚本（建议 root/cron 执行；默认每天 02:00）。
+# EriseChat 每日备份脚本（建议 root/cron 执行；默认每天 02:00）。
 #
 # 内容：SQLite 在线备份（VACUUM INTO，一致性快照）+ files/downloads 打包 → 单个 tar.gz；
 # 保留最近 30 份；可选 rsync/scp 同步到异机；失败以非 0 退出并写日志（日志在备份目录）。
 #
-# 用法（可放 /etc/cron.d/eisechat-backup）：
-#   0 2 * * * root EISECHAT_REMOTE=user@backup-host:/srv/eisechat-backup bash /opt/eisechat-server/infra/backup.sh
+# 用法（可放 /etc/cron.d/erisechat-backup）：
+#   0 2 * * * root ERISECHAT_REMOTE=user@backup-host:/srv/erisechat-backup bash /opt/erisechat-server/infra/backup.sh
 set -euo pipefail
 
-DATA_DIR="${EISECHAT_DATA_DIR:-/var/lib/eisechat}"
-BACKUP_DIR="${EISECHAT_BACKUP_DIR:-/var/backups/eisechat}"
-KEEP="${EISECHAT_BACKUP_KEEP:-30}"
-REMOTE="${EISECHAT_REMOTE:-}"
+DATA_DIR="${ERISECHAT_DATA_DIR:-/var/lib/erisechat}"
+BACKUP_DIR="${ERISECHAT_BACKUP_DIR:-/var/backups/erisechat}"
+KEEP="${ERISECHAT_BACKUP_KEEP:-30}"
+REMOTE="${ERISECHAT_REMOTE:-}"
 STAMP="$(date +%Y%m%d-%H%M)"
-ARCHIVE="$BACKUP_DIR/eisechat-$STAMP.tar.gz"
+ARCHIVE="$BACKUP_DIR/erisechat-$STAMP.tar.gz"
 
 mkdir -p "$BACKUP_DIR"
 LOG="$BACKUP_DIR/backup.log"
@@ -58,7 +58,7 @@ if [ -n "$REMOTE" ]; then
 fi
 
 # 5) 保留最近 N 份（按修改时间倒序删除多余文件）。
-ls -1t "$BACKUP_DIR"/eisechat-*.tar.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r old; do
+ls -1t "$BACKUP_DIR"/erisechat-*.tar.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r old; do
   rm -f "$old"
   echo "[backup] 清理旧备份 $old"
 done

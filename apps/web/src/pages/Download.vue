@@ -8,7 +8,7 @@ import { APP_VERSION } from '../core/version'
 
 <template>
   <main class="download-page">
-    <h2 class="download-page__title">下载 EiseChat</h2>
+    <h2 class="download-page__title">下载 EriseChat</h2>
     <EmptyState
       icon="download"
       title="客户端安装包"

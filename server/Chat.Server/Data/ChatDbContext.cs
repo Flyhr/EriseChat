@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Chat.Server.Data;
 
 /// <summary>
-/// EiseChat 数据库上下文。表结构唯一来源：<c>protocol/schema.sql</c>，迁移位于 <c>Data/Migrations</c>。
+/// EriseChat 数据库上下文。表结构唯一来源：<c>protocol/schema.sql</c>，迁移位于 <c>Data/Migrations</c>。
 /// 约定：表名/列名 snake_case；时间列 INTEGER 存 UTC 毫秒（C# long）；枚举以 TEXT 小写保存，
 /// 并由各表 CHECK 约束兜底；外键 ON DELETE 行为严格按 schema.sql 配置。
 /// </summary>

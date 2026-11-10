@@ -30,7 +30,7 @@ public sealed class EmailOptions
     public string FromAddress { get; set; } = string.Empty;
 
     /// <summary>发件人显示名称。</summary>
-    public string FromName { get; set; } = "EiseChat";
+    public string FromName { get; set; } = "EriseChat";
 }
 
 /// <summary>Mock 邮件通道配置（appsettings.Development.json 的 "Email:Mock" 节）。</summary>

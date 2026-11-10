@@ -1,9 +1,9 @@
-# EiseChat Windows 安装包配置（electron-builder；M4 实际打包，M0 先固化配置）。
-# 约束（AGENTS.md §3 / internal-plan §5.2、§6.1）：NSIS 每用户安装、免签名、产物名 EiseChat-Setup-x.y.z.exe。
+# EriseChat Windows 安装包配置（electron-builder；M4 实际打包，M0 先固化配置）。
+# 约束（AGENTS.md §3 / internal-plan §5.2、§6.1）：NSIS 每用户安装、免签名、产物名 EriseChat-Setup-x.y.z.exe。
 
-appId: com.eisechat.desktop
-productName: EiseChat
-copyright: Copyright © 2026 EiseChat
+appId: com.erisechat.desktop
+productName: EriseChat
+copyright: Copyright © 2026 EriseChat
 
 directories:
   output: dist
@@ -29,7 +29,7 @@ win:
       arch:
         - x64
   icon: build/icon.ico
-  artifactName: EiseChat-Setup-${version}.${ext}
+  artifactName: EriseChat-Setup-${version}.${ext}
 
 nsis:
   oneClick: false
@@ -37,4 +37,4 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: EiseChat
+  shortcutName: EriseChat

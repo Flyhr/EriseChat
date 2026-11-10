@@ -4,17 +4,17 @@ import path from 'node:path'
 import { getSettings, registerIpcHandlers, registerUnreadIndicator } from './ipc'
 import { disposeUpdateIpcHandlers, registerUpdateIpcHandlers } from './update'
 
-// EiseChat Windows 桌面壳（M0 骨架 → M4-02 托盘/系统通知/窗口记忆/关闭到托盘）。
+// EriseChat Windows 桌面壳（M0 骨架 → M4-02 托盘/系统通知/窗口记忆/关闭到托盘）。
 // 只负责窗口生命周期、托盘、通知与白名单 IPC，不写聊天业务逻辑（AGENTS.md §3 / project-overview §7.3、§10）。
 // 安全默认：contextIsolation=true、nodeIntegration=false、sandbox=true；页面跳转/弹窗仅允许配置的服务器与本地文件。
 
-const DEV_SERVER_URL = process.env.EISECHAT_DEV_SERVER_URL ?? 'http://127.0.0.1:5173'
+const DEV_SERVER_URL = process.env.ERISECHAT_DEV_SERVER_URL ?? 'http://127.0.0.1:5173'
 const MIN_WIDTH = 960
 const MIN_HEIGHT = 640
 
 // Windows 系统通知需要一个 Application User Model ID 才能正确归属到本应用；
 // 必须与 electron-builder.yml 的 appId 一致（开始菜单快捷方式的 AUMID 由安装包写入）。
-const APP_USER_MODEL_ID = 'com.eisechat.desktop'
+const APP_USER_MODEL_ID = 'com.erisechat.desktop'
 app.setAppUserModelId(APP_USER_MODEL_ID)
 
 interface WindowState {
@@ -179,13 +179,13 @@ function createTray(): void {
   if (trayAlertImage.isEmpty()) trayAlertImage = null
 
   tray = new Tray(trayNormalImage)
-  tray.setToolTip('EiseChat')
+  tray.setToolTip('EriseChat')
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: '显示主窗口', click: () => showMainWindow() },
       { type: 'separator' },
       {
-        label: '退出 EiseChat',
+        label: '退出 EriseChat',
         click: () => {
           isQuitting = true
           app.quit()
@@ -242,7 +242,7 @@ function applyUnreadIndicator(count: number): void {
   unreadTotal = total
   if (tray) {
     try {
-      tray.setToolTip(total > 0 ? `EiseChat — ${total} 条未读消息（点击打开）` : 'EiseChat')
+      tray.setToolTip(total > 0 ? `EriseChat — ${total} 条未读消息（点击打开）` : 'EriseChat')
     } catch (error) {
       console.warn('[desktop] 更新托盘提示失败', error)
     }
@@ -256,7 +256,7 @@ function applyUnreadIndicator(count: number): void {
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
     try {
-      mainWindow.setTitle(total > 0 ? `EiseChat（${total} 条未读）` : 'EiseChat')
+      mainWindow.setTitle(total > 0 ? `EriseChat（${total} 条未读）` : 'EriseChat')
     } catch (error) {
       console.warn('[desktop] 更新窗口标题失败', error)
     }

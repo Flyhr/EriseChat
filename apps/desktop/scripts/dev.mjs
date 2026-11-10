@@ -27,7 +27,7 @@ if (build.status !== 0) {
 
 const electronBin = path.join(desktopDir, 'node_modules', '.bin', isWindows ? 'electron.cmd' : 'electron')
 if (!existsSync(electronBin)) {
-  console.error('[eisechat] 未找到 Electron 可执行文件，请先在 apps/desktop 执行 npm install')
+  console.error('[erisechat] 未找到 Electron 可执行文件，请先在 apps/desktop 执行 npm install')
   process.exit(1)
 }
 

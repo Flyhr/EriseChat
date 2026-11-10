@@ -4,7 +4,7 @@ using System.Text;
 namespace Chat.Server.Common.Security;
 
 /// <summary>
-/// 密码哈希：PBKDF2-SHA256（随机 16 字节盐，210,000 次迭代 ≥ AGENTS §6 要求的 100,000）。
+/// 密码哈希：PBKDF2-HMAC-SHA256（随机 16 字节盐，210,000 次迭代 ≥ AGENTS §6 要求的 100,000）。
 /// 存储格式：<c>pbkdf2-sha256${iterations}${saltBase64}${hashBase64}</c>。
 /// </summary>
 public static class PasswordHasher

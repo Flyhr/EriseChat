@@ -1,6 +1,6 @@
-# AGENTS.md — EiseChat 项目约束
+# AGENTS.md — EriseChat 项目约束
 
-> 版本 2.4（2026-11-09）。改动仓库前必须阅读并遵守本文件；计划变更涉及仓库约束时同步更新。2.4 起测试文件统一放根级 `tests/`（不入库），新增测试子目录须先征得用户同意。
+> 版本 2.5（2026-11-10）。改动仓库前必须阅读并遵守本文件；计划变更涉及仓库约束时同步更新。2.4 起测试文件统一放根级 `tests/`（不入库），新增测试子目录须先征得用户同意。2.5 修订：校正 §10 后续功能清单、更正 §6 算法名、新增 §1.1 命名总则（唯一名称为 EriseChat，运行时标识与代码同步迁移）。
 
 ## 1. 文档分工与优先级
 
@@ -13,6 +13,13 @@
 | `docs/internal-plan.md` | 唯一现行计划（V2.3.5）：范围、排期、协议与数据模型、验收和风险。 |
 | `docs/project-overview.md` | 项目详解、文件级目录、模块职责与依赖方向。 |
 | `protocol/protocol.md`、`protocol/schema.sql` | 分别为协议帧和表结构的唯一来源；表结构与 EF 迁移同步。 |
+
+### 1.1 命名总则
+
+- 本项目唯一名称为 **EriseChat**：产品名与文案用 `EriseChat`，标识符与包名前缀用 `erisechat`，环境变量前缀用 `ERISECHAT`。仓库目录名 `EriseChat` 即产品名，不是路径特例。
+- 历史遗留的三个大小写变体均为早期笔误，统一方向是改为上述对应形式；禁止反向统一，也不得以兼容性或风险为由保留旧值。
+- 运行时标识（Android `applicationId` 与 Java 包名、Electron `appId` 与注入桥、JWT issuer/audience、前端 localStorage key、Docker 容器/镜像/compose 项目名与部署路径、产物名前缀及其服务端白名单、环境变量前缀）**必须与代码原子同步修改**，不得只改文档或只改代码。
+- 唯一例外：`infra/keys/eisechat-release.jks` 及其签名别名沿用历史名称。该文件为密钥资产，按 §2.6 / §2.9 内容不动、不重命名，引用路径保持指向原文件名；此处旧字面量仅用于例外登记，不计入命名残留。
 
 ## 2. 硬规则
 
@@ -40,8 +47,8 @@
 | 认证 | 邮箱验证码 + 可选密码；密码和 JWT 要求见 §6 |
 | 邮件 | 可配置 SMTP（企业邮箱/QQ 邮箱授权码）或免费邮件 API（Brevo/Resend 等）；`Development` 输出到控制台（不写日志文件）+ 固定测试码 |
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI；核心模块 `core/ws.ts`、`core/sync.ts`、`stores/` |
-| Windows 壳 | Electron + electron-builder（NSIS，`appId=com.eisechat.desktop`，安装包 `EiseChat-Setup-x.y.z.exe`，免签名） |
-| Android 壳 | Capacitor，Web 资源打进 APK（不依赖在线加载），最低 API 26，自签名 keystore 放 `infra/keys/`（gitignore），APK 名 `EiseChat-x.y.z.apk` |
+| Windows 壳 | Electron + electron-builder（NSIS，`appId=com.erisechat.desktop`，安装包 `EriseChat-Setup-x.y.z.exe`，免签名） |
+| Android 壳 | Capacitor，Web 资源打进 APK（不依赖在线加载），最低 API 26，自签名 keystore 放 `infra/keys/`（gitignore），APK 名 `EriseChat-x.y.z.apk` |
 
 ## 4. 目录与命名
 
@@ -68,7 +75,7 @@
 
 ## 6. 数据与安全
 
-- 密码：PBKDF2-SHA256（≥100,000 次、随机盐）或 Argon2id；验证码只存哈希。
+- 密码：PBKDF2-HMAC-SHA256（≥100,000 次、随机盐）或 Argon2id；验证码只存哈希。实现见 `server/Chat.Server/Common/Security/PasswordHasher.cs`（210,000 次迭代、16 字节随机盐）。
 - JWT：HS256，有效期默认 3 天且可配置；密钥首次启动生成并写入 `secrets.json`。
 - 限流：同邮箱 60 秒/次、10 次/天；同 IP 20 次/小时；验证码错误 5 次作废；登录失败 5 次锁 5 分钟。
 - 文件：默认上限 50MB（可配）；下载只走 `GET /api/files/{id}` 并校验会话成员；不暴露磁盘路径；上传校验 MIME/扩展名；图片发送前客户端压缩（最长边 1280px、约 ≤300KB）。
@@ -95,9 +102,9 @@ cd apps/desktop && npm run dist                 # NSIS 安装包
 cd apps/mobile && npm install && npm run sync   # 同步 Web 产物到 Android 工程
 cd apps/mobile/android && ./gradlew assembleRelease  # APK（需 Android SDK/Gradle）
 bash infra/publish-linux.sh 1.1.0               # 备用 Linux 发布包
-bash infra/package-src.sh                       # 开发机：打固定名源码包 dist/eisechat-src.zip（覆盖）
+bash infra/package-src.sh                       # 开发机：打固定名源码包 dist/erisechat-src.zip（覆盖）
 sudo bash infra/docker/deploy.sh                # 服务器 Docker 一键部署/升级（详见 docs/deploy.md §3）
-docker compose ps | docker compose logs -f eisechat   # 容器状态 / 日志
+docker compose ps | docker compose logs -f erisechat   # 容器状态 / 日志
 sudo bash infra/backup.sh                       # 服务器每日备份（cron 见部署文档）
 ```
 
@@ -110,8 +117,11 @@ sudo bash infra/backup.sh                       # 服务器每日备份（cron �
 
 ## 10. 后续功能与既有授权
 
-- P2 待办（不提前做）：消息搜索、多设备、群已读、自动更新、Android 前台服务保活。
-- 已获授权：消息撤回和编辑（F-18，2026-10-28，协议 §4.3）；语音消息（F-28，2026-11-02，协议 §7 第 9 条）。
+- P2 待办（不提前做）：群已读明细（F-20）。
+- 已完成（原列 P2，现已落地）：消息搜索与会话内搜索（F-11 / F-19，2026-10-27~28）；多端同时在线（F-22，2026-11-01，见 §5.7）；客户端更新检查（F-29，2026-11-02）；Android 后台消息提醒前台服务（F-39，2026-11-06 代码实现完成，N01～N12 真机验收待执行）。
+- 口径说明：本仓库「自动更新」仅指 F-29 的客户端更新检查；CI 自动打包与产物发布仍未实施（计划 §14.4）。
+- 移出本仓库：管理员功能（F-16，2026-11-01 用户裁决，由独立后台系统承接）。
+- 已获授权并实现：消息撤回和编辑（F-18，2026-10-28，协议 §4.3）；语音消息（F-28，2026-11-02，协议 §7 第 9 条）。
 
 ## 11. 测试与提交
 

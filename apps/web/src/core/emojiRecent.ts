@@ -4,7 +4,7 @@
 import { EMOJI_RECENT_LIMIT, pushRecentEmoji } from './emoji'
 import { getStorage } from './safeStorage'
 
-export const EMOJI_RECENT_STORAGE_KEY = 'eisechat.emojiRecent.v1'
+export const EMOJI_RECENT_STORAGE_KEY = 'erisechat.emojiRecent.v1'
 
 /** 存储接口（便于单测注入假实现；默认 localStorage）。 */
 export interface EmojiRecentStorage {

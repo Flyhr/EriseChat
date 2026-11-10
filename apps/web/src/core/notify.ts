@@ -44,8 +44,8 @@ export interface DesktopNotifier {
 export function getDesktopNotifier(): DesktopNotifier | null {
   if (typeof window === 'undefined') return null
   const bridge = (
-    window as Window & { eisechatDesktop?: { notify?: DesktopNotifier['notify'] } }
-  ).eisechatDesktop
+    window as Window & { erisechatDesktop?: { notify?: DesktopNotifier['notify'] } }
+  ).erisechatDesktop
   return bridge?.notify ? { notify: bridge.notify } : null
 }
 
@@ -112,21 +112,21 @@ export async function ensureNotificationPermission(): Promise<NotificationPermis
 
 /**
  * Web 版系统通知（桌面壳优先用 preload 的 notify，不调用本函数）。返回是否实际弹出。
- * 点击通知时聚焦窗口，并派发 `eisechat:notification-click` 事件携带会话 ID，
+ * 点击通知时聚焦窗口，并派发 `erisechat:notification-click` 事件携带会话 ID，
  * 由 App.vue 订阅后跳转到对应会话（F-01）；会话 ID 由订阅方再做 UUID 校验。
  */
 export function showWebNotification(title: string, body: string, conversationId?: string): boolean {
   const api = getNotificationApi()
   if (!api || api.permission !== 'granted') return false
   try {
-    const tag = conversationId ? `eisechat-incoming-${conversationId}` : 'eisechat-incoming'
+    const tag = conversationId ? `erisechat-incoming-${conversationId}` : 'erisechat-incoming'
     const notification = new api(title, { body, tag })
     notification.onclick = () => {
       window.focus()
       notification.close()
       if (conversationId) {
         window.dispatchEvent(
-          new CustomEvent('eisechat:notification-click', { detail: { conversationId } }),
+          new CustomEvent('erisechat:notification-click', { detail: { conversationId } }),
         )
       }
     }

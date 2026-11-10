@@ -8,10 +8,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-1.0.0}"
-OUT_DIR="${EISECHAT_PUBLISH_DIR:-$ROOT/docs/test/publish-linux}"
+OUT_DIR="${ERISECHAT_PUBLISH_DIR:-$ROOT/docs/test/publish-linux}"
 APP_OUT="$OUT_DIR/app"
 ZIP="$OUT_DIR/chat-server-${VERSION}-linux-x64.zip"
-PYTHON="${EISECHAT_PYTHON:-python}"
+PYTHON="${ERISECHAT_PYTHON:-python}"
 WEB_APP="$ROOT/apps/web"
 WEBROOT="$ROOT/server/Chat.Server/wwwroot"
 
@@ -22,11 +22,11 @@ rm -rf "$OUT_DIR"
 mkdir -p "$APP_OUT"
 
 # 服务端在 wwwroot/ 提供 Web 前端（构建产物，gitignore）；不先构建会把旧包发上线。
-if [ "${EISECHAT_SKIP_WEB:-0}" = "1" ]; then
-  [ -f "$WEBROOT/index.html" ] || { echo "EISECHAT_SKIP_WEB=1 但 $WEBROOT/index.html 不存在" >&2; exit 1; }
+if [ "${ERISECHAT_SKIP_WEB:-0}" = "1" ]; then
+  [ -f "$WEBROOT/index.html" ] || { echo "ERISECHAT_SKIP_WEB=1 但 $WEBROOT/index.html 不存在" >&2; exit 1; }
   echo "[publish] 跳过 Web 构建，沿用现有 wwwroot"
 else
-  command -v npm >/dev/null 2>&1 || { echo "未找到 npm（如需跳过前端构建，设置 EISECHAT_SKIP_WEB=1 并确认 wwwroot 已就绪）" >&2; exit 1; }
+  command -v npm >/dev/null 2>&1 || { echo "未找到 npm（如需跳过前端构建，设置 ERISECHAT_SKIP_WEB=1 并确认 wwwroot 已就绪）" >&2; exit 1; }
   echo "[publish] 构建 Web 前端（apps/web）"
   (cd "$WEB_APP" && npm run build)
   echo "[publish] 复制 apps/web/dist → server/Chat.Server/wwwroot"

@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 // preload 只通过 contextBridge 暴露白名单能力，不暴露 Node/Electron 原始对象。
-// M4-02：服务器地址（启动时同步注入只读值 + 读写接口）、系统通知接口；页面通过 window.eisechatDesktop 访问。
+// M4-02：服务器地址（启动时同步注入只读值 + 读写接口）、系统通知接口；页面通过 window.erisechatDesktop 访问。
 // F-01/F-02：通知点击回调（主进程校验会话 ID 后转发）与全局未读数同步（托盘/任务栏指示）。
 const desktopApi = {
   platform: process.platform,
@@ -68,6 +68,6 @@ const desktopApi = {
   },
 } as const
 
-contextBridge.exposeInMainWorld('eisechatDesktop', desktopApi)
+contextBridge.exposeInMainWorld('erisechatDesktop', desktopApi)
 
 export type DesktopApi = typeof desktopApi

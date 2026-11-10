@@ -11,7 +11,7 @@ import { syncBackgroundConversations } from '../core/backgroundNotifications'
 import { useAuthStore } from './auth'
 
 /** 本地已读游标持久化 key：用于页面内即时展示与服务端上报兜底；服务端 last_read_seq 是事实源（read.update）。 */
-const READ_SEQ_STORAGE_KEY = 'eisechat.readSeq'
+const READ_SEQ_STORAGE_KEY = 'erisechat.readSeq'
 
 /** 被移出/退出群聊后的缓存清理回调（messages store 注册；避免两个 store 循环 import）。 */
 type ConversationRemovedHandler = (conversationId: string) => void

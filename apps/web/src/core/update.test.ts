@@ -10,8 +10,8 @@ import {
 function artifact(overrides: Partial<VersionArtifact> = {}): VersionArtifact {
   return {
     version: '1.1.0',
-    fileName: 'EiseChat-Setup-1.1.0.exe',
-    url: '/download/files/EiseChat-Setup-1.1.0.exe',
+    fileName: 'EriseChat-Setup-1.1.0.exe',
+    url: '/download/files/EriseChat-Setup-1.1.0.exe',
     size: 1024,
     sha256: 'a'.repeat(64),
     modifiedAt: 1_700_000_000_000,
@@ -76,7 +76,7 @@ describe('platformArtifactOf', () => {
     const data = manifest({
       artifacts: { desktop: artifact(), android: artifact({ version: '1.0.0' }) },
     })
-    expect(platformArtifactOf(data, 'desktop')?.fileName).toBe('EiseChat-Setup-1.1.0.exe')
+    expect(platformArtifactOf(data, 'desktop')?.fileName).toBe('EriseChat-Setup-1.1.0.exe')
     expect(platformArtifactOf(data, 'android')?.version).toBe('1.0.0')
   })
 
@@ -96,7 +96,7 @@ describe('updatePromptOf', () => {
 
     expect(prompt.available).toBe(true)
     expect(prompt.latest).toBe('1.2.0')
-    expect(prompt.url).toBe('/download/files/EiseChat-Setup-1.1.0.exe')
+    expect(prompt.url).toBe('/download/files/EriseChat-Setup-1.1.0.exe')
     expect(prompt.sha256).toBe('a'.repeat(64))
   })
 

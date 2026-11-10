@@ -9,7 +9,7 @@ describe('config 默认值', () => {
     expect(config.heartbeatTimeoutSec).toBe(30)
     expect([...config.reconnectDelaysMs]).toEqual([1000, 2000, 5000, 10000, 30000])
     expect(config.syncBatchSize).toBe(200)
-    expect(config.dbName).toBe('eisechat')
+    expect(config.dbName).toBe('erisechat')
   })
 })
 

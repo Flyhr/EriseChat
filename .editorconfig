@@ -1,4 +1,4 @@
-# EiseChat 编辑器统一配置
+# EriseChat 编辑器统一配置
 # 依据：AGENTS.md §4（命名/编码/换行）与 docs/project-overview.md §7.2（UTF-8、LF、C# 4 空格 / TS 2 空格）。
 # 规则：UTF-8（无 BOM）、LF 换行、文件末尾换行；默认 2 空格，C# 用 4 空格，Markdown 不限制缩进。
 root = true

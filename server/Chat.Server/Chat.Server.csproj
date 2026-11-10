@@ -31,7 +31,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- F-27：统一发布版本；/download 页面与健康检查展示的程序集版本来自此处。 -->
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <!-- 镜像瘦身：服务端只用中文错误文案（代码内），不需要 .NET/EF 的多语言卫星资源。 -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>

@@ -1,4 +1,4 @@
-// EiseChat WebSocket 协议类型（protocolVersion = 1）。
+// EriseChat WebSocket 协议类型（protocolVersion = 1）。
 //
 // 唯一来源：protocol/protocol.md；服务端 DTO 在 server/Chat.Protocol（二者必须一致）。
 // 修改规则：先改 protocol/protocol.md 与服务端 DTO，再同步本文件；只允许向后兼容的增量

@@ -355,7 +355,7 @@ function applySession(response: LoginResponse): void {
     <section class="login-brand" aria-hidden="true">
       <div class="login-brand__inner">
         <span class="login-brand__logo">E</span>
-        <h1 class="login-brand__title">EiseChat</h1>
+        <h1 class="login-brand__title">EriseChat</h1>
       </div>
     </section>
 
@@ -363,7 +363,7 @@ function applySession(response: LoginResponse): void {
       <!-- 移动端/窄屏：品牌区放到卡片上方（≥1200 用左侧品牌说明区）。 -->
       <div class="login-mobile-brand" aria-hidden="true">
         <span class="login-mobile-brand__logo">E</span>
-        <span class="login-mobile-brand__name">EiseChat</span>
+        <span class="login-mobile-brand__name">EriseChat</span>
       </div>
       <div class="login-card">
         <h2 class="login-card__title">

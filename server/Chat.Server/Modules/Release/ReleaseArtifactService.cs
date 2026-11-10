@@ -31,15 +31,15 @@ public sealed record ReleaseManifest(
 /// </summary>
 public sealed class ReleaseArtifactService
 {
-    public const string DesktopSearchPattern = "EiseChat-Setup-*.exe";
-    public const string AndroidSearchPattern = "EiseChat-*.apk";
+    public const string DesktopSearchPattern = "EriseChat-Setup-*.exe";
+    public const string AndroidSearchPattern = "EriseChat-*.apk";
 
     private static readonly Regex DesktopNamePattern = new(
-        @"^EiseChat-Setup-(?<version>\d+\.\d+\.\d+)\.exe$",
+        @"^EriseChat-Setup-(?<version>\d+\.\d+\.\d+)\.exe$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private static readonly Regex AndroidNamePattern = new(
-        @"^EiseChat-(?<version>\d+\.\d+\.\d+)\.apk$",
+        @"^EriseChat-(?<version>\d+\.\d+\.\d+)\.apk$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private readonly string _downloadDirectory;

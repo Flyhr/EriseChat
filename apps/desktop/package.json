@@ -1,9 +1,9 @@
 {
-  "name": "eisechat-desktop",
-  "version": "1.1.0",
+  "name": "erisechat-desktop",
+  "version": "1.2.0",
   "private": true,
-  "description": "EiseChat Windows 桌面壳（Electron：窗口/托盘/通知/打包，业务逻辑在 apps/web）",
-  "author": "EiseChat",
+  "description": "EriseChat Windows 桌面壳（Electron：窗口/托盘/通知/打包，业务逻辑在 apps/web）",
+  "author": "EriseChat",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",

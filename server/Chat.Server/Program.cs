@@ -25,7 +25,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
-// EiseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；
+// EriseChat 服务端启动（M0-03 骨架；M1-02 EF Core + SQLite 迁移；M1-03 配置/密钥/统一错误；
 // M1-05 注册/登录/JWT；M1-06 WebSocket 握手/心跳/单活动连接；M1-07 单聊会话创建与列表；
 // M1-08 消息收发（seq/幂等/ack/广播）、sync 补拉与历史分页；M3-02 文件上传/下载与孤儿清理；
 // M4-04 下载页与安装包分发）。

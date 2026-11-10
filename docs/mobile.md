@@ -1,4 +1,4 @@
-# EiseChat Android 安装与联调说明（M5）
+# EriseChat Android 安装与联调说明（M5）
 
 > 本文是 Android 客户端（Capacitor 壳 + `apps/web` 构建产物）的安装、配置、构建、签名与真机联调说明。
 > 协议与表结构见 `protocol/protocol.md`、`protocol/schema.sql`；服务器部署见 `docs/deploy.md`；项目介绍以 `README.md` 为准。
@@ -8,12 +8,12 @@
 
 | 文件 | 说明 |
 |---|---|
-| `EiseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
+| `EriseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
 | 下载地址 | 服务端 `GET /download` 下载页（`data/downloads/` 放安装包） |
 
-- 当前产物（F-39 任务 E 重打，2026-11-09）：`data/downloads/EiseChat-1.1.0.apk`（3,789,395 B，SHA256 `86cd03566b2b8c75a30d9ccc66f065d322117d0b2b6e2aacf392a873a8cf05e1`，含后台消息提醒前台服务与 OkHttp；此前 F-31 重打为 3,358,404 B / `634425b2…74a72`、F-29 重打为 3,357,072 B / `cba771aa…2f3d`、F-27 首次为 3,351,022 B / `703656ce…180d5b`，均已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
-- 历史基线（已保留，用于回滚）：`data/downloads/EiseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EiseChat-1.0.0.apk` 下载
-- 包名：`com.eisechat.mobile`（与 Windows 壳 `com.eisechat.desktop` 区分）
+- 当前产物（F-39 任务 E 重打，2026-11-09）：`data/downloads/EriseChat-1.1.0.apk`（3,789,395 B，SHA256 `86cd03566b2b8c75a30d9ccc66f065d322117d0b2b6e2aacf392a873a8cf05e1`，含后台消息提醒前台服务与 OkHttp；此前 F-31 重打为 3,358,404 B / `634425b2…74a72`、F-29 重打为 3,357,072 B / `cba771aa…2f3d`、F-27 首次为 3,351,022 B / `703656ce…180d5b`，均已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
+- 历史基线（已保留，用于回滚）：`data/downloads/EriseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EriseChat-1.0.0.apk` 下载
+- 包名：`com.erisechat.mobile`（与 Windows 壳 `com.erisechat.desktop` 区分）
 - 版本：`versionName` 为 `1.1.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.1.0 → 10100）
 - 最低系统：Android 8.0（API 26）；目标/编译 API 36
 - 自签名安装包在部分手机上会提示「未知来源/风险应用」，需用户确认后安装
@@ -21,8 +21,8 @@
 ## 2. 安装与首次登录
 
 1. 手机允许浏览器/文件管理器「安装未知应用」（设置 → 安全 → 安装未知应用）。
-2. 把 `EiseChat-1.1.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
-3. 打开 EiseChat；打包态登录页会显示「服务器地址」区块（未配置时自动展开），填写后点「保存并检测」：
+2. 把 `EriseChat-1.1.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
+3. 打开 EriseChat；打包态登录页会显示「服务器地址」区块（未配置时自动展开），填写后点「保存并检测」：
    - 默认（USB 联调，配合 §5.5 的 adb reverse）：`http://127.0.0.1:6580`
    - 登录页「服务器地址」上方有「快速选择」下拉：内置「服务器（Tailscale HTTPS）」与「本机调试（USB 端口映射）」两项，选中后自动保存并检测，便于本地调试与服务器之间快速切换；选「自定义地址…」时仍可手动填写。预设列表可用构建期变量 `VITE_SERVER_PRESETS` 覆盖（格式见 `apps/web/.env.example`）。
    - 手机与开发机同一局域网：`http://<开发机局域网 IP>:6580`（不能用 `127.0.0.1`，那指向手机自身）
@@ -30,6 +30,10 @@
 4. 新账号先切「注册」→「发送验证码」（开发环境固定测试码 `123456`，生产环境走真实邮件）→ 填昵称/验证码注册并登录。
 5. 登录后可搜索用户发起单聊/建群、收发文本、图片、语音与文件消息；断线重连后自动补拉消息。
 6. 需要应用在后台时也能收到新消息通知时，进入「设置 → 消息提醒 → 后台消息提醒」开启：首次会请求系统通知权限，授权后应用退到后台由前台服务保持一条连接，收到新消息时在通知栏提示，点击通知进入对应会话。
+
+### 2.1 升级到 1.2.0
+
+1.2.0 起 `applicationId` 统一为 EriseChat，系统视为新应用：**升级前需卸载旧版后再安装新版**，原来的 `adb install -r` 覆盖安装不再复用旧应用数据。服务端聊天数据不丢失；本机设置、草稿、记住密码与本地缓存会清空，首次启动需重新填写服务器地址并登录。JWT issuer/audience 同步变更，1.2.0 上线后所有用户需重新登录。
 
 ## 3. 网络与明文 HTTP（内网联调）
 
@@ -43,7 +47,7 @@
 - 验收状态（2026-11-09）：代码、编译与发行 APK 构建已通过；首轮真机验收**尚未执行**，目标设备为 OPPO（ColorOS 16.0.10 / Android 16），场景见 §5.7。构建成功不代表通知已在真机验证。
 - 实现：原生前台服务（`ChatSocketService`，`foregroundServiceType=dataSync`）使用当前登录令牌连接 `ws`，收到 `message.new` 时发系统通知；应用在前台时由页面内提醒负责，不重复通知；免打扰会话不通知；自己发送的消息不通知。
 - 连接占用服务端「每账号最多 3 条连接」中的一条；同时开启前台服务与 Web 页面时共占用 2 条，其余设备仍有 1 条可用。
-- 点击通知会打开 EiseChat 并进入对应会话：冷热启动统一由原生缓存点击，Web 只消费一次，待登录与路由就绪后跳转。通知携带来源账号与服务器，来源不完整、账号或服务器已切换时直接丢弃；未登录时保留缓存，登录成功后再打开对应会话。
+- 点击通知会打开 EriseChat 并进入对应会话：冷热启动统一由原生缓存点击，Web 只消费一次，待登录与路由就绪后跳转。通知携带来源账号与服务器，来源不完整、账号或服务器已切换时直接丢弃；未登录时保留缓存，登录成功后再打开对应会话。
 
 #### 3.1.1 平台限制
 
@@ -79,7 +83,7 @@ mkdir -p infra/keys
   -keystore infra/keys/eisechat-release.jks -alias eisechat \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -storepass '<随机密码>' -keypass '<随机密码>' \
-  -dname "CN=EiseChat, OU=Internal, O=EiseChat, L=Local, ST=Local, C=CN"
+  -dname "CN=EriseChat, OU=Internal, O=EriseChat, L=Local, ST=Local, C=CN"
 ```
 
 `infra/keys/keystore.properties`（不入库）：
@@ -114,10 +118,10 @@ cd /d D:\Code\EriseChat
 ```
 
 脚本流程：`apps/web` 构建（含 UI 最新代码）→ `npx cap sync android` → `./gradlew assembleRelease` → 复制为
-`data/downloads/EiseChat-1.1.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
+`data/downloads/EriseChat-1.1.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
 
 - 首次构建需下载 Gradle/AGP 依赖（数分钟到十几分钟，缓存于 `~/.gradle`）；之后增量打包约 **1~2 分钟**。
-- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EiseChat-1.1.0.apk`、文件大小与 SHA256。
+- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EriseChat-1.1.0.apk`、文件大小与 SHA256。
 - 脚本默认 `JAVA_HOME=D:/softWare/jdk21`（可用环境变量覆盖），SDK 路径读 `apps/mobile/android/local.properties`。
 - 改完 `apps/web` 后**必须重新打包**（`cap sync` 只是把 `apps/web/dist` 拷进 Android 工程，APK 内是打包时的 Web 产物）。
 
@@ -132,12 +136,12 @@ cd /d D:\Code\EriseChat
 ```bash
 export JAVA_HOME=D:/softWare/jdk21
 SDK=D:/softWare/android-sdk
-"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EiseChat-1.1.0.apk | head
-"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EiseChat-1.1.0.apk
-unzip -l data/downloads/EiseChat-1.1.0.apk | grep assets/public/index.html
+"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EriseChat-1.1.0.apk | head
+"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EriseChat-1.1.0.apk
+unzip -l data/downloads/EriseChat-1.1.0.apk | grep assets/public/index.html
 ```
 
-校验基线（1.1.0，历史 1.0.0 见括号）：`package=com.eisechat.mobile`、`versionCode=10100`（1.0.0 为 10000）、`versionName=1.1.0`（1.0.0）、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EiseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要），证书 SHA-256 `2a5eef2be5a636ecfb021d1ad384a28d1ff48c365b678fd1435085a5adedbe3a`（与 1.0.0 一致，是覆盖安装的前提）。
+校验基线（1.1.0，历史 1.0.0 见括号）：`package=com.erisechat.mobile`、`versionCode=10100`（1.0.0 为 10000）、`versionName=1.1.0`（1.0.0）、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EriseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要），证书 SHA-256 `2a5eef2be5a636ecfb021d1ad384a28d1ff48c365b678fd1435085a5adedbe3a`（与 1.0.0 一致，是覆盖安装的前提）。
 
 ### 5.5 安装到手机（三种方式）
 
@@ -147,8 +151,8 @@ unzip -l data/downloads/EiseChat-1.1.0.apk | grep assets/public/index.html
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EiseChat-1.1.0.apk
-D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.eisechat.mobile | findstr "versionName versionCode"
+D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EriseChat-1.1.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.erisechat.mobile | findstr "versionName versionCode"
 ```
 
 `devices` 应显示一行 `device`（显示 `unauthorized` 时在手机上点「允许 USB 调试」）。
@@ -158,10 +162,10 @@ D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.eisecha
 **B. adb push 到手机，手动点安装（适合把 APK 留在手机上）**
 
 ```bat
-D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EiseChat-1.1.0.apk /sdcard/Download/
+D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EriseChat-1.1.0.apk /sdcard/Download/
 ```
 
-然后在手机「文件管理 → Download」中点开 `EiseChat-1.1.0.apk` 安装。
+然后在手机「文件管理 → Download」中点开 `EriseChat-1.1.0.apk` 安装。
 
 **C. 局域网下载页（手机与电脑同一 Wi-Fi）**
 
@@ -195,7 +199,7 @@ ipconfig
 
 **D. 其他传输方式**：微信/QQ「文件传输助手」传 APK 后点开安装亦可；只需保证 APK 完整（对比 SHA256）。
 
-安装后核对：桌面出现 EiseChat 图标；`设置 → 应用 → EiseChat → 版本 1.1.0`。如需覆盖升级但提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
+安装后核对：桌面出现 EriseChat 图标；`设置 → 应用 → EriseChat → 版本 1.1.0`。如需覆盖升级但提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
 
 ### 5.6 本机联调（服务端 + 手机，USB 或局域网）
 
@@ -235,7 +239,7 @@ ipconfig
 6. **启动 App（可选，免手动点图标）**：
 
    ```bat
-   D:\softWare\android-sdk\platform-tools\adb.exe shell monkey -p com.eisechat.mobile -c android.intent.category.LAUNCHER 1
+   D:\softWare\android-sdk\platform-tools\adb.exe shell monkey -p com.erisechat.mobile -c android.intent.category.LAUNCHER 1
    ```
 
    截图排障：`adb exec-out screencap -p > D:\Code\EriseChat\docs\test\phone.png`（`docs/test/` 不入库）。
@@ -265,7 +269,7 @@ ipconfig
 
 ### 5.8 一键流程速查（复制即用）
 
-**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EiseChat-1.1.0.apk`）
+**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EriseChat-1.1.0.apk`）
 
 ```bat
 cd /d/Code/EriseChat
@@ -276,7 +280,7 @@ cd /d/Code/EriseChat
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EiseChat-1.1.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EriseChat-1.1.0.apk
 ```
 
 **③ 另开终端：启动服务端**（开发模式，验证码固定 `123456`）
@@ -292,7 +296,7 @@ dotnet run
 D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 ```
 
-**⑤ 手机打开 EiseChat → 注册/登录 → 按 §5.7 清单验收。**
+**⑤ 手机打开 EriseChat → 注册/登录 → 按 §5.7 清单验收。**
 
 > 若走局域网而不接 USB：③ 改为 `dotnet run --urls http://0.0.0.0:6580`、放行防火墙 6580，④ 跳过，App 内服务器地址改填 `http://<电脑IPv4>:6580`。
 
@@ -304,7 +308,7 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 | 打包报 `ERROR: 找不到 JDK` / `缺少 local.properties` | 按 §5.1 设置 `JAVA_HOME`（默认 `D:/softWare/jdk21`）与 `apps/mobile/android/local.properties` 的 `sdk.dir` |
 | Gradle 下载依赖很慢/失败 | 首次构建需下载 Gradle/AGP；`gradle-wrapper.properties` 已配腾讯镜像，网络受限时检查代理 |
 | `adb devices` 为空 / `unauthorized` | 打开手机开发者选项与 USB 调试；换数据线（需支持数据传输）；手机上点「允许 USB 调试」；`adb kill-server && adb start-server` 后重试 |
-| `adb install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | 新旧 APK 签名不同（keystore 变化）→ 先 `adb uninstall com.eisechat.mobile` 再安装（服务端聊天数据不受影响） |
+| `adb install` 报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | 新旧 APK 签名不同（keystore 变化）→ 先 `adb uninstall com.erisechat.mobile` 再安装（服务端聊天数据不受影响） |
 | `adb install` 报 `INSTALL_FAILED_VERSION_DOWNGRADE` | 新包 `versionCode` 比已安装的小；按 `major*10000+minor*100+patch` 递增后重打包 |
 | App 登录提示「无法连接服务器」 | ① 服务端是否已启动（`curl http://127.0.0.1:6580/api/health`）；② 登录页「服务器地址」是否已填写且「保存并检测」成功（打包态仅登录页/设置页可改）；③ USB 联调是否执行过 `adb reverse tcp:6580 tcp:6580`（拔插 USB 后需重做，`adb reverse --list` 确认）；④ 局域网/Tailscale 联调时服务器是否监听可达地址（`Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580` 或 `tailscale serve`）且防火墙放行；⑤ 服务器地址不能填 `127.0.0.1`（除本机/USB 映射外）；⑥ Tailscale 场景确认手机 Tailscale 已连接且与服务器同一 tailnet |
 | 手机访问 `/download` 打不开 | 开发默认只监听 `127.0.0.1:6580`；按 §5.5-C 用 `Kestrel__Endpoints__Http__Url=http://0.0.0.0:6580` 启动并放行防火墙（同一 Wi-Fi），或走 Tailscale Serve 的 HTTPS 地址 |

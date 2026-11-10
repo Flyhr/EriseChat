@@ -1,4 +1,4 @@
-package com.eisechat.mobile;
+package com.erisechat.mobile;
 
 import android.content.Intent;
 import android.net.Uri;

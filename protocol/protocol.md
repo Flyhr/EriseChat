@@ -1,4 +1,4 @@
-# EiseChat WebSocket 协议 v1
+# EriseChat WebSocket 协议 v1
 
 > 本文件是**协议帧与字段的唯一来源**（`AGENTS.md` §1/§5）；表结构唯一来源为 `protocol/schema.sql`。
 > 依据：`docs/internal-plan.md` §4.2 / §4.3（计划 V2.3.5）与 `docs/project-overview.md` §11.1。
@@ -647,7 +647,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - `version`：string，服务端程序集版本与安装包文件名版本中的最大值（x.y.z）；
     - `protocolVersion`：integer，当前协议版本；
     - `artifacts`：object，固定含 `desktop` 与 `android` 两个键，值可能为 `null`（该平台暂无产物）；非 null 时结构为 `{ version, fileName, url, size, sha256, modifiedAt }`：`fileName` 为安装包文件名（供客户端保存下载文件用）、`url` 为同源相对地址 `/download/files/{fileName}`（客户端必须与当前服务器地址拼接后使用，禁止跨源下载）、`size` 为字节数、`sha256` 为小写十六进制摘要（客户端下载完成后必须校验一致才可执行/安装）、`modifiedAt` 为最近修改时间（UTC 毫秒）。
-    - 产物只认 `EiseChat-Setup-x.y.z.exe` 与 `EiseChat-x.y.z.apk`（文件名版本号必须为三段数字），同平台存在多个合法版本时取最近修改的一个；`/download` 下载页行为不变。
+    - 产物只认 `EriseChat-Setup-x.y.z.exe` 与 `EriseChat-x.y.z.apk`（文件名版本号必须为三段数字），同平台存在多个合法版本时取最近修改的一个；`/download` 下载页行为不变。
     - 该接口不新增帧、不改库表，`protocolVersion` 仍为 1；Web 浏览器端只提示刷新页面，桌面/APK 壳负责下载与安装。
 
 11. **消息搜索（REST，v1，F-36）**：`GET /api/messages/search`，需登录，参数：
@@ -774,4 +774,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-22 多端在线） | 2026-11-01 | 连接策略由「单活动连接」改为「每账号最多 3 个连接」（`App:MaxConnectionsPerUser` 可配，裁到 1~10），超限踢「最早建立」的连接；`read.updated` 增加下发给本人其他连接（多端已读同步），群聊仍不向其他成员广播；`kicked` 帧结构与 `4001` 关闭码不变，仅语义/文案扩展；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-28 语音消息） | 2026-11-01 | `message.send` 的 `msgType` 新增 `voice`（向后兼容增量），content 为 VoiceContent `{fileId, durationMs}`（durationMs 1000~60000 整数、客户端上报）；新增音频文件规则：`.webm` / `audio/webm` / 魔数 `1A 45 DF A3`、单文件 ≤5MB，上传下载仍走现有 `/api/files`；voice 消息走现有 Message 路径（落库 messages.file_id、共享文件汇总排除 voice、撤回规则同 image/file）；无新帧、不改库表、`protocolVersion` 仍为 1 |
-| v1（F-29 客户端更新） | 2026-11-02 | 新增 REST `GET /api/version`（匿名），返回 `{ version, protocolVersion, artifacts: { desktop, android } }`；产物字段 `version` / `url`（同源 `/download/files/{fileName}`）/ `size` / `sha256`（小写十六进制）/ `modifiedAt`（UTC 毫秒）；只认 `EiseChat-Setup-x.y.z.exe` / `EiseChat-x.y.z.apk`，同平台取最近修改的合法产物；客户端下载后必须校验 sha256；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（F-29 客户端更新） | 2026-11-02 | 新增 REST `GET /api/version`（匿名），返回 `{ version, protocolVersion, artifacts: { desktop, android } }`；产物字段 `version` / `url`（同源 `/download/files/{fileName}`）/ `size` / `sha256`（小写十六进制）/ `modifiedAt`（UTC 毫秒）；只认 `EriseChat-Setup-x.y.z.exe` / `EriseChat-x.y.z.apk`，同平台取最近修改的合法产物；客户端下载后必须校验 sha256；无新帧、不改库表、`protocolVersion` 仍为 1 |

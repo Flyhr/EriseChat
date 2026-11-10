@@ -176,7 +176,7 @@ public sealed class FileStorageTests
 
     private static string CreateTempRoot()
     {
-        var path = Path.Combine(Path.GetTempPath(), "eisechat-tests", "storage-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(Path.GetTempPath(), "erisechat-tests", "storage-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
     }

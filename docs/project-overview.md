@@ -1,4 +1,4 @@
-# EiseChat 项目说明与目录架构（V1.2）
+# EriseChat 项目说明与目录架构（V1.2）
 
 > 本文是**面向开发的项目总览**：项目是什么、代码放哪里、模块怎么分、从哪开始写。
 > 唯一现行计划：`docs/internal-plan.md`（V2.3.5，回答"做什么、什么时候做"）；硬约束：`AGENTS.md`（回答"什么不能做"）。
@@ -34,9 +34,9 @@
 
 ## 2. 项目概述
 
-- **一句话**：EiseChat 是公司内部使用的**自研轻量 IM**：一台 ASP.NET Core 单进程服务端 + 一套 Vue 3 前端核心 + Windows（Electron）与 Android（Capacitor）安装包，服务 10~100 个账号、峰值 ≤100 在线。
-- **为什么自己做**：不引第三方 IM（协议自研、可控可改）、零软件授权费用、单进程易部署易备份、出 Windows 安装包和 Android APK 给同事直接装。
-- **交付物**：`EiseChat-Setup-x.y.z.exe`（Windows 安装包）、`EiseChat-x.y.z.apk`（Android 侧载包）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）。
+- **一句话**：EriseChat 是非公开分发、面向日常聊天的**自研轻量 IM**：一台 ASP.NET Core 单进程服务端 + 一套 Vue 3 前端核心 + Windows（Electron）与 Android（Capacitor）安装包，按 10~100 个账号、峰值 ≤100 在线设计。
+- **为什么自己做**：不引第三方 IM（协议自研、可控可改）、零软件授权费用、单进程易部署易备份，由部署者自行分发 Windows 安装包和 Android APK 给指定用户。
+- **交付物**：`EriseChat-Setup-x.y.z.exe`（Windows 安装包）、`EriseChat-x.y.z.apk`（Android 侧载包）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）。
 - **技术骨架**：Caddy 自动 HTTPS → Kestrel（`127.0.0.1:6580`）→ SQLite（WAL）+ 本地文件目录；消息走自研 JSON-over-WebSocket，登录/历史/文件走 REST；服务端是**唯一事实源**，客户端 IndexedDB 只是缓存。
 - **本期不做**：iPhone/iOS 代码（只出方案）、音视频、朋友圈、AI、机器人、E2EE、ICP/等保/短信/厂商推送（见 `AGENTS.md` §2.5）。
 
@@ -46,7 +46,7 @@
 
 | 项 | 取值 | 说明 |
 |---|---|---|
-| 账号数 | 10~100 | 公司/团队内部，不面向公众 |
+| 账号数 | 10~100 | 指定用户日常聊天，不公开分发 |
 | 峰值在线 | ≤100 | WebSocket 长连接数（单人单活动连接） |
 | 部署 | 1 台云服务器 2C4G / 40~80GB SSD / Ubuntu 22.04 或 24.04 | 单机单进程，systemd 自启 |
 | 网络 | 公网域名 + HTTPS（WSS） | Caddy 自动申请/续期证书；开发期先用占位域名 |
@@ -93,7 +93,7 @@
 | 认证 | 邮箱验证码 + 可选密码；JWT HS256（默认 3 天） | 验证码只存哈希；密码 PBKDF2-SHA256 ≥100,000 或 Argon2id |
 | 邮件 | SMTP（企业邮箱/QQ 授权码）或免费邮件 API（Brevo/Resend 等） | `Development` 输出到控制台（不写日志文件）+ 固定测试码 |
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI | 核心 `core/ws.ts`、`core/sync.ts`；IndexedDB 缓存 |
-| Windows 壳 | Electron + electron-builder（NSIS） | `appId=com.eisechat.desktop`；免签名，SmartScreen 提示选"仍要运行" |
+| Windows 壳 | Electron + electron-builder（NSIS） | `appId=com.erisechat.desktop`；免签名，SmartScreen 提示选"仍要运行" |
 | Android 壳 | Capacitor（Web 资源打进 APK，不依赖在线加载） | 最低 API 26；自签名 keystore 放 `infra/keys/`（gitignore，另行离线备份） |
 | 部署 | Ubuntu + Caddy 自动 HTTPS + systemd | 6580 只监听 `127.0.0.1`；备份到对象存储/异机，保留最近 30 份 |
 | 测试 | xUnit（服务端）+ Vitest（前端核心）单测随工程 | 临时脚本/验收数据统一放 `docs/test/`（不入库）；不搞重型测试体系 |
@@ -276,7 +276,7 @@ EriseChat/
 │   ├── install.sh                          # 旧：Linux 安装/升级（systemd，备选）
 │   ├── install.ps1                         # Windows 可选安装（sc.exe 服务）
 │   ├── backup.sh / backup.ps1              # 备份与恢复（SQLite 在线备份 + files/）
-│   ├── eisechat.service                    # systemd 单元（旧方案备选）
+│   ├── erisechat.service                    # systemd 单元（旧方案备选）
 │   ├── caddy/Caddyfile                     # 公网 HTTPS 反代 127.0.0.1:6580（宿主侧）
 │   ├── email/                              # 邮件通道配置示例 + 自测脚本
 │   └── keys/                               # Android keystore（gitignore + 离线备份）
@@ -469,7 +469,7 @@ pages/ ──► components/ ──► stores/ ──► api/  (REST)
 
   | 场景 | 逻辑路径 | 实际路径 |
   |---|---|---|
-  | 部署（Linux） | `/data/chat.db`、`/data/files/` | `/var/lib/eisechat/chat.db`、`/var/lib/eisechat/files/` |
+  | 部署（Linux） | `/data/chat.db`、`/data/files/` | `/var/lib/erisechat/chat.db`、`/var/lib/erisechat/files/` |
   | 部署（Windows 可选） | 同上 | `C:\ChatServer\data\...` |
   | 本地开发 | `data/` | 仓库根 `data/`（gitignore，可配置） |
 
@@ -497,9 +497,9 @@ sudo bash infra/docker/deploy.sh && infra/backup.sh   # 服务器 Docker 部署 
 | 产物 | 来源 | 去向 |
 |---|---|---|
 | `apps/web/dist/` | `npm run build` | ① 复制到 `server/Chat.Server/wwwroot/`；② 桌面壳加载；③ `npx cap sync` 进 APK |
-| `chat-server-x.y.z.zip` | `dotnet publish -c Release` + `wwwroot` | 服务器 `/opt/eisechat-server/` |
-| `EiseChat-Setup-x.y.z.exe` | `electron-builder`（NSIS） | 下载页 / 内部分发，不入库 |
-| `EiseChat-x.y.z.apk` | `gradlew assembleRelease` + 自签名 | 下载页 / 侧载，不入库 |
+| `chat-server-x.y.z.zip` | `dotnet publish -c Release` + `wwwroot` | 服务器 `/opt/erisechat-server/` |
+| `EriseChat-Setup-x.y.z.exe` | `electron-builder`（NSIS） | 下载页 / 内部分发，不入库 |
+| `EriseChat-x.y.z.apk` | `gradlew assembleRelease` + 自签名 | 下载页 / 侧载，不入库 |
 
 **版本号同步**：服务端、桌面、APK 使用同一 `主.次.修订`；`protocolVersion` 独立（v1 = 1）；发版前检查三者一致。
 
@@ -536,7 +536,7 @@ sudo bash infra/docker/deploy.sh && infra/backup.sh   # 服务器 Docker 部署 
 | M5 | 第 5 周 | Android APK（Capacitor + 自签名） | `apps/mobile/`、`infra/keys/`（gitignore） |
 | M6 | 第 6~7 周 | 100 连接稳定性、备份恢复演练、10~20 人内测 | `docs/test/`（不入库）、`docs/usage.md`、发版检查清单 |
 
-> 实现进度（2026-10-26）：M0~M5 已完成（M4：Windows 安装包 1.0.0、Electron 托盘/通知/窗口记忆/开机自启、`GET /download` 下载页与安装包分发、`infra/` 部署脚本与 `docs/deploy.md`；M5：Android APK 1.0.0（`com.eisechat.mobile`、minSdk 26、v2 自签名）已产出并可从下载页下载、图标/启动页、`infra/build-apk.sh` 与 `docs/mobile.md`），M6（稳定性与恢复演练）未开始；详细状态见 `docs/internal-plan.md` §13。
+> 实现进度（2026-10-26）：M0~M5 已完成（M4：Windows 安装包 1.0.0、Electron 托盘/通知/窗口记忆/开机自启、`GET /download` 下载页与安装包分发、`infra/` 部署脚本与 `docs/deploy.md`；M5：Android APK 1.0.0（`com.erisechat.mobile`、minSdk 26、v2 自签名）已产出并可从下载页下载、图标/启动页、`infra/build-apk.sh` 与 `docs/mobile.md`），M6（稳定性与恢复演练）未开始；详细状态见 `docs/internal-plan.md` §13。
 
 P2 待办（语音消息、搜索、撤回、多设备、群已读、自动更新、Android 前台保活）**不提前做**，先保证 v1 闭环。
 

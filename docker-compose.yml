@@ -1,16 +1,16 @@
-# EiseChat 单容器 Docker Compose 部署（一键部署入口，说明见 docs/deploy.md §3）
+# EriseChat 单容器 Docker Compose 部署（一键部署入口，说明见 docs/deploy.md §3）
 #
 # 架构约束（AGENTS.md §2.4）：服务端仍是单进程（ASP.NET Core + SQLite + 本地文件卷），
 # 不使用多容器编排；HTTPS 入口走宿主侧 Tailscale Serve（内测）或 Caddy（公网）。
 #
 # 服务器上执行 `sudo bash infra/docker/deploy.sh` 会自动准备目录/.env 并调用本文件；
 # 手动执行示例：
-#   EISECHAT_DATA_DIR=/opt/eisechat/data EISECHAT_ENV_FILE=/opt/eisechat/.env \
+#   ERISECHAT_DATA_DIR=/opt/erisechat/data ERISECHAT_ENV_FILE=/opt/erisechat/.env \
 #     docker compose up -d --build
-name: eisechat
+name: erisechat
 
 services:
-  eisechat:
+  erisechat:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile
@@ -18,16 +18,16 @@ services:
         DOTNET_REGISTRY: ${DOTNET_REGISTRY:-mcr.microsoft.com}
         NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
         # 容器内非 root 用户 UID/GID，与 deploy.sh 对数据目录的 chown 使用同一值
-        APP_UID: ${EISECHAT_UID:-1000}
-        APP_GID: ${EISECHAT_UID:-1000}
-    image: eisechat-server:${APP_VERSION:-1.1.0}
-    container_name: eisechat-server
+        APP_UID: ${ERISECHAT_UID:-1000}
+        APP_GID: ${ERISECHAT_UID:-1000}
+    image: erisechat-server:${APP_VERSION:-1.2.0}
+    container_name: erisechat-server
     restart: unless-stopped
     ports:
       # 只绑定回环：公网入口由 Tailscale Serve / Caddy 反代本机 6580
-      - "127.0.0.1:${EISECHAT_PORT:-6580}:6580"
+      - "127.0.0.1:${ERISECHAT_PORT:-6580}:6580"
     env_file:
-      - ${EISECHAT_ENV_FILE:-.env}
+      - ${ERISECHAT_ENV_FILE:-.env}
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://0.0.0.0:6580
@@ -38,7 +38,7 @@ services:
       App__DownloadDirectory: /data/downloads
       TZ: Asia/Shanghai
     volumes:
-      - ${EISECHAT_DATA_DIR:-./data}:/data
+      - ${ERISECHAT_DATA_DIR:-./data}:/data
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:6580/api/health"]
       interval: 30s

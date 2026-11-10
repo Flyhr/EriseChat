@@ -42,7 +42,7 @@ public sealed class TestDatabase : IAsyncDisposable
 
     public static async Task<TestDatabase> CreateAsync()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "eisechat-tests", Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(Path.GetTempPath(), "erisechat-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var dbPath = Path.Combine(directory, "chat.db");
 
@@ -109,8 +109,8 @@ public static class TestSupport
 
     public static JwtOptions CreateJwtOptions() => new()
     {
-        Issuer = "eisechat",
-        Audience = "eisechat",
+        Issuer = "erisechat",
+        Audience = "erisechat",
         ExpireDays = 3,
         ClockSkewSeconds = 30,
         Key = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
@@ -454,7 +454,7 @@ public sealed class TempFileStorage : IAsyncDisposable
     {
         var directory = Path.Combine(
             Path.GetTempPath(),
-            "eisechat-file-storage-tests",
+            "erisechat-file-storage-tests",
             Guid.NewGuid().ToString("N"));
         System.IO.Directory.CreateDirectory(directory);
         var options = TestSupport.CreateAppOptions();

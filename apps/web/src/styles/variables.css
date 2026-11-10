@@ -1,4 +1,4 @@
-/* EiseChat 设计变量（UI-01，依据 docs/ui-upgrade-plan.md §3.1 / §3.2 与 §16.5）。
+/* EriseChat 设计变量（UI-01，依据 docs/ui-upgrade-plan.md §3.1 / §3.2 与 §16.5）。
    规则：
    1) 新代码统一使用 --ec-* token；旧组件通过文件末尾的 --color-* / --space-* 别名渐进迁移，
       组件内不写死颜色与魔法数字。

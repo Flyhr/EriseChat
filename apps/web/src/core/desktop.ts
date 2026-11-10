@@ -1,4 +1,4 @@
-// 桌面壳（Electron preload 注入的 window.eisechatDesktop）扩展能力桥：
+// 桌面壳（Electron preload 注入的 window.erisechatDesktop）扩展能力桥：
 // 未读角标同步、系统通知点击回调、服务器地址、客户端更新检查（F-29）；Web 版没有该对象，所有调用静默降级。
 // 只暴露白名单能力，不接触 Node/Electron 原始对象（apps/desktop/electron/preload.ts）。
 
@@ -27,11 +27,11 @@ interface DesktopBridge {
 
 function getBridge(): DesktopBridge | null {
   if (typeof window === 'undefined') return null
-  const bridge = (window as Window & { eisechatDesktop?: DesktopBridge }).eisechatDesktop
+  const bridge = (window as Window & { erisechatDesktop?: DesktopBridge }).erisechatDesktop
   return bridge ?? null
 }
 
-/** 是否运行在 Electron 桌面壳内（preload 暴露 window.eisechatDesktop）。 */
+/** 是否运行在 Electron 桌面壳内（preload 暴露 window.erisechatDesktop）。 */
 export function isDesktopShell(): boolean {
   return getBridge() !== null
 }
@@ -97,8 +97,8 @@ export function subscribeNotificationClick(callback: NotificationClickCallback):
       const detail = (event as CustomEvent<{ conversationId?: unknown }>).detail
       if (isConversationIdLike(detail?.conversationId)) callback(detail.conversationId)
     }
-    window.addEventListener('eisechat:notification-click', handler)
-    disposers.push(() => window.removeEventListener('eisechat:notification-click', handler))
+    window.addEventListener('erisechat:notification-click', handler)
+    disposers.push(() => window.removeEventListener('erisechat:notification-click', handler))
   }
 
   return () => {

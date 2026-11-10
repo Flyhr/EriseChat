@@ -8,10 +8,10 @@ public sealed class JwtOptions
     public const string SectionName = "Jwt";
 
     /// <summary>签发者（iss）。</summary>
-    public string Issuer { get; set; } = "eisechat";
+    public string Issuer { get; set; } = "erisechat";
 
     /// <summary>受众（aud）。</summary>
-    public string Audience { get; set; } = "eisechat";
+    public string Audience { get; set; } = "erisechat";
 
     /// <summary>有效期（天），默认 3 天。</summary>
     public int ExpireDays { get; set; } = 3;

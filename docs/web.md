@@ -1,4 +1,4 @@
-# EiseChat Web 端运行与构建说明
+# EriseChat Web 端运行与构建说明
 
 > 本文是 Web 客户端（Vue 3 核心，`apps/web`）的开发运行、构建、部署与验收说明。
 > 协议见 `protocol/protocol.md`；服务端部署见 `docs/deploy.md`；Windows 壳见 `docs/desktop.md`；Android 见 `docs/mobile.md`；项目介绍以 `README.md` 为准。
@@ -35,14 +35,14 @@ npm run dev        # http://127.0.0.1:5173
 - 开发期 `vite.config.ts` 把 `/api` 代理到 `http://127.0.0.1:6580`、`/ws` 代理到 `ws://127.0.0.1:6580`，所以**开发调试请用 5173**；直接打开 6580 没有前端资源（除非已把 dist 复制到 wwwroot）。
 - 服务端 `Development` 环境使用 mock 邮件：验证码固定 `123456`，同时打印到服务端控制台（`[email][mock] ... code=123456`），不写入日志文件；登录页与「发送验证码」响应也带 `devCode` 提示。
 - 两浏览器验收：一个普通窗口 + 一个无痕窗口，用两个不同邮箱账号注册/登录（两者共享同一浏览器存储会互相顶号）。
-- 登录页支持「记住密码」（F-30）：仅在密码登录模式显示，勾选后把邮箱与密码**明文**保存在本机 `localStorage['eisechat.savedLogin']`，下次打开登录页进入密码模式时自动回填；取消勾选立即删除，退出登录不自动清除；仅适用于内部信任模型，不加密、不上传服务端、不写日志。token 默认有效期 3 天（`Jwt__ExpireDays` 环境变量可覆盖，旧 token 仍按签发时有效期过期）。
+- 登录页支持「记住密码」（F-30）：仅在密码登录模式显示，勾选后把邮箱与密码**明文**保存在本机 `localStorage['erisechat.savedLogin']`，下次打开登录页进入密码模式时自动回填；取消勾选立即删除，退出登录不自动清除；仅适用于内部信任模型，不加密、不上传服务端、不写日志。token 默认有效期 3 天（`Jwt__ExpireDays` 环境变量可覆盖，旧 token 仍按签发时有效期过期）。
 
 ## 3. 服务端地址配置
 
 | 场景 | 地址来源 | 说明 |
 |---|---|---|
 | Web 生产（同域） | 默认同源 | `apiBase=/api`，`wsUrl=页面 origin+/ws` |
-| Web 手动指定 | 设置页「服务器地址」 | 存 `localStorage['eisechat.serverUrl']`；清空恢复同源；保存不同 origin 时会先退出登录（隔离旧令牌与缓存）再回登录页，同址保存只重连 |
+| Web 手动指定 | 设置页「服务器地址」 | 存 `localStorage['erisechat.serverUrl']`；清空恢复同源；保存不同 origin 时会先退出登录（隔离旧令牌与缓存）再回登录页，同址保存只重连 |
 | 打包壳首启（exe/APK） | 登录页「服务器地址」区块（仅打包壳显示，未配置自动展开；含「服务器 / 本机调试」下拉快速选择，选中即保存并检测） | 保存后同步桌面壳 `settings.json`；预设可用 `VITE_SERVER_PRESETS` 覆盖；Web 同源部署不显示该区块 |
 | Windows 桌面壳 | preload 注入的已保存地址；登录页首启填写 | 见 `docs/desktop.md` |
 | Android | 登录页首启 / 设置页「服务器地址」/ 打包默认地址 | 见 `docs/mobile.md` |
@@ -104,7 +104,7 @@ npm run test:unit   # vitest run（503 个用例 / 38 个测试文件，约 2.3 
 - `infra/publish-linux.sh` **目前不会自动构建/复制前端**：必须先做第 1、2 步；`wwwroot/` 为空时服务端只提供 `/api`、`/ws`、`/download`，访问 `/` 会 404。
 - **SPA 路由限制**：Web 使用 history 路由，但服务端当前没有 SPA fallback（未配置 `MapFallbackToFile`），部署后直接刷新 `/chat/:id` 之类深链接会 404；从根路径进入、页面内跳转正常。后续可在服务端加 fallback（改服务端前先按 AGENTS §2.7 更新协议/计划文档）。
 - 服务端只监听 `127.0.0.1:6580`，公网入口由 Caddy 反代并提供 HTTPS（`docs/deploy.md` §1/§3.3）；6580 不对公网开放。
-- 下载页安装包来自服务器 `data/downloads/`（`App:DownloadDirectory`），页面自动取最新的 `EiseChat-Setup-*.exe` / `EiseChat-*.apk`。
+- 下载页安装包来自服务器 `data/downloads/`（`App:DownloadDirectory`），页面自动取最新的 `EriseChat-Setup-*.exe` / `EriseChat-*.apk`。
 
 ## 6. 运行时能力与限制（当前版本）
 

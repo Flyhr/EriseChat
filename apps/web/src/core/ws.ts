@@ -355,7 +355,7 @@ export class ChatWsClient {
 
   private getOrCreateDeviceId(): string {
     if (this.deviceId) return this.deviceId
-    const storageKey = 'eisechat.deviceId'
+    const storageKey = 'erisechat.deviceId'
     const existing = readStorage(storageKey)
     if (existing) {
       this.deviceId = existing

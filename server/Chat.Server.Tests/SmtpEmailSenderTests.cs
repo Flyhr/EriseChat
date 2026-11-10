@@ -30,7 +30,7 @@ public sealed class SmtpEmailSenderTests
     public void SubjectAndBody_ContainPurposeAndCode(EmailCodePurpose purpose, string action)
     {
         var subject = SmtpEmailSender.SubjectOf(purpose);
-        Assert.Contains("EiseChat", subject);
+        Assert.Contains("EriseChat", subject);
         Assert.Contains("验证码", subject);
 
         var body = SmtpEmailSender.BodyOf(purpose, "123456");

@@ -107,7 +107,7 @@ describe('resolveApiBase / resolveWsUrl', () => {
 
   it('桌面壳注入地址时作为初始值（只读来源，Web 版无此对象）', () => {
     vi.stubGlobal('window', {
-      eisechatDesktop: { serverUrl: 'https://desktop.example.com' },
+      erisechatDesktop: { serverUrl: 'https://desktop.example.com' },
     } as unknown as Window)
     expect(getServerUrl()).toBe('https://desktop.example.com')
     expect(resolveApiBase()).toBe('https://desktop.example.com/api')

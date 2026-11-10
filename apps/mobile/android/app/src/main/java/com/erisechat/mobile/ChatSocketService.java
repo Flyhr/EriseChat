@@ -1,4 +1,4 @@
-package com.eisechat.mobile;
+package com.erisechat.mobile;
 
 import android.app.Activity;
 import android.app.Application;
@@ -49,19 +49,19 @@ import okhttp3.WebSocketListener;
  * 本连接只接收推送与发通知，不发送 read.update，不推进已读或同步游标。</p>
  */
 public class ChatSocketService extends Service {
-    public static final String EXTRA_WS_URL = "eisechat_ws_url";
-    public static final String EXTRA_API_BASE = "eisechat_api_base";
-    public static final String EXTRA_TOKEN = "eisechat_token";
-    public static final String EXTRA_DEVICE_ID = "eisechat_device_id";
-    public static final String EXTRA_USER_ID = "eisechat_user_id";
+    public static final String EXTRA_WS_URL = "erisechat_ws_url";
+    public static final String EXTRA_API_BASE = "erisechat_api_base";
+    public static final String EXTRA_TOKEN = "erisechat_token";
+    public static final String EXTRA_DEVICE_ID = "erisechat_device_id";
+    public static final String EXTRA_USER_ID = "erisechat_user_id";
     /** 由用户在前台显式开启（区别于系统 START_STICKY 重建）。 */
-    public static final String EXTRA_USER_INITIATED = "eisechat_user_initiated";
+    public static final String EXTRA_USER_INITIATED = "erisechat_user_initiated";
 
     private static final String CHANNEL_SERVICE = "background_service";
     public static final String CHANNEL_MESSAGES = "messages";
     private static final int NOTIFICATION_ID_SERVICE = 10101;
     private static final int NOTIFICATION_ID_MESSAGE = 10102;
-    private static final String MESSAGE_TAG_PREFIX = "eisechat-conv:";
+    private static final String MESSAGE_TAG_PREFIX = "erisechat-conv:";
     private static final int MAX_PREVIEW_LENGTH = 120;
 
     /** 协议版本（protocol/protocol.md §1，当前为 1）。 */
@@ -108,7 +108,7 @@ public class ChatSocketService extends Service {
     /** 当前服务实例已配置的会话键；切换账号/服务器时据此清理旧的终止标记。 */
     private static volatile String configuredSessionKey;
 
-    private static final String STATE_PREFS = "eisechat_background_state";
+    private static final String STATE_PREFS = "erisechat_background_state";
     private static final String PREF_TERMINAL_SESSION = "terminal_session";
     private static final String PREF_TERMINAL_REASON = "terminal_reason";
 
@@ -398,15 +398,15 @@ public class ChatSocketService extends Service {
         if (intent == null) {
             return;
         }
-        String conversationId = intent.getStringExtra("eisechat_conversation_id");
+        String conversationId = intent.getStringExtra("erisechat_conversation_id");
         if (conversationId == null || conversationId.trim().isEmpty()) {
             return;
         }
-        String clickUserId = intent.getStringExtra("eisechat_click_user_id");
-        String clickServer = intent.getStringExtra("eisechat_click_server");
-        intent.removeExtra("eisechat_conversation_id");
-        intent.removeExtra("eisechat_click_user_id");
-        intent.removeExtra("eisechat_click_server");
+        String clickUserId = intent.getStringExtra("erisechat_click_user_id");
+        String clickServer = intent.getStringExtra("erisechat_click_server");
+        intent.removeExtra("erisechat_conversation_id");
+        intent.removeExtra("erisechat_click_user_id");
+        intent.removeExtra("erisechat_click_server");
         pendingConversationId = conversationId;
         pendingClickUserId = clickUserId;
         pendingClickServer = clickServer;
@@ -541,7 +541,7 @@ public class ChatSocketService extends Service {
     private Notification buildServiceNotification(String text) {
         return new NotificationCompat.Builder(this, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_stat_message)
-            .setContentTitle("EiseChat")
+            .setContentTitle("EriseChat")
             .setContentText(text)
             .setContentIntent(buildOpenAppIntent(null))
             .setOngoing(true)
@@ -562,13 +562,13 @@ public class ChatSocketService extends Service {
         Intent intent = new Intent(this, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (conversationId != null) {
-            intent.putExtra("eisechat_conversation_id", conversationId);
+            intent.putExtra("erisechat_conversation_id", conversationId);
             // 通知携带来源账号与服务器：冷启动/旧通知可据登录态判断是否仍应打开。
             if (userId != null) {
-                intent.putExtra("eisechat_click_user_id", userId);
+                intent.putExtra("erisechat_click_user_id", userId);
             }
             if (apiBase != null) {
-                intent.putExtra("eisechat_click_server", apiBase);
+                intent.putExtra("erisechat_click_server", apiBase);
             }
         }
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
