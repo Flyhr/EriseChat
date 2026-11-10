@@ -3,6 +3,7 @@ using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Security;
 using Chat.Server.Modules.Messages;
+using Chat.Server.Realtime;
 using Microsoft.AspNetCore.Http;
 
 namespace Chat.Server.Api;
@@ -34,6 +35,13 @@ public static class MessageEndpoints
             .WithName("GetMessageContext")
             .RequireAuthorization()
             .Produces<MessageContextResponse>();
+
+        // F-40：单条转发（text/image/file/voice）。附件复用原 files 记录，不重新上传；
+        // 每条转发由客户端提供稳定 clientMsgId，服务端按目标会话幂等。
+        app.MapPost("/api/messages/forward", ForwardAsync)
+            .WithName("ForwardMessage")
+            .RequireAuthorization()
+            .Produces<Message>();
 
         return app;
     }
@@ -114,6 +122,35 @@ public static class MessageEndpoints
             cancellationToken);
         return Results.Json(new MessageContextResponse(result.Messages, result.HasOlder, result.HasNewer));
     }
+
+    private static async Task<IResult> ForwardAsync(
+        ForwardMessageRequest request,
+        ClaimsPrincipal principal,
+        MessageService messages,
+        MessageHub hub,
+        CancellationToken cancellationToken)
+    {
+        var result = await messages.ForwardAsync(
+            principal.UserId(),
+            request.MessageId,
+            request.TargetConversationId,
+            request.ClientMsgId,
+            cancellationToken);
+
+        // 幂等命中（重试/并发）不重复广播，返回已存在消息，避免接收端重复处理。
+        if (result.Created)
+        {
+            await hub.BroadcastForwardedAsync(result.MemberUserIds, result.Message);
+        }
+
+        return Results.Json(result.Message);
+    }
+
+    /// <summary>F-40：转发请求；messageId/targetConversationId/clientMsgId 必填，clientMsgId 用于重试幂等。</summary>
+    public sealed record ForwardMessageRequest(
+        string? MessageId,
+        string? TargetConversationId,
+        string? ClientMsgId);
 
     /// <summary>F-36：按目标消息定位的上下文窗口响应（非协议帧）。</summary>
     public sealed record MessageContextResponse(

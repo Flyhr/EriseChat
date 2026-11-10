@@ -689,6 +689,14 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 {"type":"message.send","reqId":"r2","clientMsgId":"c-1b2c-3d4e-5f60-789a-bcdef0123456","conversationId":"cv-1a2b3c4d","msgType":"image","content":{"fileId":"f-12ab34cd","name":"照片.png","size":204800,"mime":"image/png"}}
 ```
 
+14. **多选消息与附件转发（REST，v1，F-40）**：单条转发 text/image/file/voice 到另一个当前账号仍可访问的会话；不做合并卡片、不做一次请求发往多个目标，也不新增消息类型。
+
+    - `POST /api/messages/forward`：body `{ "messageId": "...", "targetConversationId": "...", "clientMsgId": "<UUID>" }`，成功返回新消息（结构同 `message.new.message`，`clientMsgId` 为请求值）；失败按错误码返回，错误文案不得包含原消息正文。
+    - 服务端校验：目标会话存在且转发者是成员；源消息存在且转发者仍是源会话成员；源消息未撤回且非 system；附件消息的 `files` 记录仍存在。失败返回 `NOT_FOUND`（404）/ `FORBIDDEN`（403）/ `VALIDATION_FAILED`（400）。校验、`seq` 分配与消息插入在同一事务内完成，校验后发生的退群/撤回不会导致旧内容被转发。
+    - 目标消息按普通消息落库：目标会话内 `seq` 严格 +1；`clientMsgId` 在 `(conversation_id, client_msg_id)` 唯一，重试命中时返回已存在消息且不重复落库/广播；`senderId` 为转发者，`replyTo` 为空，不复制原消息的 `editedAt`。
+    - 附件不复制：新消息与原消息引用同一 `files.id`（`messages.file_id`），客户端不重复下载/上传；此后目标会话成员按现有 `GET /api/files/{id}` 鉴权访问附件。原会话失去访问权不影响目标会话成员访问。
+    - 广播：落库成功后向目标会话全部在线连接推送 `message.new`（含转发者本人连接，`clientMsgId` 置空，客户端按 `messageId` 去重）；幂等命中不广播。广播为尽力而为：单个在线连接发送失败只记录并跳过，不影响接口成功返回（消息已落库）。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -761,6 +769,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（群置顶消息） | 2026-11-04 | Conversation 新增可选字段 `pinnedMessage`（群置顶消息快照，仅 group、消息存在且未撤回时下发，null=无置顶）；`conversations` 新增 `pinned_message_id TEXT` 列（`protocol/schema.sql` 同步）；新增 REST `PUT/DELETE /api/conversations/{conversationId}/pinned-message`（仅群主、单聊不支持）；置顶消息被撤回时自动清空并推 `conv.updated`；与会话级 `pinned` 无关；无新帧，`protocolVersion` 仍为 1 |
 | v1（F-26 未读口径） | 2026-10-28 | Conversation 新增可选字段 `unread`（当前用户未读数，只统计他人发送且 `seq > lastReadSeq` 的消息，自己发送的消息不计入；服务端实时计算，客户端可直接展示；旧客户端忽略）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-38 收藏跨设备同步） | 2026-11-04 | 新增服务端个人收藏（`favorites` 表：账号 + 原消息引用 + 收藏时间，单账号上限 500）与 REST `GET/POST /api/favorites`、`DELETE /api/favorites/{messageId}`（新增/取消幂等）；新增推送帧 `favorite.changed`（共 23 个 type，§4.10），向本人全部在线连接同步；收藏列表只展示仍可访问的原消息，撤回/失去会话访问权显示不可用；收尾：500 上限与新增写入原子执行（并发不超限）、下载鉴权不再以已撤回消息作为成员访问依据、客户端重连后自动刷新；`protocolVersion` 仍为 1 |
+| v1（F-40 多选消息与附件转发） | 2026-11-09 | 新增 REST `POST /api/messages/forward`：单条转发 text/image/file/voice 到目标会话（目标会话 `seq` 连续、`clientMsgId` 幂等，重试不重复落库/广播）；附件消息复用原 `files.id`，不复制文件、不要求客户端重新上传，下载鉴权按新消息所在会话判定；服务端校验源消息仍可访问且未撤回、附件仍存在；无新帧，`protocolVersion` 仍为 1 |
 
 | v1（F-24 群主转让） | 2026-10-28 | 系统消息事件新增 `owner.transferred`（群主转让；content 仍为 `{event, actorId, targetUserIds, text}`，`targetUserIds` 为新群主 userId，旧客户端按未知事件回退「系统消息」）；新增 REST `POST /api/conversations/{conversationId}/owner`（body `{userId}`，仅群主，成功后两条成员行 role 互换、追加系统消息、按收件人视角下发 `conv.updated`）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-22 多端在线） | 2026-11-01 | 连接策略由「单活动连接」改为「每账号最多 3 个连接」（`App:MaxConnectionsPerUser` 可配，裁到 1~10），超限踢「最早建立」的连接；`read.updated` 增加下发给本人其他连接（多端已读同步），群聊仍不向其他成员广播；`kicked` 帧结构与 `4001` 关闭码不变，仅语义/文案扩展；无新帧、不改库表、`protocolVersion` 仍为 1 |

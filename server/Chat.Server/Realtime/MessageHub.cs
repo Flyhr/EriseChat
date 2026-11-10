@@ -283,6 +283,22 @@ public sealed class MessageHub
     }
 
     /// <summary>向会话内其它在线连接发送 message.new（跳过发送连接本身）。</summary>
+    /// <summary>
+    /// F-40：REST 转发落库成功后向目标会话全部在线连接广播 message.new。
+    /// 与 WS 发送不同，这里无法识别「发起 REST 的连接」，因此包含转发者自己的其它在线连接（同消息去重由客户端按 messageId 处理）。
+    /// </summary>
+    public async Task BroadcastForwardedAsync(IReadOnlyList<string> memberUserIds, Chat.Protocol.Frames.Message message)
+    {
+        var frame = new MessageNewFrame(message with { ClientMsgId = null });
+        var sent = await BroadcastToAllAsync(memberUserIds, frame);
+        _logger.LogInformation(
+            "message.new 广播（转发）：会话 {ConversationId} seq={Seq} messageId={MessageId} → {ConnectionCount} 条在线连接",
+            message.ConversationId,
+            message.Seq,
+            message.MessageId,
+            sent);
+    }
+
     private async Task<int> BroadcastAsync(
         IReadOnlyList<string> memberUserIds,
         WsConnection sender,
@@ -298,8 +314,10 @@ public sealed class MessageHub
                     continue;
                 }
 
-                await connection.SendFrameAsync(frame, CancellationToken.None);
-                sent++;
+                if (await TrySendAsync(connection, frame))
+                {
+                    sent++;
+                }
             }
         }
 
@@ -330,11 +348,34 @@ public sealed class MessageHub
         {
             foreach (var connection in _connections.GetConnections(userId))
             {
-                await connection.SendFrameAsync(frame, CancellationToken.None);
-                sent++;
+                if (await TrySendAsync(connection, frame))
+                {
+                    sent++;
+                }
             }
         }
 
         return sent;
+    }
+
+    /// <summary>
+    /// 向单个在线连接发送帧；失败只记录并跳过该连接，不中断本次广播。
+    /// 消息已落库后再广播时，个别连接发送失败不应让 REST 请求返回失败（否则重试会命中幂等、无法补广播）。
+    /// </summary>
+    private async Task<bool> TrySendAsync(WsConnection connection, FrameEnvelope frame)
+    {
+        try
+        {
+            await connection.SendFrameAsync(frame, CancellationToken.None);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "向连接发送帧失败，已跳过该连接（ConnectionId={ConnectionId}）",
+                connection.ConnectionId);
+            return false;
+        }
     }
 }

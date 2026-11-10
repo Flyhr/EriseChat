@@ -30,6 +30,9 @@ public sealed record MessageRecallResult(
 /// <summary>message.edit 处理结果（F-18）：协议消息 + 会话成员（用于广播）。</summary>
 public sealed record MessageEditResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds);
 
+/// <summary>F-40：跨会话转发结果；created=false 表示 clientMsgId 幂等命中（不重复落库/广播）。</summary>
+public sealed record MessageForwardResult(ProtocolMessage Message, IReadOnlyList<string> MemberUserIds, bool Created);
+
 /// <summary>sync.request 补拉结果（reqId 由 Realtime 层回填）。</summary>
 public sealed record SyncPullResult(IReadOnlyList<SyncBatch> Batches, bool HasMore);
 
@@ -357,6 +360,121 @@ public sealed class MessageService
 
         var memberUserIds = await LoadMemberUserIdsAsync(conversationIdValue, cancellationToken);
         return new MessageEditResult(ToProtocolMessage(message), memberUserIds);
+    }
+
+    /// <summary>
+    /// F-40：把源消息转发到目标会话（text/image/file/voice）。
+    /// 转发者必须仍是源会话成员、仍属于目标会话；源消息未撤回且非 system；附件消息的 files 记录必须仍存在。
+    /// 不复制文件、不要求客户端重新上传：新消息复用同一 files.id（下载鉴权按目标消息所在会话判定）。
+    /// 新消息使用调用方提供的稳定 clientMsgId 走普通 (conversation_id, client_msg_id) 幂等。
+    /// 不支持把 system 消息、已撤回消息转发，也不复制 replyTo/editedAt。
+    /// </summary>
+    public async Task<MessageForwardResult> ForwardAsync(
+        string userId,
+        string? messageId,
+        string? targetConversationId,
+        string? clientMsgId,
+        CancellationToken cancellationToken)
+    {
+        var messageIdValue = ValidateId(messageId, "messageId");
+        var targetId = ValidateId(targetConversationId, "targetConversationId");
+        var clientId = ValidateId(clientMsgId, "clientMsgId");
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        // F-40：成员资格、撤回状态、附件可用性校验与 seq 分配/插入必须在同一事务内完成。
+        // 否则校验后、写入前发生退群或撤回时，仍可能把旧内容写进目标会话。
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // 目标会话成员校验先于幂等查询：重试仍需确认转发者仍有目标会话访问权。
+            var targetConversation = await EnsureMemberAsync(userId, targetId, cancellationToken);
+
+            var existing = await _db.Messages.AsNoTracking().FirstOrDefaultAsync(
+                item => item.ConversationId == targetId && item.ClientMsgId == clientId,
+                cancellationToken);
+            if (existing is not null)
+            {
+                return new MessageForwardResult(ToProtocolMessage(existing), Array.Empty<string>(), Created: false);
+            }
+
+            var source = await _db.Messages.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == messageIdValue, cancellationToken);
+            if (source is null)
+            {
+                throw ApiException.NotFound("原消息不存在");
+            }
+
+            var stillMember = await _db.ConversationMembers.AsNoTracking().AnyAsync(
+                member => member.ConversationId == source.ConversationId && member.UserId == userId,
+                cancellationToken);
+            if (!stillMember)
+            {
+                throw ApiException.Forbidden("无权访问原消息");
+            }
+
+            if (source.DeletedAt is not null)
+            {
+                throw ApiException.ValidationFailed("已撤回的消息不能转发");
+            }
+
+            if (source.MsgType == MessageType.System)
+            {
+                throw ApiException.ValidationFailed("系统消息不能转发");
+            }
+
+            if (source.FileId is not null)
+            {
+                var fileExists = await _db.Files.AsNoTracking()
+                    .AnyAsync(file => file.Id == source.FileId, cancellationToken);
+                if (!fileExists)
+                {
+                    throw ApiException.ValidationFailed("原消息的附件已不可用");
+                }
+            }
+
+            var seq = await SeqAllocator.AllocateAsync(_db, targetId, cancellationToken);
+            var entity = new MessageEntity
+            {
+                Id = Guid.NewGuid().ToString("D"),
+                ConversationId = targetId,
+                SenderId = userId,
+                ClientMsgId = clientId,
+                Seq = seq,
+                MsgType = source.MsgType,
+                // 内容快照直接沿用原消息（编辑后的文本为最新版本；附件仍在原文件记录中）。
+                ContentJson = source.ContentJson,
+                FileId = source.FileId,
+                ReplyTo = null,
+                CreatedAt = now,
+            };
+
+            _db.Messages.Add(entity);
+            targetConversation.LastMessageId = entity.Id;
+            await _db.SaveChangesAsync(cancellationToken);
+
+            var memberUserIds = await _db.ConversationMembers.AsNoTracking()
+                .Where(member => member.ConversationId == targetId)
+                .Select(member => member.UserId)
+                .ToListAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+            return new MessageForwardResult(ToProtocolMessage(entity), memberUserIds, Created: true);
+        }
+        catch (DbUpdateException)
+        {
+            // 并发重试：唯一索引 (conversation_id, client_msg_id) 兜底，回滚后返回已存在的转发消息。
+            await transaction.RollbackAsync(CancellationToken.None);
+            var raced = await _db.Messages.AsNoTracking()
+                .FirstOrDefaultAsync(
+                    item => item.ConversationId == targetId && item.ClientMsgId == clientId,
+                    cancellationToken);
+            if (raced is not null)
+            {
+                return new MessageForwardResult(ToProtocolMessage(raced), Array.Empty<string>(), Created: false);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>读取会话全部成员用户 ID（撤回/编辑广播用）。</summary>
