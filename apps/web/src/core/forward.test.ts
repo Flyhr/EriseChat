@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canForward, filterForwardTargets, forwardTextOf } from './forward'
+import { canForward, filterForwardTargets } from './forward'
 import { makeConversation, makeMessage } from '../test/fixtures'
 
 describe('canForward', () => {
@@ -11,12 +11,14 @@ describe('canForward', () => {
     expect(canForward(makeMessage({ content: '' }))).toBe(false)
   })
 
-  it('图片/文件/系统消息不可转发', () => {
+  it('图片/文件/语音可转发，系统消息不可转发', () => {
     const image = makeMessage({ msgType: 'image', content: { fileId: 'f', name: 'a.png', size: 1, mime: 'image/png' } })
     const file = makeMessage({ msgType: 'file', content: { fileId: 'f', name: 'b.pdf', size: 1, mime: 'application/pdf' } })
+    const voice = makeMessage({ msgType: 'voice', content: { fileId: 'f', durationMs: 1200 } })
     const system = makeMessage({ msgType: 'system', content: { event: 'e' } })
-    expect(canForward(image)).toBe(false)
-    expect(canForward(file)).toBe(false)
+    expect(canForward(image)).toBe(true)
+    expect(canForward(file)).toBe(true)
+    expect(canForward(voice)).toBe(true)
     expect(canForward(system)).toBe(false)
   })
 
@@ -27,17 +29,6 @@ describe('canForward', () => {
   it('空消息不可转发', () => {
     expect(canForward(null)).toBe(false)
     expect(canForward(undefined)).toBe(false)
-  })
-})
-
-describe('forwardTextOf', () => {
-  it('返回可转发消息的文本', () => {
-    expect(forwardTextOf(makeMessage({ content: '转发我' }))).toBe('转发我')
-  })
-
-  it('不可转发消息返回空串', () => {
-    expect(forwardTextOf(makeMessage({ deletedAt: 1 }))).toBe('')
-    expect(forwardTextOf(null)).toBe('')
   })
 })
 

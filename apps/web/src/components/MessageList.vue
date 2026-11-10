@@ -44,6 +44,10 @@ const props = defineProps<{
   locateHasOlder?: boolean
   /** F-37：定位窗口下方是否还有更新消息。 */
   locateHasNewer?: boolean
+  /** F-40：多选模式（消息行可点选，气泡内交互暂时禁用）。 */
+  selecting?: boolean
+  /** F-40：已选中的服务端消息 ID（回显勾选态）。 */
+  selectedIds?: readonly string[]
 }>()
 
 const emit = defineEmits<{
@@ -55,6 +59,8 @@ const emit = defineEmits<{
   'open-actions': [messageId: string, position: { x: number; y: number }]
   /** F-09：请求定位到被引用的消息（由会话页处理未加载时的补拉）。 */
   'jump-to-message': [messageId: string]
+  /** F-40：多选模式下切换消息选中状态。 */
+  'toggle-select': [messageId: string]
 }>()
 
 const container = ref<HTMLDivElement | null>(null)
@@ -480,10 +486,13 @@ onMounted(() => {
           :receipt="receiptOf(item.message)"
           :mention-names="mentionNames ?? []"
           :self-display-name="selfDisplayName ?? ''"
+          :selectable="selecting === true"
+          :selected="selectedIds?.includes(item.message.messageId) ?? false"
           @image-loaded="onImageLoaded"
           @preview-image="emit('preview-image', $event)"
           @open-actions="forwardOpenActions"
           @jump-to-message="emit('jump-to-message', $event)"
+          @toggle-select="emit('toggle-select', $event)"
         />
       </template>
 

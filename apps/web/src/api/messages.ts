@@ -84,4 +84,11 @@ export const messagesApi = {
         after: target.after,
       },
     }),
+
+  /**
+   * F-40：把一条消息转发到目标会话。附件由服务端复用原 `files.id`，客户端不需要下载后再上传；
+   * `clientMsgId` 由调用方为每条目标消息生成并保留，重试同一 clientMsgId 幂等。
+   */
+  forward: (body: { messageId: string; targetConversationId: string; clientMsgId: string }) =>
+    http.post<Message>('/messages/forward', body),
 }

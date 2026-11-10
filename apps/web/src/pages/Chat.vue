@@ -314,8 +314,97 @@ function senderNameOf(message: Message): string {
   return message.senderId === selfUserId.value ? '我' : '未知成员'
 }
 
-/** F-26：转发弹窗目标消息（null = 关闭）。 */
-const forwardTarget = ref<Message | null>(null)
+/** F-26/F-40：转发弹窗要转发的消息；关闭弹窗后仅在「部分失败待重试」时保留。 */
+const forwardMessages = ref<Message[]>([])
+/** F-40：弹窗显隐；与 forwardMessages 分开，关闭后仍可保留同一批的幂等键与失败项。 */
+const forwardOpen = ref(false)
+/** F-40：开始新一批时递增，驱动弹窗重新生成 clientMsgId 并解锁目标。 */
+const forwardBatchId = ref(0)
+
+/** F-40：多选状态：选择模式、已选消息 ID（按展示顺序过滤后即为转发顺序）。 */
+const MAX_FORWARD_MESSAGES = 20
+const selecting = ref(false)
+const selectedMessageIds = ref<string[]>([])
+const selectedMessages = computed(() =>
+  displayMessages.value.filter((message) => selectedMessageIds.value.includes(message.messageId)),
+)
+const canForwardSelection = computed(() => selectedMessages.value.length > 0)
+
+/** 只有已落库、非 system、未撤回的消息可选（待发送消息在 pending 列表，不在 displayMessages）。 */
+function isSelectableMessage(message: Message): boolean {
+  return message.msgType !== 'system' && typeof message.deletedAt !== 'number' && Boolean(message.messageId)
+}
+
+function startSelecting(messageId: string): void {
+  const message = displayMessages.value.find((item) => item.messageId === messageId)
+  if (!message || !isSelectableMessage(message)) {
+    showToast('该消息不能选择', 'error')
+    return
+  }
+  if (activeDrawer.value === 'emoji') activeDrawer.value = null
+  // 重新开始选择即放弃上一批的失败项与幂等键。
+  forwardOpen.value = false
+  forwardMessages.value = []
+  selecting.value = true
+  selectedMessageIds.value = [messageId]
+}
+
+function toggleSelected(messageId: string): void {
+  const message = displayMessages.value.find((item) => item.messageId === messageId)
+  if (!message || !isSelectableMessage(message)) return
+  // 选择变化后旧批次的目标/结果不再适用，丢弃后按新选择重新开始一批。
+  if (forwardMessages.value.length > 0) {
+    forwardOpen.value = false
+    forwardMessages.value = []
+  }
+  if (selectedMessageIds.value.includes(messageId)) {
+    selectedMessageIds.value = selectedMessageIds.value.filter((id) => id !== messageId)
+    if (selectedMessageIds.value.length === 0) selecting.value = false
+    return
+  }
+  if (selectedMessageIds.value.length >= MAX_FORWARD_MESSAGES) {
+    showToast(`最多选择 ${MAX_FORWARD_MESSAGES} 条`, 'error')
+    return
+  }
+  selectedMessageIds.value = [...selectedMessageIds.value, messageId]
+}
+
+function exitSelecting(): void {
+  selecting.value = false
+  selectedMessageIds.value = []
+  forwardOpen.value = false
+  forwardMessages.value = []
+}
+
+/** 多选转发：按原消息在会话中的顺序逐条转发（顺序由 selectedMessages 的计算保证）。 */
+function openMultiForward(): void {
+  if (selectedMessages.value.length === 0) return
+  // 部分失败后关闭再点「转发」：恢复同一批（保留目标、clientMsgId 与失败项），不重新生成幂等键。
+  const sameBatch =
+    forwardMessages.value.length > 0 &&
+    forwardMessages.value.length === selectedMessages.value.length &&
+    forwardMessages.value.every((message, index) => message.messageId === selectedMessages.value[index]?.messageId)
+  if (!sameBatch) {
+    forwardMessages.value = [...selectedMessages.value]
+    forwardBatchId.value += 1
+  }
+  forwardOpen.value = true
+}
+
+function onForwarded(result: { success: number; failed: number }): void {
+  // 全部成功才退出多选；部分失败保留选择与失败项，用户可只重试失败消息。
+  if (result.failed === 0) {
+    forwardOpen.value = false
+    forwardMessages.value = []
+    exitSelecting()
+  }
+}
+
+/** 关闭转发弹窗：部分失败时保留本批，便于重新打开只重试失败项。 */
+function onForwardClose(keepBatch: boolean): void {
+  forwardOpen.value = false
+  if (!keepBatch) forwardMessages.value = []
+}
 
 /** F-38：收藏/取消收藏（服务端为事实源）；失败用明确错误提示，不显示成功。 */
 async function toggleFavorite(message: Message): Promise<void> {
@@ -379,7 +468,13 @@ function onActionSelect(action: MessageActionId): void {
     return
   }
   if (action === 'forward') {
-    forwardTarget.value = message
+    forwardMessages.value = [message]
+    forwardBatchId.value += 1
+    forwardOpen.value = true
+    return
+  }
+  if (action === 'select') {
+    startSelecting(message.messageId)
     return
   }
   if (action === 'favorite' || action === 'unfavorite') {
@@ -471,6 +566,9 @@ watch(
     actionMenu.value = null
     recallTarget.value = null
     editTarget.value = null
+    forwardOpen.value = false
+    forwardMessages.value = []
+    exitSelecting()
     pendingEnteredMarkClear.value = conversationId
     tryClearEnteredMark()
   },
@@ -1536,14 +1634,39 @@ function onWindowDrop(event: DragEvent): void {
               :locate-mode="locateMode"
               :locate-has-older="locateWindow?.hasOlder ?? false"
               :locate-has-newer="locateWindow?.hasNewer ?? false"
+              :selecting="selecting"
+              :selected-ids="selectedMessageIds"
               @load-more="loadMoreMessages"
               @retry="retryMessage"
               @near-bottom-change="onNearBottomChange"
               @preview-image="onPreviewImage"
               @open-actions="onOpenActions"
               @jump-to-message="onJumpToMessage"
+              @toggle-select="toggleSelected"
             />
-            <div class="chat-page__composer">
+            <div v-if="selecting" class="chat-page__selection-bar" role="region" aria-label="多选操作">
+              <span class="chat-page__selection-count">
+                已选 {{ selectedMessageIds.length }}/{{ MAX_FORWARD_MESSAGES }} 条
+              </span>
+              <div class="chat-page__selection-actions">
+                <button
+                  type="button"
+                  class="chat-page__selection-btn"
+                  :disabled="!canForwardSelection"
+                  @click="openMultiForward"
+                >
+                  转发
+                </button>
+                <button
+                  type="button"
+                  class="chat-page__selection-btn chat-page__selection-btn--ghost"
+                  @click="exitSelecting"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+            <div v-if="!selecting" class="chat-page__composer">
               <!-- 悬浮表情面板：不占文档流，开合不会让聊天内容整体上移。 -->
               <EmojiPanel
                 v-if="activeDrawer === 'emoji'"
@@ -1717,10 +1840,12 @@ function onWindowDrop(event: DragEvent): void {
       </div>
     </AppDialog>
     <ForwardDialog
-      :open="Boolean(forwardTarget)"
-      :message="forwardTarget"
+      :open="forwardOpen"
+      :messages="forwardMessages"
       :self-user-id="selfUserId"
-      @close="forwardTarget = null"
+      :batch-id="forwardBatchId"
+      @close="onForwardClose"
+      @forwarded="onForwarded"
     />
   </main>
 </template>
@@ -1988,6 +2113,53 @@ function onWindowDrop(event: DragEvent): void {
 .chat-page__composer {
   position: relative;
   flex: none;
+}
+
+/* F-40：多选操作条（选择时替换输入区；固定在消息区底部，不覆盖消息）。 */
+.chat-page__selection-bar {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ec-space-3) var(--ec-space-4);
+  padding-bottom: calc(var(--ec-space-3) + env(safe-area-inset-bottom, 0px));
+  background: var(--ec-surface);
+  border-top: 1px solid var(--ec-border);
+}
+
+.chat-page__selection-count {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.chat-page__selection-actions {
+  display: flex;
+  gap: var(--ec-space-2);
+}
+
+.chat-page__selection-btn {
+  min-width: 72px;
+  height: 34px;
+  padding: 0 var(--ec-space-4);
+  color: var(--ec-text-inverse);
+  font-weight: 600;
+  background: var(--ec-brand-600);
+  border: none;
+  border-radius: var(--ec-radius-input);
+  cursor: pointer;
+}
+
+.chat-page__selection-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.chat-page__selection-btn--ghost {
+  color: var(--ec-text-secondary);
+  font-weight: 400;
+  background: transparent;
+  border: 1px solid var(--ec-border);
 }
 
 /* 悬浮表情面板：锚定在发送框上方，开合不会改变消息区高度、不挤动聊天内容。 */

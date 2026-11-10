@@ -1,9 +1,10 @@
-// F-18/F-26：消息操作（回复/转发/收藏/撤回/编辑）的纯逻辑。
+// F-18/F-26/F-40：消息操作（回复/转发/多选/收藏/撤回/编辑）的纯逻辑。
 //
 // 时间窗口与 protocol.md §4.3 一致（服务端为最终判定，这里只决定 UI 是否展示入口）：
 // - 撤回：发送者本人、非 system、未撤回、创建后 120 秒内；
 // - 编辑：发送者本人、文本、未撤回、创建后 900 秒内；
-// - 转发：仅文本、未撤回（纯前端发送一条新消息）；
+// - 转发：text/image/file/voice、未撤回（附件走服务端转发接口）；
+// - 多选：非 system、未撤回（实际可选性还会过滤待发送消息）；
 // - 收藏：文本/图片/文件、未撤回（本地 IndexedDB 快照）。
 import type { Message } from '../types/frames'
 import { canForward } from './forward'
@@ -17,6 +18,7 @@ export const MESSAGE_EDIT_WINDOW_MS = 900_000
 export type MessageActionId =
   | 'reply'
   | 'forward'
+  | 'select'
   | 'favorite'
   | 'unfavorite'
   | 'pin'
@@ -111,12 +113,15 @@ export function canManagePinned(
   return !isRecalled(message)
 }
 
-/** 构建消息操作菜单项（回复恒有；转发/收藏/撤回/编辑/置顶按能力与权限过滤）。 */
+/** 构建消息操作菜单项（回复/多选恒有；转发/收藏/撤回/编辑/置顶按能力与权限过滤）。 */
 export function buildMessageActions(
   message: Message | null | undefined,
   options: MessageActionOptions,
 ): MessageAction[] {
   const actions: MessageAction[] = [{ id: 'reply', label: '回复' }]
+  if (message && message.msgType !== 'system' && !isRecalled(message) && message.messageId) {
+    actions.push({ id: 'select', label: '多选' })
+  }
   if (canForward(message)) {
     actions.push({ id: 'forward', label: '转发' })
   }

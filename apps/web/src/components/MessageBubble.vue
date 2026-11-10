@@ -6,6 +6,7 @@ import { systemMessageText } from '../core/groupChat'
 import { hasSelfMention, splitRichText } from '../core/mentions'
 import { replyCardText } from '../core/replyPreview'
 import Avatar from './Avatar.vue'
+import AppIcon from './AppIcon.vue'
 import MessageAttachment from './MessageAttachment.vue'
 import VoiceMessagePlayer from './VoiceMessagePlayer.vue'
 
@@ -32,6 +33,10 @@ const props = withDefaults(
     mentionNames?: readonly string[]
     /** F-25：当前用户昵称（用于「提到你」标记；空串不标记）。 */
     selfDisplayName?: string
+    /** F-40：多选模式下行可点选（点击整行切换选中，气泡内交互暂时禁用）。 */
+    selectable?: boolean
+    /** F-40：当前是否已选中。 */
+    selected?: boolean
   }>(),
   {
     self: false,
@@ -41,6 +46,8 @@ const props = withDefaults(
     isGroup: false,
     mentionNames: () => [],
     selfDisplayName: '',
+    selectable: false,
+    selected: false,
   },
 )
 
@@ -54,6 +61,8 @@ const emit = defineEmits<{
   'open-actions': [messageId: string, position: { x: number; y: number }]
   /** F-09：点击引用条，请求定位到被引用的消息。 */
   'jump-to-message': [messageId: string]
+  /** F-40：多选模式下切换该消息的选中状态。 */
+  'toggle-select': [messageId: string]
 }>()
 
 /** F-28：语音消息内容（{ fileId, durationMs }）；非语音/已撤回时为空。 */
@@ -170,13 +179,23 @@ function openActions(position: { x: number; y: number }): void {
 
 /** 桌面：右键气泡打开操作菜单（system 消息不提供）。 */
 function onContextMenu(event: MouseEvent): void {
+  if (props.selectable) return
   if (isSystem.value || !repliableMessageId()) return
   event.preventDefault()
   openActions({ x: event.clientX, y: event.clientY })
 }
 
+/** F-40：多选模式下点击整行切换选中；非多选模式保持原有气泡内交互。 */
+function onRowClick(): void {
+  if (!props.selectable) return
+  const messageId = repliableMessageId()
+  if (!messageId) return
+  emit('toggle-select', messageId)
+}
+
 /** 移动端：长按 500ms 打开操作菜单；滚动/抬起/取消时清除计时器。 */
 function onPointerDown(event: PointerEvent): void {
+  if (props.selectable) return
   if (event.button !== 0 || isSystem.value || !repliableMessageId()) return
   // F-28-06：语音播放器内的按下（播放键、进度条拖拽）不触发长按菜单，
   // 否则长按拖拽进度条会弹出「回复/收藏」。
@@ -211,8 +230,21 @@ const timeText = computed(() =>
   <div
     v-else
     class="message-row"
-    :class="{ 'message-row--self': self, 'message-row--sender': showSender }"
+    :class="{
+      'message-row--self': self,
+      'message-row--sender': showSender,
+      'message-row--selectable': selectable,
+      'message-row--selected': selected,
+    }"
+    :role="selectable ? 'checkbox' : undefined"
+    :aria-checked="selectable ? selected : undefined"
+    :tabindex="selectable ? 0 : undefined"
+    @click="onRowClick"
+    @keydown.space.prevent="onRowClick"
   >
+    <span v-if="selectable" class="message-row__check" :class="{ 'message-row__check--on': selected }" aria-hidden="true">
+      <AppIcon v-if="selected" name="check" :size="12" />
+    </span>
     <Avatar v-if="showSender" class="message-row__avatar" :display-name="senderName || '?'" :size="32" />
     <div class="message-row__body">
       <span v-if="showSender && senderName" class="message-row__sender">{{ senderName }}</span>
@@ -324,6 +356,52 @@ const timeText = computed(() =>
 /* 自己消息靠右：行方向反转，meta 右对齐。 */
 .message-row--self {
   flex-direction: row-reverse;
+}
+
+/* F-40 多选：整行可点击，行前圆形勾选框；气泡内交互（预览/播放/引用跳转）暂时禁用，避免误触。 */
+.message-row--selectable {
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: var(--ec-radius-panel);
+  cursor: pointer;
+}
+
+.message-row--selectable:hover {
+  background: var(--ec-surface-hover);
+}
+
+.message-row--selectable:focus-visible {
+  outline: 2px solid var(--ec-focus);
+  outline-offset: 2px;
+}
+
+.message-row--selected,
+.message-row--selected:hover {
+  background: var(--ec-brand-050);
+}
+
+.message-row--selectable .message-bubble,
+.message-row--selectable .message-bubble * {
+  pointer-events: none;
+}
+
+.message-row__check {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 12px;
+  color: var(--ec-text-inverse);
+  background: var(--ec-surface);
+  border: 1.5px solid var(--ec-border);
+  border-radius: 50%;
+}
+
+.message-row__check--on {
+  background: var(--ec-brand-600);
+  border-color: var(--ec-brand-600);
 }
 
 .message-row__avatar {
