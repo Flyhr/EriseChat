@@ -9,6 +9,7 @@ import { isVoiceContent, voicePreviewText } from '../core/voice'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
+import { usePresenceStore } from '../stores/presence'
 
 // 会话列表项（UI-02 批次1，计划 §5.2）：行高桌面 72 / 紧凑 64 / 移动 44；头像 44；
 // 选中浅蓝底 + 左侧 3px 品牌色指示条；hover 浅灰蓝；标题单行、摘要一行、时间与未读角标保留。
@@ -45,6 +46,14 @@ const title = computed(() =>
 // F-23：群聊优先展示群头像；单聊仍展示对方个人头像。
 const avatarFileId = computed(
   () => otherMember.value?.avatarFileId ?? groupAvatarFileIdOf(props.conversation),
+)
+
+// UI-D P2：单聊头像右下在线点。未知状态不显示（v1 无初始查询，不能把「未知」画成离线）。
+const presence = usePresenceStore()
+const peerOnline = computed(
+  () =>
+    props.conversation.type !== 'group' &&
+    presence.stateOf(otherMember.value?.userId) === true,
 )
 
 const preview = computed(() => {
@@ -194,7 +203,10 @@ function formatTime(timestamp: number): string {
       :aria-current="active ? 'true' : undefined"
       @click="emit('select', conversation.conversationId)"
     >
-      <Avatar :display-name="title" :avatar-file-id="avatarFileId ?? undefined" :size="44" />
+      <span class="conversation-item__avatar">
+        <Avatar :display-name="title" :avatar-file-id="avatarFileId ?? undefined" :size="44" />
+        <span v-if="peerOnline" class="conversation-item__online" role="img" aria-label="在线" />
+      </span>
       <span class="conversation-item__body">
         <span class="conversation-item__title">{{ title }}</span>
         <span class="conversation-item__preview">{{ preview }}</span>
@@ -268,6 +280,28 @@ function formatTime(timestamp: number): string {
 </template>
 
 <style scoped>
+/* UI-D P2：头像在线点 + 会话行分隔线，参考图 01/08 的列表密度。 */
+.conversation-item__avatar {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.conversation-item__online {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--ec-list-bg);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-online);
+}
+
+.conversation-item {
+  border-bottom: 1px solid var(--ec-border-soft);
+}
+
 .conversation-item {
   position: relative;
   display: flex;

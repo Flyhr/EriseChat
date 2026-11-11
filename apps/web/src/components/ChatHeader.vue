@@ -47,21 +47,24 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
         <AppIcon name="back" />
       </button>
 
+      <!-- UI-D P2：头像常驻（单聊用彩色首字母回退），在线状态改为标题下方副标题。 -->
       <Avatar
-        v-if="isGroup && avatarFileId"
         :display-name="title"
-        :avatar-file-id="avatarFileId"
-        :size="32"
+        :avatar-file-id="avatarFileId ?? undefined"
+        :size="36"
         class="ec-chat-header__avatar"
       />
 
-      <h2 class="ec-chat-header__title" :title="title">{{ title }}</h2>
-
-      <template v-if="!isGroup">
-        <PresenceDot :online="peerPresence" />
-        <span class="ec-chat-header__presence">{{ presenceText }}</span>
-      </template>
-      <span v-else class="ec-chat-header__member-count">{{ memberCount }} 人</span>
+      <div class="ec-chat-header__identity">
+        <h2 class="ec-chat-header__title" :title="title">{{ title }}</h2>
+        <p class="ec-chat-header__subtitle">
+          <template v-if="!isGroup">
+            <PresenceDot :online="peerPresence" />
+            <span>{{ presenceText }}</span>
+          </template>
+          <span v-else>{{ memberCount }} 人</span>
+        </p>
+      </div>
     </div>
 
     <div class="ec-chat-header__actions">
@@ -100,6 +103,27 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
 </template>
 
 <style scoped>
+/* UI-D P2：标题 + 状态副标题两行结构；原有横向状态样式保留给窄屏降级。 */
+.ec-chat-header__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ec-chat-header__identity .ec-chat-header__title {
+  margin: 0;
+}
+
+.ec-chat-header__subtitle {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: 1.3;
+}
+
 .ec-chat-header {
   display: flex;
   flex: none;

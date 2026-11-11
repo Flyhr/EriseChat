@@ -219,6 +219,10 @@ async function onUpdateSettings(payload: {
 
 <template>
   <section class="ec-conversation-list" aria-label="会话列表">
+    <!-- UI-D P2：补回参考图的列表标题（F-11 移除后信息层级偏弱）。 -->
+    <div class="ec-conversation-list__titlebar">
+      <h1 class="ec-conversation-list__title">消息</h1>
+    </div>
     <header class="ec-conversation-list__header">
       <SearchInput
         v-model="searchKeyword"
@@ -294,6 +298,23 @@ async function onUpdateSettings(payload: {
 </template>
 
 <style scoped>
+/* UI-D P2：列表标题行，与聊天顶栏形成明确的信息层级。 */
+.ec-conversation-list__titlebar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 44px;
+  padding: 0 var(--ec-space-4);
+}
+
+.ec-conversation-list__title {
+  margin: 0;
+  color: var(--ec-text-primary);
+  font-size: 18px;
+  font-weight: var(--ec-font-weight-semibold);
+  line-height: 1.3;
+}
+
 .ec-conversation-list {
   display: flex;
   flex-direction: column;

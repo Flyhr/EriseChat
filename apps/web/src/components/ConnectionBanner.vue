@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { PhWarningCircle } from '@phosphor-icons/vue'
 import type { WsState } from '../core/ws'
 
-// 全局连接横幅（App.vue 挂在路由出口上方，UI-01 token 化）：按 chatWs 状态提示，断开可点击重连。
+// 连接状态条（UI-D P2）：参考图要求浅色非遮挡提示、历史消息继续可见。
+// 去掉原先 fixed 全宽深色条，改为布局流内的一条浅橙横幅；只在「已断开」提供真实可点的重连。
 const props = defineProps<{
   state: WsState
 }>()
@@ -22,7 +24,7 @@ const text = computed(() => {
   }
 })
 
-/** 仅「已断开」状态提供点击重连（重连中由退避策略自动进行）。 */
+/** 仅「已断开」状态可点重连；重连中由退避策略自动进行，不放假按钮。 */
 const clickable = computed(() => props.state === 'closed')
 
 function onClick(): void {
@@ -31,42 +33,65 @@ function onClick(): void {
 </script>
 
 <template>
-  <div
-    v-if="text"
-    class="connection-banner"
-    :class="{ 'connection-banner--clickable': clickable }"
-    role="status"
-    @click="onClick"
-  >
-    <span>{{ text }}</span>
-    <span v-if="clickable" class="connection-banner__action">点击重连</span>
+  <div v-if="text" class="connection-banner" role="status">
+    <PhWarningCircle :size="16" weight="regular" class="connection-banner__icon" aria-hidden="true" />
+    <span class="connection-banner__text">{{ text }}</span>
+    <span class="connection-banner__hint">可以继续查看历史消息</span>
+    <button
+      v-if="clickable"
+      type="button"
+      class="connection-banner__action"
+      @click="onClick"
+    >
+      重试连接
+    </button>
   </div>
 </template>
 
 <style scoped>
 .connection-banner {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
-  z-index: 100;
   display: flex;
+  flex: none;
   gap: var(--ec-space-2);
   align-items: center;
-  justify-content: center;
-  padding: var(--ec-space-2);
-  background: var(--ec-warning);
-  color: var(--ec-text-inverse);
+  min-height: 36px;
+  padding: 6px var(--ec-space-4);
+  border-bottom: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: var(--ec-warning);
   font-size: var(--ec-font-size-secondary);
-  text-align: center;
 }
 
-.connection-banner--clickable {
-  cursor: pointer;
+.connection-banner__icon {
+  flex: none;
+}
+
+.connection-banner__text {
+  font-weight: var(--ec-font-weight-medium);
+}
+
+.connection-banner__hint {
+  color: var(--ec-text-secondary);
 }
 
 .connection-banner__action {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  margin-left: auto;
+  padding: 2px 10px;
+  border: 1px solid var(--ec-warning);
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-warning);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.connection-banner__action:hover {
+  background: #ffedd5;
+}
+
+@media (max-width: 800px) {
+  .connection-banner__hint {
+    display: none;
+  }
 }
 </style>

@@ -535,7 +535,7 @@ function onInput(): void {
         rows="3"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
-        placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+        placeholder="输入消息"
         aria-label="消息输入框"
         :aria-activedescendant="mentionActiveId"
         @input="onInput"

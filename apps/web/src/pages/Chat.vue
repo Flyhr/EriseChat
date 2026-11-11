@@ -1770,7 +1770,7 @@ function onWindowDrop(event: DragEvent): void {
         v-else
         icon="chat"
         title="选择会话开始聊天"
-        description="从左侧选择会话，或到「通讯录」搜索用户发起单聊、创建群聊。"
+        description="选择一个会话开始聊天"
       />
       <!-- 拖拽投放提示（F-06）：仅拖拽含文件且已选择会话时出现在聊天主区；移动端由 CSS 隐藏。 -->
       <div v-if="dragActive" class="chat-page__drop" aria-hidden="true">

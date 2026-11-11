@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { getOrLoadBlobUrl } from '../core/blobCache'
 import { filesApi } from '../api/files'
 
-// 头像（纯展示，UI-01 修 H-04；F-12 接入鉴权图片）：
-// - 默认字母/首字头像（brand-050 底 + brand-600 字）；
+// 头像（UI-D P2）：
+// - 默认字母/首字头像按名称哈希取固定色板，让不同会话/联系人可区分（参考图要求多色相头像）；
 // - 传入 avatarFileId 时内部用 blobCache 下载并展示（image/*），不把 blob URL 写入 store/持久化；
 // - avatarUrl 仅允许传入外部已准备好的 blob: URL（当前无调用方），优先于 avatarFileId；
 // - 下载失败或加载中显示首字母（不破图）；卸载后忽略过期结果（blobCache 负责 URL 生命周期）。
@@ -15,9 +15,29 @@ const props = defineProps<{
   avatarUrl?: string
 }>()
 
+// 主题无关的固定色板：与 --ec-* 主题变量解耦，切换主题时头像辨识色保持一致。
+const AVATAR_TONES = [
+  { bg: '#fee2e2', fg: '#b91c1c' },
+  { bg: '#dbeafe', fg: '#1d4ed8' },
+  { bg: '#d1fae5', fg: '#047857' },
+  { bg: '#fef3c7', fg: '#b45309' },
+  { bg: '#ede9fe', fg: '#6d28d9' },
+  { bg: '#cffafe', fg: '#0e7490' },
+  { bg: '#fce7f3', fg: '#be185d' },
+  { bg: '#e0e7ff', fg: '#4338ca' },
+] as const
+
+/** 稳定哈希：同名始终同色，避免列表重排时头像闪烁。 */
+function toneOf(name: string): { bg: string; fg: string } {
+  let hash = 0
+  for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) | 0
+  return AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length]
+}
+
 const initial = computed(() => props.displayName.trim().charAt(0).toUpperCase() || '?')
 const dimension = computed(() => `${props.size ?? 40}px`)
 const fontSize = computed(() => `${Math.max(12, Math.round((props.size ?? 40) * 0.42))}px`)
+const tone = computed(() => toneOf(props.displayName))
 
 /** 内部加载到的 object URL（仅 avatarFileId 路径使用）。 */
 const loadedUrl = ref<string | null>(null)
@@ -70,7 +90,13 @@ onBeforeUnmount(() => {
 <template>
   <span
     class="avatar ec-avatar"
-    :style="{ width: dimension, height: dimension, fontSize }"
+    :style="{
+      width: dimension,
+      height: dimension,
+      fontSize,
+      backgroundColor: showImage ? undefined : tone.bg,
+      color: showImage ? undefined : tone.fg,
+    }"
     :title="displayName"
   >
     <img
