@@ -424,8 +424,8 @@ const timeText = computed(() =>
 }
 
 .message-row--selectable:focus-visible {
-  outline: 2px solid var(--ec-focus);
-  outline-offset: 2px;
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .message-row--selected,

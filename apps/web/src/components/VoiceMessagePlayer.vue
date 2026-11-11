@@ -251,10 +251,12 @@ onBeforeUnmount(() => {
   gap: var(--ec-space-2);
   min-width: 168px;
   max-width: min(260px, 60vw);
-  height: 36px;
-  padding: 0 var(--ec-space-2) 0 4px;
+  min-height: 36px;
+  /* 上下 4px + 按钮 28px 撑满 36px，左右留出与圆角相称的边距，避免按钮贴角。 */
+  padding: 4px var(--ec-space-2) 4px 6px;
   border: 1px solid var(--ec-media-border);
-  border-radius: var(--ec-radius-pill);
+  /* 圆角与文件卡一致（--ec-radius-md）；此前误用未定义的 --ec-radius-pill，导致渲染成直角。 */
+  border-radius: var(--ec-radius-md);
   background: var(--ec-media-surface);
   color: var(--ec-text-primary);
   box-shadow: var(--ec-shadow-media);
@@ -267,16 +269,22 @@ onBeforeUnmount(() => {
   }
 }
 
+/* 播放按钮：flex 居中图标（原 grid 未设 place-items，图标贴在按钮左上角，视觉上错位）。 */
 .voice-player__main {
-  display: grid;
+  display: flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
   width: 28px;
   height: 28px;
+  min-width: 28px;
+  min-height: 28px;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
+  line-height: 0;
   cursor: pointer;
 }
 
@@ -285,8 +293,8 @@ onBeforeUnmount(() => {
 }
 
 .voice-player__main:focus-visible {
-  outline: 2px solid var(--ec-focus);
-  outline-offset: 2px;
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 /* 命中区：视觉 3px、上下各 8px padding 撑到 19px，方便触屏拖动 */
@@ -303,9 +311,9 @@ onBeforeUnmount(() => {
 }
 
 .voice-player__track:focus-visible {
-  outline: 2px solid var(--ec-focus);
-  outline-offset: 2px;
-  border-radius: var(--ec-radius-pill);
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+  border-radius: var(--ec-radius-sm);
 }
 
 .voice-player__bar {
@@ -313,7 +321,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 3px;
   overflow: hidden;
-  border-radius: var(--ec-radius-pill);
+  border-radius: var(--ec-radius-full);
   background: var(--ec-media-track);
 }
 

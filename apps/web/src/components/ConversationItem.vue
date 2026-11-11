@@ -393,7 +393,7 @@ function formatTime(timestamp: number): string {
   flex: none;
   padding: 0 5px;
   border: 1px solid var(--ec-brand-600);
-  border-radius: var(--ec-radius-pill, 999px);
+  border-radius: var(--ec-radius-full);
   color: var(--ec-brand-600);
   font-size: 10px;
   line-height: 14px;

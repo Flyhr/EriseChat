@@ -417,9 +417,9 @@ async function confirmForward(): Promise<void> {
 }
 
 .forward-dialog__search:focus-visible {
-  border-color: var(--ec-focus);
-  outline: 2px solid var(--ec-focus);
-  outline-offset: 2px;
+  border-color: var(--ec-focus-ring);
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .forward-dialog__list {
