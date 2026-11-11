@@ -338,25 +338,26 @@ onBeforeUnmount(() => {
   background: var(--ec-danger);
 }
 
-/* 自己发送的语音在蓝底气泡内：改为半透明白底 + 白色进度，保证对比度。 */
-:global(.message-bubble--self) .voice-player {
+/* 自己发送的语音在蓝底气泡内：改为半透明白底 + 白色进度，保证对比度；
+   媒体消息不套气泡（.message-bubble--plain）时沿用默认浅色胶囊。 */
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player {
   background: rgb(255 255 255 / 22%);
   color: var(--ec-text-inverse);
 }
 
-:global(.message-bubble--self) .voice-player__bar {
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__bar {
   background: rgb(255 255 255 / 35%);
 }
 
-:global(.message-bubble--self) .voice-player__fill {
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__fill {
   background: var(--ec-text-inverse);
 }
 
-:global(.message-bubble--self) .voice-player__time {
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__time {
   color: var(--ec-text-inverse);
 }
 
-:global(.message-bubble--self) .voice-player__main {
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__main {
   background: var(--ec-text-inverse);
   color: var(--ec-brand-600);
 }

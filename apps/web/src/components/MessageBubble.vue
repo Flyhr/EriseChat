@@ -132,6 +132,14 @@ const showAttachment = computed(() => {
   return typeof content === 'object' && content !== null && 'fileId' in content
 })
 
+/**
+ * 图片 / 文件 / 语音直接贴在消息行里，不套气泡：去掉底色、描边与内边距。
+ * 撤回态仍用气泡承载「已撤回」文案，避免媒体消失后没有落点。
+ */
+const plainBubble = computed(
+  () => !recalled.value && (showAttachment.value || voiceContent.value !== null),
+)
+
 /** pending 消息没有 messageId，用 clientMsgId 兜底，作为预览条目的稳定键。 */
 function messageKeyOf(message: Message | PendingMessage): string {
   return 'messageId' in message ? message.messageId : message.clientMsgId
@@ -258,6 +266,7 @@ const timeText = computed(() =>
           'message-bubble--sending': status === 'sending',
           'message-bubble--failed': status === 'failed',
           'message-bubble--recalled': recalled,
+          'message-bubble--plain': plainBubble,
         }"
         @contextmenu="onContextMenu"
         @pointerdown="onPointerDown"
@@ -311,7 +320,7 @@ const timeText = computed(() =>
           <template v-else>{{ contentText }}</template>
         </p>
         <!-- UI-D P2-B：时间与已读回执内嵌气泡右下（参考图 01/09），外部只保留状态反馈。 -->
-        <div v-if="!recalled" class="message-bubble__footer">
+        <div v-if="!recalled && !plainBubble" class="message-bubble__footer">
           <time class="message-bubble__time">{{ timeText }}</time>
           <span
             v-if="receipt"
@@ -323,6 +332,17 @@ const timeText = computed(() =>
         </div>
       </div>
       <div class="message-row__meta">
+        <!-- 媒体消息不套气泡，时间与已读回执改到媒体下方同一行。 -->
+        <template v-if="plainBubble">
+          <time class="message-row__time">{{ timeText }}</time>
+          <span
+            v-if="receipt"
+            class="message-row__receipt"
+            :class="`message-row__receipt--${receipt}`"
+          >
+            {{ receipt === 'read' ? '已读' : '未读' }}
+          </span>
+        </template>
         <span v-if="selfMentioned" class="message-row__mention-badge">提到你</span>
         <span v-if="edited" class="message-row__edited">已编辑</span>
         <span v-if="status === 'sending'" class="message-row__pending">
@@ -479,6 +499,25 @@ const timeText = computed(() =>
   box-shadow: var(--ec-shadow-bubble-self);
 }
 
+/* 图片/文件/语音：去掉气泡底色、描边、内边距与投影，内容直接贴在消息行里。 */
+.message-bubble--plain {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 自己消息的 plain 气泡不再继承蓝底白字。 */
+.message-bubble--plain.message-bubble--self {
+  background: transparent;
+  color: var(--ec-text-primary);
+}
+
+.message-bubble--plain.message-bubble--failed {
+  border: none;
+}
+
 .message-bubble--sending {
   opacity: 0.75;
 }
@@ -548,6 +587,10 @@ const timeText = computed(() =>
   font-size: var(--ec-font-size-small);
 }
 
+.message-row__time {
+  color: var(--ec-text-tertiary);
+}
+
 .message-row__receipt--read {
   color: var(--ec-brand-600);
 }
@@ -573,7 +616,8 @@ const timeText = computed(() =>
   text-align: left;
 }
 
-.message-bubble--self .message-bubble__reply {
+/* 媒体消息（plain）不套气泡，引用块回到浅色样式。 */
+.message-bubble--self:not(.message-bubble--plain) .message-bubble__reply {
   border-left-color: var(--ec-text-inverse);
   background: rgba(255, 255, 255, 0.18);
   color: inherit;

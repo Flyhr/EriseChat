@@ -35,13 +35,24 @@ export type AppIconName =
   | 'mic'
   | 'play'
   | 'pause'
+  // F-35：文件消息按扩展名区分类型图标。
+  | 'filePdf'
+  | 'fileDoc'
+  | 'fileXls'
+  | 'filePpt'
+  | 'fileZip'
+  | 'fileAudio'
+  | 'fileVideo'
+  | 'fileImage'
 
 export interface AppIconShape {
   paths?: string[]
   circles?: { cx: number; cy: number; r: number }[]
 }
 
-export const APP_ICONS: Record<AppIconName, AppIconShape> = {
+// 历史自绘图形：仅 filePdf/fileDoc 等 F-35 新增图标未在此登记（只由 Phosphor 提供），
+// 因此类型放宽为 Partial；本表已不参与渲染，保留仅用于追溯旧图形数据。
+export const APP_ICONS: Partial<Record<AppIconName, AppIconShape>> = {
   chat: { paths: ['M4.5 5.5h15v10h-8.2l-3.6 3.2v-3.2H4.5v-10Z'] },
   contacts: {
     paths: ['M12 11.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z', 'M5 20c0-3 3.1-5.5 7-5.5s7 2.5 7 5.5'],

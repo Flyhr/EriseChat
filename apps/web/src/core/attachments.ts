@@ -1,4 +1,6 @@
 // 附件选择校验与展示辅助（M3-07，纯函数，便于 Vitest 单测）。
+import type { AppIconName } from './icons'
+
 // 白名单与上限必须与服务端 server/Chat.Server/Modules/Files/FileService.cs 保持一致：
 // 12 种扩展名（png/jpg/jpeg/gif/webp/pdf/txt/docx/xlsx/pptx/zip/7z），默认上限 50MB（AppOptions.UploadMaxBytes）。
 
@@ -33,6 +35,46 @@ export type AttachmentValidation = { ok: true } | { ok: false; reason: string }
 export function extensionOf(fileName: string): string {
   const dot = fileName.lastIndexOf('.')
   return dot >= 0 ? fileName.slice(dot).toLowerCase() : ''
+}
+
+/** 文件消息的图标映射（按扩展名）；未登记的类型回退通用文件图标。 */
+const FILE_ICON_BY_EXTENSION: Record<string, AppIconName> = {
+  '.pdf': 'filePdf',
+  '.doc': 'fileDoc',
+  '.docx': 'fileDoc',
+  '.xls': 'fileXls',
+  '.xlsx': 'fileXls',
+  '.csv': 'fileXls',
+  '.ppt': 'filePpt',
+  '.pptx': 'filePpt',
+  '.zip': 'fileZip',
+  '.7z': 'fileZip',
+  '.rar': 'fileZip',
+  '.gz': 'fileZip',
+  '.tar': 'fileZip',
+  '.png': 'fileImage',
+  '.jpg': 'fileImage',
+  '.jpeg': 'fileImage',
+  '.gif': 'fileImage',
+  '.webp': 'fileImage',
+  '.bmp': 'fileImage',
+  '.svg': 'fileImage',
+  '.mp3': 'fileAudio',
+  '.wav': 'fileAudio',
+  '.ogg': 'fileAudio',
+  '.m4a': 'fileAudio',
+  '.aac': 'fileAudio',
+  '.flac': 'fileAudio',
+  '.mp4': 'fileVideo',
+  '.mov': 'fileVideo',
+  '.mkv': 'fileVideo',
+  '.avi': 'fileVideo',
+  '.webm': 'fileVideo',
+}
+
+/** 文件消息按扩展名选类型图标（pdf/doc/xls/ppt/zip/audio/video/image），未知回退 'file'。 */
+export function fileIconOf(fileName: string): AppIconName {
+  return FILE_ICON_BY_EXTENSION[extensionOf(fileName)] ?? 'file'
 }
 
 /** 是否为图片类附件（png/jpg/jpeg/gif/webp）。 */
