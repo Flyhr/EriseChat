@@ -1147,7 +1147,8 @@ async function onPickCustomEmoji(file: File): Promise<void> {
   const conversationId = activeId.value
   const senderId = selfUserId.value
   if (!conversationId || !senderId) return
-  if (uploadBusy.value) return
+  // 只拦截同一会话内的重复提交；其他会话的表情/语音上传互不影响。
+  if (singleShotUploads.value.has(conversationId)) return
 
   const validation = validateAttachment(file)
   if (!validation.ok) {
@@ -1155,7 +1156,7 @@ async function onPickCustomEmoji(file: File): Promise<void> {
     return
   }
 
-  uploadBusy.value = true
+  singleShotUploads.value.add(conversationId)
   uploadError.value = null
   try {
     const uploaded = await filesApi.upload(file)
@@ -1174,7 +1175,7 @@ async function onPickCustomEmoji(file: File): Promise<void> {
   } catch {
     showToast('表情发送失败', 'error')
   } finally {
-    uploadBusy.value = false
+    singleShotUploads.value.delete(conversationId)
   }
 }
 
@@ -1183,9 +1184,10 @@ async function handleVoiceRecorded(payload: { blob: Blob; durationMs: number }):
   const conversationId = activeId.value
   const senderId = selfUserId.value
   if (!conversationId || !senderId) return
-  if (uploadBusy.value) return
+  // 同上：只拦截同一会话内的重复提交，跨会话互不影响。
+  if (singleShotUploads.value.has(conversationId)) return
 
-  uploadBusy.value = true
+  singleShotUploads.value.add(conversationId)
   uploadError.value = null
   try {
     const uploaded = await filesApi.uploadVoice(payload.blob)
@@ -1200,7 +1202,7 @@ async function handleVoiceRecorded(payload: { blob: Blob; durationMs: number }):
     const message = error instanceof Error && error.message ? error.message : '语音发送失败'
     showToast(message, 'error')
   } finally {
-    uploadBusy.value = false
+    singleShotUploads.value.delete(conversationId)
   }
 }
 
@@ -1210,7 +1212,7 @@ function onVoiceError(message: string): void {
 
 // 附件上传队列（F-35）：选择后入队并逐项展示真实进度；取消/失败不影响队列其他项。
 // 并发策略：不同会话之间并行上传，同一会话内仍按入队顺序串行；全局并发上限见 MAX_CONCURRENT_UPLOADS。
-// 说明：表情/语音/头像上传不在本批范围，仍走 uploadBusy 的旧链路。
+// 说明：表情/语音等单发上传走 singleShotUploads（按会话），与附件队列互不阻塞。
 const uploadItems = ref<UploadItem[]>([])
 const uploadControllers = new Map<string, AbortController>()
 /** 全局并发上限：跨会话并行，但不超过该值，避免内存与带宽峰值。 */
@@ -1218,8 +1220,8 @@ const MAX_CONCURRENT_UPLOADS = 3
 /** 单会话并发上限：同一会话内保持串行，避免多张大图同时压缩占内存。 */
 const MAX_CONCURRENT_UPLOADS_PER_CONVERSATION = 1
 let uploadPumping = false
-/** 兼容表情/语音上传的互斥标记；附件队列的忙碌状态按会话计算（visibleQueueBusy）。 */
-const uploadBusy = ref(false)
+/** 单发上传（自定义表情/语音）进行中的会话集合：同一会话内互斥，跨会话互不影响。 */
+const singleShotUploads = ref<Set<string>>(new Set())
 const uploadError = ref<string | null>(null)
 /** 输入区只展示当前会话的附件项：切换会话不把其他会话的上传中/失败项带过来。 */
 const visibleUploadItems = computed(() =>
@@ -1229,6 +1231,11 @@ const visibleUploadItems = computed(() =>
 const visibleQueueBusy = computed(() =>
   visibleUploadItems.value.some((item) => item.status === 'uploading' || item.status === 'pending'),
 )
+/** 当前会话是否有表情/语音正在上传。 */
+const singleShotBusy = computed(() => {
+  const conversationId = activeId.value
+  return Boolean(conversationId) && singleShotUploads.value.has(conversationId as string)
+})
 
 // 退出登录/切换账号：关闭群成员面板、清空附件队列与页内提示（附件属于原账号）。
 watch(selfUserId, () => {
@@ -1237,6 +1244,7 @@ watch(selfUserId, () => {
   uploadError.value = null
   cancelAllUploads()
   clearSentCleanupTimers()
+  singleShotUploads.value.clear()
   uploadItems.value = []
   typing.clear()
   typingThrottle.reset()
@@ -1579,8 +1587,8 @@ function onDragEnter(event: DragEvent): void {
 function onDragOver(event: DragEvent): void {
   if (!hasFiles(event.dataTransfer)) return
   event.preventDefault()
-  // 上传按会话独立：其他会话上传中不再阻止在当前会话投放，文件进入各自队列等待。
-  if (event.dataTransfer) event.dataTransfer.dropEffect = uploadBusy.value ? 'none' : 'copy'
+  // 上传按会话独立：任何会话上传中都不阻止在当前会话投放，文件进入各自队列等待。
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
 }
 
 function onDragLeave(event: DragEvent): void {
@@ -1594,10 +1602,6 @@ function onDrop(event: DragEvent): void {
   event.preventDefault()
   dragDepth = 0
   dragActive.value = false
-  if (uploadBusy.value) {
-    uploadError.value = '上传中，请稍候'
-    return
-  }
   if (!activeId.value) {
     uploadError.value = '请先选择会话'
     return
@@ -1755,7 +1759,7 @@ function onWindowDrop(event: DragEvent): void {
                 ref="sendBoxRef"
                 :conversation-id="activeId ?? ''"
                 :initial-draft="activeId ? drafts.draftOf(activeId) : ''"
-                :uploading="uploadBusy || visibleQueueBusy"
+                :uploading="singleShotBusy || visibleQueueBusy"
                 :upload-error="uploadError"
                 :upload-items="visibleUploadItems"
                 :emoji-open="activeDrawer === 'emoji'"
