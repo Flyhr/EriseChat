@@ -27,5 +27,5 @@
 
 - 主题层：`apps/web/src/styles/themes/azure.css` + `index.html` 的 `data-ec-theme="azure"`；`core/theme.ts` 把色板映射为 Naive UI `themeOverrides`。
 - 组件库：`naive-ui` + `@phosphor-icons/vue` + `@vueuse/core`（均 MIT）渐进引入，后续逐步替换全部自绘组件；首个替换组件为 `AppIcon.vue`。
-- 已完成：P0 依赖与兼容性验证、P1 主题层与图标基座、P2-A 导航/会话列表/会话行/顶栏/断线条。
-- 待完成：P2-B 消息气泡与输入区、P3 面板/设置/移动端、P4 全局统一与逐图截图验收。
+- 已完成：P0 依赖与兼容性验证、P1 主题层与图标基座、P2-A 导航/会话列表/会话行/顶栏/断线条、P2-B 消息气泡（14px 圆角与尾角、时间/已读内嵌、连续消息分组）与紧凑输入区、断线待发送提示。
+- 待完成：P3 面板/设置/移动端、P4 全局统一与逐图截图验收。

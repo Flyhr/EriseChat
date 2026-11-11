@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ConversationMember, Message } from '../types/frames'
 import type { PendingMessage } from '../stores/messages'
 import { buildMessageItems, shouldShowNewMessageBadge } from '../core/chatLayout'
@@ -14,7 +14,18 @@ import {
   type WindowRange,
 } from '../core/messageWindow'
 import { lastOwnMessageOf, readStateOf, type ReadReceiptState } from '../core/readReceipt'
+import { chatWs } from '../core/ws'
 import MessageBubble from './MessageBubble.vue'
+
+// UI-D P2-B：断线状态只订阅一次，向下传给 pending 消息用于「消息待发送」提示。
+const offline = ref(chatWs.state !== 'authed')
+let unsubscribeWs: (() => void) | null = null
+onMounted(() => {
+  unsubscribeWs = chatWs.on('statechange', (state) => {
+    offline.value = state !== 'authed'
+  })
+})
+onBeforeUnmount(() => unsubscribeWs?.())
 
 // 消息列表（纯展示，UI-02 批次2）：按 seq 升序渲染（输入即有序），跨天插入日期分隔；
 // 群聊他人消息展示头像+昵称；用户向上翻阅时收到新消息只累加「有新消息 ↓」浮标，不强制滚底。
@@ -502,6 +513,7 @@ onMounted(() => {
         :message="item"
         :self="true"
         :status="item.status"
+        :offline="offline"
         :mention-names="mentionNames ?? []"
         :self-display-name="selfDisplayName ?? ''"
         @retry="emit('retry', item.clientMsgId)"
@@ -526,6 +538,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* UI-D P2-B：同一侧连续消息收紧间距形成分组；日期分隔与系统消息会打断相邻关系。 */
+.message-list :deep(.message-row--self + .message-row--self),
+.message-list :deep(.message-row:not(.message-row--self) + .message-row:not(.message-row--self)) {
+  margin-top: -8px;
+}
+
 .message-list-wrap {
   position: relative;
   display: flex;

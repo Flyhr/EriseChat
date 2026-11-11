@@ -37,6 +37,8 @@ const props = withDefaults(
     selectable?: boolean
     /** F-40：当前是否已选中。 */
     selected?: boolean
+    /** UI-D P2-B：断线期间 pending 消息展示「消息待发送」而非「发送中」。 */
+    offline?: boolean
   }>(),
   {
     self: false,
@@ -48,6 +50,7 @@ const props = withDefaults(
     selfDisplayName: '',
     selectable: false,
     selected: false,
+    offline: false,
   },
 )
 
@@ -307,19 +310,24 @@ const timeText = computed(() =>
           </template>
           <template v-else>{{ contentText }}</template>
         </p>
+        <!-- UI-D P2-B：时间与已读回执内嵌气泡右下（参考图 01/09），外部只保留状态反馈。 -->
+        <div v-if="!recalled" class="message-bubble__footer">
+          <time class="message-bubble__time">{{ timeText }}</time>
+          <span
+            v-if="receipt"
+            class="message-bubble__receipt"
+            :class="`message-bubble__receipt--${receipt}`"
+          >
+            {{ receipt === 'read' ? '已读' : '未读' }}
+          </span>
+        </div>
       </div>
       <div class="message-row__meta">
         <span v-if="selfMentioned" class="message-row__mention-badge">提到你</span>
         <span v-if="edited" class="message-row__edited">已编辑</span>
-        <time class="message-row__time">{{ timeText }}</time>
-        <span
-          v-if="receipt"
-          class="message-row__receipt"
-          :class="`message-row__receipt--${receipt}`"
-        >
-          {{ receipt === 'read' ? '已读' : '未读' }}
+        <span v-if="status === 'sending'" class="message-row__pending">
+          {{ offline ? '消息待发送 · 网络恢复后自动重试' : '发送中…' }}
         </span>
-        <span v-if="status === 'sending'" class="message-row__pending">发送中…</span>
         <button
           v-else-if="status === 'failed'"
           class="message-row__retry"
@@ -334,6 +342,31 @@ const timeText = computed(() =>
 </template>
 
 <style scoped>
+/* UI-D P2-B：气泡内时间与已读回执；自己气泡用半透明白字，对方用次要文字色。 */
+.message-bubble__footer {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.message-bubble__time,
+.message-bubble__receipt {
+  color: var(--ec-text-tertiary);
+}
+
+.message-bubble__receipt--read {
+  font-weight: var(--ec-font-weight-medium);
+}
+
+.message-bubble--self .message-bubble__time,
+.message-bubble--self .message-bubble__receipt {
+  color: rgba(255, 255, 255, 0.82);
+}
+
 .message-system {
   display: flex;
   justify-content: center;

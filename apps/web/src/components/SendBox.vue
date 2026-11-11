@@ -172,7 +172,7 @@ function cancelRecording(): void {
   handle.cancel()
 }
 
-/** 依据内容调整 textarea 高度：3 行起，超过约 360px 改为内部滚动。 */
+/** 依据内容调整 textarea 高度：单行起，超过约 360px 改为内部滚动。 */
 function resizeInput(): void {
   const el = input.value
   if (!el) return
@@ -532,7 +532,7 @@ function onInput(): void {
         ref="input"
         v-model="text"
         class="send-box__input"
-        rows="3"
+        rows="1"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息"
@@ -601,8 +601,13 @@ function onInput(): void {
         >
           {{ length }}/{{ MAX_TEXT_LENGTH }}
         </span>
-        <button class="send-box__send" type="submit" :disabled="uploading || !text.trim()">
-          发送
+        <button
+          class="send-box__send send-box__send--icon"
+          type="submit"
+          aria-label="发送消息"
+          :disabled="uploading || !text.trim()"
+        >
+          <AppIcon name="send" :size="18" />
         </button>
       </div>
       </template>
@@ -615,7 +620,8 @@ function onInput(): void {
   display: block;
   flex-shrink: 0;
   /* 去掉输入条外部白底与顶部分割线：聊天区渐变背景直接透出，只保留输入框自身边框。 */
-  padding: var(--ec-space-2) var(--ec-space-5) var(--ec-space-4);
+  /* UI-D P2-B：收紧外部留白，让输入条更贴近参考图的紧凑形态。 */
+  padding: 6px var(--ec-space-4) var(--ec-space-3);
   background: transparent;
 }
 
@@ -660,8 +666,8 @@ function onInput(): void {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  /* 「澄蓝」主题：浮起的大圆角输入卡（工具按钮与输入框同卡）。 */
-  padding: 12px 12px 8px 16px;
+  /* UI-D P2-B：紧凑输入条（工具按钮与输入框同卡），去掉过大留白。 */
+  padding: 8px 10px 6px 14px;
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-composer);
   background: var(--ec-surface);
@@ -792,8 +798,8 @@ function onInput(): void {
 
 .send-box__input {
   width: 100%;
-  /* 输入区高度为原先约 2 倍（3 行起），最大约 360px 后内部滚动。 */
-  min-height: 64px;
+  /* UI-D P2-B：单行起，随内容自动增高，最大约 360px 后内部滚动。 */
+  min-height: 24px;
   max-height: 360px;
   padding: 0;
   border: none;
@@ -877,6 +883,15 @@ function onInput(): void {
 .send-box__send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* UI-D P2-B：主色方形发送按钮（参考图）；录音条的「发送」文字按钮保持原样。 */
+.send-box__send--icon {
+  display: grid;
+  width: 34px;
+  padding: 0;
+  place-items: center;
+  border-radius: var(--ec-radius-sm);
 }
 
 /* UI-05 移动端输入条：大圆角输入卡（工具按钮与输入框同卡），发送按钮改为圆角胶囊；
