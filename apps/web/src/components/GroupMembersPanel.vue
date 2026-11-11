@@ -839,17 +839,24 @@ async function removeAvatar(): Promise<void> {
   list-style: none;
 }
 
-/* F-41：成员为单列紧凑行——去掉邮箱行与行内「转让/移除」按钮，行高约 37px；
-   完整信息与成员管理动作集中在点击后的资料浮窗。 */
+/* F-41：成员为单列紧凑行——去掉邮箱行与行内「转让/移除」按钮，行间不加分隔线；
+   默认最多显示 15 人，其余在列表内滚动查看；视口较矮时按 60vh 收敛，避免与侧栏滚动叠加过长。 */
 .group-panel__members {
+  --group-member-row-height: 36px;
+  --group-member-gap: 2px;
   display: flex;
   flex-direction: column;
+  gap: var(--group-member-gap);
+  max-height: min(
+    calc(var(--group-member-row-height) * 15 + var(--group-member-gap) * 14),
+    60vh
+  );
+  overflow-y: auto;
 }
 
 .group-panel__member {
   display: flex;
   min-width: 0;
-  border-bottom: 1px solid var(--ec-border);
 }
 
 .group-panel__candidate {
@@ -1131,6 +1138,11 @@ async function removeAvatar(): Promise<void> {
   .group-panel__link,
   .group-panel__clear {
     min-height: 44px;
+  }
+
+  /* 触屏行高提到 44px，15 人上限同步按 44px 计算。 */
+  .group-panel__members {
+    --group-member-row-height: 44px;
   }
 
   .group-panel__member-main {
