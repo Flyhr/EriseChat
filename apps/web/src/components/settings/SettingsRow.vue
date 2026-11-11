@@ -1,8 +1,18 @@
 <script setup lang="ts">
+import { NFlex } from 'naive-ui'
+
 // 标准设置行（SET-01）：左侧标题 + 说明，右侧控件。
 // - vertical：控件换行显示（输入框、说明、错误提示等需要整行宽度的场景）；
 // - clickable：整行可点击（键盘可达、进入子面板/下载页等），否则只渲染为静态行；
 // - tone=danger：危险操作（退出登录）用危险色标签。
+//
+// 主布局改用 Naive UI NFlex（承担 flex-direction / justify / align / gap / wrap）。
+// 外层语义节点必须保留：clickable 时要渲染 <button> 保证键盘可达，而 NFlex 恒为 div；
+// 页面级 :deep(.ec-set-row + .ec-set-row) 也依赖 .ec-set-row 类名画行分割线。
+// NFlex 的 size 只接受数值(px)，下列常量对应 --ec-space-3(12px) / --ec-space-2(8px)。
+const GAP_ROW = 12
+const GAP_COLUMN = 8
+
 const props = withDefaults(
   defineProps<{
     label: string
@@ -32,22 +42,28 @@ function activate(): void {
     :type="clickable ? 'button' : undefined"
     @click="activate"
   >
-    <span class="ec-set-row__text">
-      <span class="ec-set-row__label">{{ label }}</span>
-      <span v-if="hint" class="ec-set-row__hint">{{ hint }}</span>
-    </span>
-    <span class="ec-set-row__control">
-      <slot />
-    </span>
+    <NFlex
+      class="ec-set-row__layout"
+      :vertical="vertical"
+      :wrap="false"
+      :size="vertical ? GAP_COLUMN : GAP_ROW"
+      :align="vertical ? 'stretch' : 'center'"
+      justify="space-between"
+    >
+      <span class="ec-set-row__text">
+        <span class="ec-set-row__label">{{ label }}</span>
+        <span v-if="hint" class="ec-set-row__hint">{{ hint }}</span>
+      </span>
+      <span class="ec-set-row__control">
+        <slot />
+      </span>
+    </NFlex>
   </component>
 </template>
 
 <style scoped>
 .ec-set-row {
   display: flex;
-  gap: var(--ec-space-3);
-  align-items: center;
-  justify-content: space-between;
   width: 100%;
   min-height: 56px;
   padding: var(--ec-space-3) var(--ec-space-4);
@@ -58,14 +74,10 @@ function activate(): void {
   text-align: left;
 }
 
-.ec-set-row--vertical {
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--ec-space-2);
-}
-
-.ec-set-row--vertical .ec-set-row__control {
-  justify-content: flex-start;
+/* NFlex 承担主布局；此处只负责撑满行高与横向余量。 */
+.ec-set-row__layout {
+  flex: 1;
+  min-width: 0;
 }
 
 .ec-set-row--danger .ec-set-row__label {
@@ -122,6 +134,7 @@ function activate(): void {
   flex: 1;
   flex-direction: column;
   align-items: stretch;
+  justify-content: flex-start;
   min-width: 0;
 }
 
