@@ -132,11 +132,8 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   justify-content: space-between;
   height: var(--ec-header-height);
   padding: 0 var(--ec-space-5);
-  border-bottom: 1px solid var(--ec-border-soft);
-  /* 「澄蓝」主题：半透明磨砂顶栏，聊天区光晕透出。 */
-  background: var(--ec-header-bg);
-  -webkit-backdrop-filter: var(--ec-header-blur);
-  backdrop-filter: var(--ec-header-blur);
+  /* UI-D：顶栏直接融入聊天渐变背景，去掉白色磨砂带与底部分隔线。 */
+  background: transparent;
 }
 
 .ec-chat-header__main {

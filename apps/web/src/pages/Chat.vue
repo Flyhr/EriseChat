@@ -1975,6 +1975,8 @@ function onWindowDrop(event: DragEvent): void {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* UI-D：渐变上移到聊天主体，顶栏 / 消息区 / 输入区共用同一块连续背景，消除分层色差。 */
+  background: var(--ec-chat-gradient);
 }
 
 /* 聊天主区内容行：消息/输入区占剩余宽度，群成员面板固定宽度并列在右侧。 */

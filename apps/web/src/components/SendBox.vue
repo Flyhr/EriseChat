@@ -619,8 +619,7 @@ function onInput(): void {
 .send-box {
   display: block;
   flex-shrink: 0;
-  /* 去掉输入条外部白底与顶部分割线：聊天区渐变背景直接透出，只保留输入框自身边框。 */
-  /* UI-D P2-B：收紧外部留白，让输入条更贴近参考图的紧凑形态。 */
+  /* UI-D：输入条整体透明，直接铺在聊天渐变背景上；只保留外边距控制留白。 */
   padding: 6px var(--ec-space-4) var(--ec-space-3);
   background: transparent;
 }
@@ -666,26 +665,9 @@ function onInput(): void {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  /* UI-D P2-B：紧凑输入条（工具按钮与输入框同卡），去掉过大留白。 */
-  padding: 8px 10px 6px 14px;
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-composer);
-  background: var(--ec-surface);
-  box-shadow: var(--ec-composer-shadow);
-  transition:
-    border-color var(--ec-transition-fast) var(--ec-ease),
-    box-shadow var(--ec-transition-fast) var(--ec-ease);
-}
-
-.send-box__field:focus-within {
-  border-color: var(--ec-brand-500);
-  box-shadow:
-    var(--ec-composer-shadow),
-    0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-
-.send-box__field--error {
-  border-color: var(--ec-danger);
+  /* UI-D：输入区直接嵌在聊天渐变背景上，不再有独立白色卡片、描边与阴影。 */
+  padding: 4px 0 0;
+  background: transparent;
 }
 
 /* F-25：@ 成员候选面板（绝对定位在输入卡上方，不推动聊天内容）。 */
@@ -904,8 +886,8 @@ function onInput(): void {
 
   .send-box__field {
     gap: 2px;
-    padding: var(--ec-space-2) var(--ec-space-3) var(--ec-space-1);
-    border-radius: var(--ec-radius-mobile-input);
+    /* 与桌面一致：移动端也直接嵌入渐变背景，不保留卡片圆角与额外内边距。 */
+    padding: 4px 0 0;
   }
 
   .send-box__input {

@@ -563,8 +563,8 @@ onMounted(() => {
   /* UI-04 批次3：移动端触摸滚动保持原生惯性，滚动链不传给页面。 */
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  /* 「澄蓝」主题：左上 brand 光晕 + 右下 indigo 光晕 + 纵向浅蓝渐变。 */
-  background: var(--ec-chat-gradient);
+  /* 渐变由 .chat-page__main 统一提供，这里保持透明，避免消息区与输入区出现色差。 */
+  background: transparent;
 }
 
 .message-list__more {
