@@ -8,13 +8,14 @@ import { formatSessionTime } from '../core/sessionFormat'
 import type { ConversationMember } from '../types/frames'
 
 // F-41：群成员资料浮窗。展示昵称、在线状态、群内角色、邮箱与加入时间，
-// 并提供「发送消息」「添加好友」两个入口；是否已是好友/已发申请由父组件按好友关系计算。
+// 提供「发送消息」「添加好友」，群主查看其他成员时追加「转让群主」「移出群聊」（确认弹窗由父组件负责）；
+// 是否已是好友/已发申请由父组件按好友关系计算。邮箱只在浮窗展示，成员列表不再显示。
 // 纯展示组件：不直接调用接口，动作通过 emits 交给 GroupMembersPanel 处理。
 // 桌面按被点击成员行的位置开在侧栏左侧并做视口收敛；≤800 改为居中浮层（带遮罩）。
 const CARD_WIDTH = 288
 const VIEWPORT_MARGIN = 12
 /** 桌面纵向收敛的预估高度：仅用于避免浮窗底部越界，真实高度由内容决定。 */
-const ESTIMATED_HEIGHT = 320
+const ESTIMATED_HEIGHT = 380
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +34,10 @@ const props = withDefaults(
     busy?: boolean
     /** 正在发送好友申请。 */
     requesting?: boolean
+    /** 群主可把群主转让给该成员（仅群主、非本人）。 */
+    canTransfer?: boolean
+    /** 群主可把该成员移出群聊（仅群主、非本人）。 */
+    canRemove?: boolean
     /** 操作失败文案（父组件用 friendlyError 转换后传入）。 */
     error?: string
   }>(),
@@ -43,6 +48,8 @@ const props = withDefaults(
     anchor: null,
     busy: false,
     requesting: false,
+    canTransfer: false,
+    canRemove: false,
     error: '',
   },
 )
@@ -51,6 +58,9 @@ const emit = defineEmits<{
   close: []
   'start-chat': []
   'send-request': []
+  /** 群主管理动作：由父组件关闭浮窗后打开既有二次确认弹窗。 */
+  transfer: []
+  remove: []
 }>()
 
 const card = ref<HTMLElement | null>(null)
@@ -221,6 +231,26 @@ onBeforeUnmount(() => {
           对方已申请
         </button>
       </div>
+
+      <!-- 群主管理动作（原成员行内「转让/移除」迁入）：确认弹窗仍由父组件负责。 -->
+      <div v-if="!isSelf && (canTransfer || canRemove)" class="member-card__manage">
+        <button
+          v-if="canTransfer"
+          type="button"
+          class="member-card__manage-btn"
+          @click="emit('transfer')"
+        >
+          转让群主
+        </button>
+        <button
+          v-if="canRemove"
+          type="button"
+          class="member-card__manage-btn member-card__manage-btn--danger"
+          @click="emit('remove')"
+        >
+          移出群聊
+        </button>
+      </div>
     </section>
   </Teleport>
 </template>
@@ -384,8 +414,35 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+/* 群主管理动作：与上方「发送消息/添加好友」用细分隔线区分，危险动作用描边红。 */
+.member-card__manage {
+  display: flex;
+  gap: var(--ec-space-2);
+  margin-top: var(--ec-space-1);
+  padding-top: var(--ec-space-2);
+  border-top: 1px solid var(--ec-border-soft);
+}
+
+.member-card__manage-btn {
+  flex: 1;
+  min-height: 32px;
+  padding: 0 var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-md);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.member-card__manage-btn--danger {
+  border-color: var(--ec-danger);
+  color: var(--ec-danger);
+}
+
 .member-card__primary:focus-visible,
 .member-card__secondary:focus-visible,
+.member-card__manage-btn:focus-visible,
 .member-card__close:focus-visible {
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
@@ -398,6 +455,7 @@ onBeforeUnmount(() => {
   }
 
   .member-card__secondary:hover:not(:disabled),
+  .member-card__manage-btn:hover:not(:disabled),
   .member-card__close:hover {
     background: var(--ec-surface-hover);
   }
@@ -422,7 +480,8 @@ onBeforeUnmount(() => {
   }
 
   .member-card__primary,
-  .member-card__secondary {
+  .member-card__secondary,
+  .member-card__manage-btn {
     min-height: 44px;
     font-size: var(--ec-font-size-body);
   }

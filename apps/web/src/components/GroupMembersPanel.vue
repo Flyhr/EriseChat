@@ -204,6 +204,22 @@ async function addFriendFromCard(): Promise<void> {
   }
 }
 
+/** 浮窗「转让群主」：先收起浮窗，再交给既有二次确认弹窗（成员行内不再提供入口）。 */
+function transferFromCard(): void {
+  const member = cardMember.value
+  if (!member) return
+  closeMemberCard()
+  askTransferOwner(member)
+}
+
+/** 浮窗「移出群聊」：先收起浮窗，再交给既有二次确认弹窗。 */
+function removeFromCard(): void {
+  const member = cardMember.value
+  if (!member) return
+  closeMemberCard()
+  askRemoveMember(member)
+}
+
 // 好友数据由 App 在登录/重连时拉取；面板首次打开补一次兜底，避免把好友误显示为陌生人。
 void friends.ensureLoaded().catch(() => undefined)
 
@@ -212,10 +228,6 @@ watch(
   () => props.conversation.conversationId,
   () => closeMemberCard(),
 )
-
-function roleLabel(member: ConversationMember): string {
-  return member.role === 'owner' ? '群主' : '成员'
-}
 
 const dialogTitle = computed(() =>
   confirmState.value?.kind === 'remove' ? '移除群成员' : '退出群聊',
@@ -583,34 +595,13 @@ async function removeAvatar(): Promise<void> {
           aria-haspopup="dialog"
           @click="openMemberCard(member, $event)"
         >
-          <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
-          <span class="group-panel__member-info">
-            <span class="group-panel__member-name">
-              <PresenceDot :online="presence.stateOf(member.userId)" />
-              {{ member.displayName }}
-              <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
-            </span>
-            <span class="group-panel__member-email">{{ member.email }}</span>
+          <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="28" />
+          <span class="group-panel__member-name">
+            <PresenceDot :online="presence.stateOf(member.userId)" />
+            <span class="group-panel__member-text">{{ member.displayName }}</span>
+            <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
           </span>
-        </button>
-        <span class="group-panel__role">{{ roleLabel(member) }}</span>
-        <button
-          v-if="canTransferTo(member)"
-          type="button"
-          class="group-panel__transfer"
-          :disabled="busy || transferSubmitting"
-          @click="askTransferOwner(member)"
-        >
-          转让
-        </button>
-        <button
-          v-if="isOwner && member.userId !== selfUserId"
-          type="button"
-          class="group-panel__remove"
-          :disabled="busy"
-          @click="askRemoveMember(member)"
-        >
-          移除
+          <span v-if="member.role === 'owner'" class="group-panel__role">群主</span>
         </button>
       </li>
     </ul>
@@ -762,10 +753,14 @@ async function removeAvatar(): Promise<void> {
       :anchor="memberCard?.anchor ?? null"
       :busy="memberCardBusy"
       :requesting="memberCardRequesting"
+      :can-transfer="cardMember ? canTransferTo(cardMember) : false"
+      :can-remove="cardMember ? isOwner && cardMember.userId !== selfUserId : false"
       :error="memberCardError"
       @close="closeMemberCard"
       @start-chat="startChatWithCardMember"
       @send-request="addFriendFromCard"
+      @transfer="transferFromCard"
+      @remove="removeFromCard"
     />
   </div>
 </template>
@@ -792,8 +787,6 @@ async function removeAvatar(): Promise<void> {
 }
 
 .group-panel__toggle,
-.group-panel__remove,
-.group-panel__transfer,
 .group-panel__secondary {
   padding: var(--ec-space-1) var(--ec-space-2);
   border: 1px solid var(--ec-border);
@@ -846,7 +839,19 @@ async function removeAvatar(): Promise<void> {
   list-style: none;
 }
 
-.group-panel__member,
+/* F-41 优化：成员改为自适应多列网格（每列 ≥128px），去掉邮箱行与行内「转让/移除」按钮，
+   长列表滚动量约减半；完整信息与成员管理动作集中在点击后的资料浮窗。 */
+.group-panel__members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 2px var(--ec-space-1);
+}
+
+.group-panel__member {
+  display: flex;
+  min-width: 0;
+}
+
 .group-panel__candidate {
   display: flex;
   gap: var(--ec-space-2);
@@ -855,14 +860,14 @@ async function removeAvatar(): Promise<void> {
   border-bottom: 1px solid var(--ec-border);
 }
 
-/* F-41：成员行主体改为按钮（点击打开资料浮窗），保持原有头像 + 昵称/邮箱布局。 */
+/* F-41：成员行主体为按钮（点击打开资料浮窗）；头像 + 昵称 + 群主徽标，邮箱只在浮窗展示。 */
 .group-panel__member-main {
   display: flex;
   flex: 1;
-  gap: var(--ec-space-2);
+  gap: var(--ec-space-1);
   align-items: center;
   min-width: 0;
-  padding: 0;
+  padding: var(--ec-space-1);
   border: none;
   border-radius: var(--ec-radius-sm);
   background: transparent;
@@ -879,12 +884,11 @@ async function removeAvatar(): Promise<void> {
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 @media (hover: hover) and (pointer: fine) {
-  .group-panel__member-main:hover .group-panel__member-name {
-    color: var(--ec-brand-600);
+  .group-panel__member-main:hover {
+    background: var(--ec-surface-hover);
   }
 }
 
-.group-panel__member-info,
 .group-panel__candidate-info {
   display: flex;
   flex: 1;
@@ -894,10 +898,22 @@ async function removeAvatar(): Promise<void> {
 }
 
 .group-panel__member-name {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
   font-weight: var(--ec-font-weight-semibold);
 }
 
+.group-panel__member-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .group-panel__me {
+  flex: none;
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
   font-style: normal;
@@ -913,11 +929,12 @@ async function removeAvatar(): Promise<void> {
 
 .group-panel__role {
   flex: none;
-  padding: 2px var(--ec-space-2);
+  padding: 0 5px;
   border-radius: var(--ec-radius-full);
-  background: var(--ec-surface-hover);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: 10px;
+  line-height: 16px;
 }
 
 .group-panel__section {
