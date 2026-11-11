@@ -449,13 +449,29 @@ function onInput(): void {
             >
               取消
             </button>
+            <template v-else-if="item.status === 'failed'">
+              <button
+                class="send-box__upload-action send-box__upload-action--retry"
+                type="button"
+                @click="emit('retry-upload', item.id)"
+              >
+                重试
+              </button>
+              <button
+                class="send-box__upload-action"
+                type="button"
+                @click="emit('dismiss-upload', item.id)"
+              >
+                移除
+              </button>
+            </template>
             <button
-              v-else-if="item.status === 'failed'"
-              class="send-box__upload-action send-box__upload-action--retry"
+              v-else-if="item.status === 'cancelled'"
+              class="send-box__upload-action"
               type="button"
-              @click="emit('retry-upload', item.id)"
+              @click="emit('dismiss-upload', item.id)"
             >
-              重试
+              移除
             </button>
           </div>
           <p v-if="item.status === 'failed' && item.error" class="send-box__upload-error">
@@ -1003,7 +1019,9 @@ function onInput(): void {
   display: flex;
   flex-direction: column;
   gap: var(--ec-space-2);
+  max-height: 40vh;
   margin-bottom: var(--ec-space-2);
+  overflow-y: auto;
 }
 
 .send-box__upload {
@@ -1061,6 +1079,7 @@ function onInput(): void {
 
 .send-box__upload-actions {
   display: flex;
+  gap: var(--ec-space-1);
   justify-content: flex-end;
 }
 

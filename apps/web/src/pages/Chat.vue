@@ -974,6 +974,7 @@ onBeforeUnmount(() => {
   // 离开聊天页（去设置/退出登录/切换账号或服务器）：中止上传并丢弃队列，
   // 晚到的压缩/上传结果因找不到队列项而不会再发送；仅聊天页内切换会话不触发卸载。
   cancelAllUploads()
+  clearSentCleanupTimers()
   uploadItems.value = []
   offWsState?.()
   offWsState = null
@@ -1218,6 +1219,10 @@ const uploadError = ref<string | null>(null)
 const queueBusy = computed(() =>
   uploadItems.value.some((item) => item.status === 'uploading' || item.status === 'pending'),
 )
+/** 输入区只展示当前会话的附件项：切换会话不把其他会话的上传中/失败项带过来。 */
+const visibleUploadItems = computed(() =>
+  uploadItems.value.filter((item) => item.conversationId === activeId.value),
+)
 
 // 退出登录/切换账号：关闭群成员面板、清空附件队列与页内提示（附件属于原账号）。
 watch(selfUserId, () => {
@@ -1225,6 +1230,7 @@ watch(selfUserId, () => {
   pageNotice.value = ''
   uploadError.value = null
   cancelAllUploads()
+  clearSentCleanupTimers()
   uploadItems.value = []
   typing.clear()
   typingThrottle.reset()
@@ -1234,6 +1240,25 @@ function patchUploadItem(id: string, patch: Partial<UploadItem>): void {
   uploadItems.value = uploadItems.value.map((item) =>
     item.id === id ? { ...item, ...patch } : item,
   )
+  if (patch.status === 'sent') scheduleSentCleanup(id)
+}
+
+// 已发送项保留片刻后自动移出队列，避免长期堆积撑高输入区；失败项保留，供重试或手动移出。
+const SENT_UPLOAD_KEEP_MS = 4000
+const sentCleanupTimers = new Map<string, number>()
+
+function scheduleSentCleanup(id: string): void {
+  if (sentCleanupTimers.has(id)) return
+  const timer = window.setTimeout(() => {
+    sentCleanupTimers.delete(id)
+    uploadItems.value = uploadItems.value.filter((entry) => entry.id !== id)
+  }, SENT_UPLOAD_KEEP_MS)
+  sentCleanupTimers.set(id, timer)
+}
+
+function clearSentCleanupTimers(): void {
+  for (const timer of sentCleanupTimers.values()) window.clearTimeout(timer)
+  sentCleanupTimers.clear()
 }
 
 function findUploadItem(id: string): UploadItem | undefined {
@@ -1299,15 +1324,34 @@ function handleFileSelected(files: File[]): void {
     uploadError.value = '请先选择会话'
     return
   }
-  const { files: accepted, rejectedCount } = truncateFiles(files)
-  if (accepted.length === 0) return
+  const { files: capped, rejectedCount } = truncateFiles(files)
+  if (capped.length === 0) return
   uploadError.value = null
   if (rejectedCount > 0) {
     uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 个文件，已忽略多余的 ${rejectedCount} 个`
   }
+
+  // 入队前先做本地校验：不支持的类型/空文件/超限文件直接忽略并提示，
+  // 不生成「上传失败」队列项——这类项重试也不会成功，还会长期占住输入区。
+  const accepted: File[] = []
+  const ignored: Array<{ name: string; reason: string }> = []
+  for (const file of capped) {
+    const normalized = normalizeDroppedFile(file, Date.now())
+    const validation = validateAttachment(normalized)
+    if (validation.ok) accepted.push(normalized)
+    else ignored.push({ name: normalized.name, reason: validation.reason })
+  }
+  if (ignored.length === 1) {
+    showToast(`已忽略「${ignored[0].name}」：${ignored[0].reason}`, 'error')
+  } else if (ignored.length > 1) {
+    const names = ignored.slice(0, 2).map((entry) => entry.name).join('、')
+    showToast(`已忽略 ${ignored.length} 个文件（${names}${ignored.length > 2 ? ' 等' : ''}）`, 'error')
+  }
+  if (accepted.length === 0) return
+
   const reply = replyTarget.value
   const created = accepted.map((file) =>
-    createUploadItem(normalizeDroppedFile(file, Date.now()), conversationId, senderId, {
+    createUploadItem(file, conversationId, senderId, {
       replyTo: reply?.messageId,
       replyPreview: reply?.preview,
     }),
@@ -1435,10 +1479,13 @@ function cancelUpload(id: string): void {
   patchUploadItem(id, { status: 'cancelled', error: undefined })
 }
 
-/** 移出等待中的附件（尚未占用上传资源）。 */
+/** 移出等待/失败/已取消的附件项（上传中请先取消）；失败项可先重试，也可直接移出。 */
 function dismissUpload(id: string): void {
   const item = findUploadItem(id)
-  if (!item || item.status !== 'pending') return
+  if (!item) return
+  if (item.status !== 'pending' && item.status !== 'failed' && item.status !== 'cancelled') return
+  uploadControllers.get(id)?.abort()
+  uploadControllers.delete(id)
   uploadItems.value = uploadItems.value.filter((entry) => entry.id !== id)
 }
 
@@ -1687,7 +1734,7 @@ function onWindowDrop(event: DragEvent): void {
                 :initial-draft="activeId ? drafts.draftOf(activeId) : ''"
                 :uploading="uploadBusy || queueBusy"
                 :upload-error="uploadError"
-                :upload-items="uploadItems"
+                :upload-items="visibleUploadItems"
                 :emoji-open="activeDrawer === 'emoji'"
                 :reply-to="replyTarget?.preview ?? null"
                 :mention-candidates="mentionCandidates"
