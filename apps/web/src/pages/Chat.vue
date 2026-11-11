@@ -1992,6 +1992,9 @@ function onWindowDrop(event: DragEvent): void {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* 渐变上移到顶栏以下的整块聊天容器：typing 预留区、消息区、输入区共用同一背景，
+     消除原来因 .message-list 独占渐变而在顶栏下方产生的浅色缝隙。 */
+  background: var(--ec-chat-gradient);
 }
 
 /* 群成员面板（UI-03 追加）：与聊天窗口同层，位于聊天顶栏下方紧邻右侧，
