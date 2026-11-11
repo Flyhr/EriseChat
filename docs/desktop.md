@@ -2,15 +2,15 @@
 
 > 本文是 Windows 客户端（Electron 壳 `apps/desktop` + `apps/web` 构建产物）的安装、运行、开发联调、打包与验收说明。
 > 协议见 `protocol/protocol.md`；服务端部署见 `docs/deploy.md`；Web 端见 `docs/web.md`；Android 见 `docs/mobile.md`；项目介绍以 `README.md` 为准。
-> 最近更新：2026-10-28（F-27：统一发布 1.1.0）。
+> 最近更新：2026-11-11（同步 1.2.0 命名统一后的产物、大小与 SHA256 基线）。
 
 ## 1. 交付物与定位
 
 | 项 | 值 |
 |---|---|
-| 安装包 | `EriseChat-Setup-1.1.0.exe`（NSIS，当前用户安装、免代码签名） |
+| 安装包 | `EriseChat-Setup-1.2.0.exe`（NSIS，当前用户安装、免代码签名） |
 | 产物位置 | `apps/desktop/dist/`（不入库）；分发时复制到服务端 `data/downloads/`，经 `GET /download` 提供下载 |
-| 本机当前文件 | `data/downloads/EriseChat-Setup-1.1.0.exe`，121,366,029 B，SHA256 `d075353eed43c67ab8a7d75bd5b427a48cf6b66dd3a9c6c46d8c1c3d418204b1`（F-29 重打，含客户端更新入口；F-27 首次 1.1.0 为 121,359,488 B / `82fbd17c…13deec`，已由本次取代）；FileVersion/ProductVersion 均为 1.1.0（重新打包后会变，以文件/打包输出为准）。历史基线：`EriseChat-Setup-1.0.0.exe`（121,290,773 B）保留在 `data/downloads/` 供回滚 |
+| 本机当前文件 | `data/downloads/EriseChat-Setup-1.2.0.exe`，121,376,785 B，SHA256 `b5a08505c5b43d4563fab0dc569ece7172ef5a2a6af47f5f2da6317465d6d651`（1.2.0 命名统一后重打；FileVersion/ProductVersion 1.2.0，重新打包后会变，以文件/打包输出为准）。历史基线：1.1.0（121,366,029 B）与 1.0.0（121,290,773 B）的旧名安装包仍保留在 `data/downloads/`（文件名沿用发布时的旧前缀），但旧名前缀不再被 `GET /download` 白名单识别、不作为回滚路径 |
 | 应用标识 | `appId=com.erisechat.desktop`，产品名 `EriseChat` |
 | 包内容 | Electron 主进程/预加载脚本 + `apps/web` 构建产物（以 `resources/web-dist/` 随安装包分发） |
 | 最低系统 | Windows 10/11 x64（Electron 45 运行时自带，无需安装 .NET/Node） |
@@ -19,7 +19,7 @@
 
 ## 2. 安装与首次登录
 
-1. 双击 `EriseChat-Setup-1.1.0.exe`。
+1. 双击 `EriseChat-Setup-1.2.0.exe`。
    - 若出现 SmartScreen「Windows 已保护你的电脑」：点「更多信息 → 仍要运行」。这是**未购买代码签名证书**的正常提示（AGENTS §2.2 不产生授权费用），不是安装包损坏。
    - 向导默认「当前用户」安装，无需管理员权限；可改安装目录；自动创建桌面与开始菜单快捷方式。
 2. 安装完成启动 EriseChat；打包态登录页会显示「服务器地址」区块（未配置时自动展开），填写地址后点「保存并检测」，状态显示服务可达即可登录：
@@ -92,7 +92,7 @@ cd apps/web && npm run build && cd ../..
 cd apps/desktop
 npm install          # 首次
 npm run build        # tsc 编译 electron/ → dist-electron/
-npm run dist         # electron-builder --win nsis → apps/desktop/dist/EriseChat-Setup-1.1.0.exe
+npm run dist         # electron-builder --win nsis → apps/desktop/dist/EriseChat-Setup-1.2.0.exe
 ```
 
 - 打包配置 `apps/desktop/electron-builder.yml`：`appId`、产品名、NSIS 每用户安装（`oneClick: false`、`perMachine: false`、可改目录、桌面/开始菜单快捷方式）、`artifactName` 固定为 `EriseChat-Setup-${version}.${ext}`、`extraResources` 把 `apps/web/dist` 复制为安装包内 `resources/web-dist/`、`build/icon.ico` 作为 exe 图标与托盘图标。
@@ -105,20 +105,20 @@ npm run dist         # electron-builder --win nsis → apps/desktop/dist/EriseCh
 
 ### 版本号规则
 
-三端与服务端版本保持一致：`apps/web/package.json`、`apps/desktop/package.json`、`apps/mobile/android/app/build.gradle`、服务端发布版本号（`publish-linux.sh <版本>`）统一修改；安装包文件名随之变成 `EriseChat-Setup-<版本>.exe`。当前为 `1.1.0`。
+三端与服务端版本保持一致：`apps/web/package.json`、`apps/desktop/package.json`、`apps/mobile/android/app/build.gradle`、服务端发布版本号（`publish-linux.sh <版本>`）统一修改；安装包文件名随之变成 `EriseChat-Setup-<版本>.exe`。当前为 `1.2.0`。
 
 ## 6. 静态校验（可选）
 
 ```bash
 # Git Bash
-sha256sum data/downloads/EriseChat-Setup-1.1.0.exe
-ls -l data/downloads/EriseChat-Setup-1.1.0.exe
+sha256sum data/downloads/EriseChat-Setup-1.2.0.exe
+ls -l data/downloads/EriseChat-Setup-1.2.0.exe
 
 # Windows PowerShell
-Get-FileHash .\data\downloads\EriseChat-Setup-1.1.0.exe -Algorithm SHA256
+Get-FileHash .\data\downloads\EriseChat-Setup-1.2.0.exe -Algorithm SHA256
 ```
 
-对照基线（1.1.0，F-29 重打）：大小 121,366,029 B、SHA256 `d075353e…204b1`、FileVersion/ProductVersion 1.1.0；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.1.0。历史基线（1.0.0）：121,290,773 B、SHA256 `2ea45f7b…6f02f9e`。
+对照基线（1.2.0）：大小 121,376,785 B、SHA256 `b5a08505…d651`、FileVersion/ProductVersion 1.2.0；重新打包后两者都会变化，以打包输出为准。也可在「控制面板 → 程序和功能」或安装向导中核对版本 1.2.0。历史基线（1.1.0）：121,366,029 B、SHA256 `d075353e…204b1`；（1.0.0）：121,290,773 B、SHA256 `2ea45f7b…6f02f9e`。
 
 ## 7. 验收清单（每次打包后建议过一遍）
 
@@ -156,7 +156,7 @@ Get-FileHash .\data\downloads\EriseChat-Setup-1.1.0.exe -Algorithm SHA256
 
 ## 9. 已知限制（v1）
 
-- 更新入口（F-29）：设置「连接与关于 → 关于 → 检查更新」从当前服务器读取 `/api/version`，发现更高版本时下载安装包并校验 sha256 后静默安装并重启；本次版本号仍为 1.1.0，真实升级提示需下次提升版本并重打安装包后才出现（不购买签名证书/不做独立更新服务，AGENTS §2.2）。
+- 更新入口（F-29）：设置「连接与关于 → 关于 → 检查更新」从当前服务器读取 `/api/version`，发现更高版本时下载安装包并校验 sha256 后静默安装并重启；当前版本为 1.2.0，只有服务端 `data/downloads/` 出现更高版本的合法产物时才会提示升级（不购买签名证书/不做独立更新服务，AGENTS §2.2）。
 - 无离线推送：程序未运行或窗口关闭（关闭到托盘只是隐藏，进程仍在）时，重新打开后靠补拉同步；真正退出后新消息不提醒。
 - 免签名安装包：SmartScreen 会提示；杀毒软件偶发误报属正常现象。
 - 语音消息：录音依赖 Chromium 的 `MediaRecorder`（webm/opus），首次使用需在 Windows 设置中允许麦克风；时长由客户端上报；不做语音转文字/后台录音。

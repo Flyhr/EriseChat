@@ -1,9 +1,9 @@
-# EriseChat 项目说明与目录架构（V1.2）
+# EriseChat 项目说明与目录架构（V1.3）
 
 > 本文是**面向开发的项目总览**：项目是什么、代码放哪里、模块怎么分、从哪开始写。
 > 唯一现行计划：`docs/internal-plan.md`（V2.3.5，回答"做什么、什么时候做"）；硬约束：`AGENTS.md`（回答"什么不能做"）。
 > 优先级：`AGENTS.md` §2 硬规则 > `docs/internal-plan.md` > 本文 > 其他。本文与计划冲突时以计划为准，并回头修本文。
-> 本文版本 1.2（2026-10-25）。**M0 建工程骨架以本文 §7 的目录与文件名为准。**
+> 本文版本 1.3（2026-11-11）。**§7 为结构示意（非逐文件清单）**，实际文件以仓库为准；M0 建骨架时的历史口径见 §7.6。
 
 ---
 
@@ -47,8 +47,8 @@
 | 项 | 取值 | 说明 |
 |---|---|---|
 | 账号数 | 10~100 | 指定用户日常聊天，不公开分发 |
-| 峰值在线 | ≤100 | WebSocket 长连接数（单人单活动连接） |
-| 部署 | 1 台云服务器 2C4G / 40~80GB SSD / Ubuntu 22.04 或 24.04 | 单机单进程，systemd 自启 |
+| 峰值在线 | ≤100 | WebSocket 长连接数；每账号默认 3 个连接（`App:MaxConnectionsPerUser` 可配 1~10），超限踢最早建立的连接（F-22，见 §11.1） |
+| 部署 | 1 台云服务器 2C4G / 40~80GB SSD / Ubuntu 22.04 或 24.04 | **主路径：Docker Compose 单容器**（`docker compose up -d --build`）；备用 Linux 发布包才用 systemd |
 | 网络 | 公网域名 + HTTPS（WSS） | Caddy 自动申请/续期证书；开发期先用占位域名 |
 | 数据量 | SQLite 单文件 + 文件目录 | 文件默认上限 50MB/个（可配）；单群默认 ≤100 人 |
 | 运维 | 1 人 | 自启 + 自动 HTTPS + 每日备份到对象存储/异机 |
@@ -139,7 +139,9 @@
 
 ---
 
-## 7. 目录架构（文件级规划）
+## 7. 目录架构（结构示意）
+
+> **本节为结构示意，非逐文件清单**：只标出主要目录与职责，实际文件以仓库为准（`apps/web/src/core/` 现有约 100 个文件、`server/Chat.Server/Modules/` 现有 11 个模块）。M0 建骨架时的历史口径见 §7.6。
 
 ### 7.1 顶层结构
 
@@ -171,17 +173,18 @@ EriseChat/
 │
 ├── docs/
 │   ├── project-overview.md                 # ← 本文
-│   ├── internal-plan.md                    # 唯一现行计划（V2.3.5）
-│   ├── deploy.md                           # M4：部署/HTTPS/升级/备份恢复
+│   ├── internal-plan.md                    # 唯一现行计划（V2.3.5，本地不入库）
+│   ├── deploy.md                           # 部署/HTTPS/升级/备份恢复/1.2.0 迁移
+│   ├── update-deploy.md                    # 源码包 → 服务器重建 → 验证与回滚
 │   ├── web.md                              # Web 端运行/构建/部署/验收（说明类，入库）
 │   ├── desktop.md                          # Windows 端安装/打包/联调（说明类，入库）
+│   ├── mobile.md                           # Android 端安装/打包/真机验收（说明类，入库）
 │   ├── usage.md                            # M6：安装使用说明（给最终用户）
 │   └── test/                               # 测试与临时脚本（gitignore，不入库；子目录需申请）
 │
 ├── protocol/
-│   ├── protocol.md                         # 帧定义 + 字段 + 示例（唯一来源）
-│   ├── schema.sql                          # 10 张表 DDL（与 EF 迁移保持同步）
-│   └── protocol.schema.json                # 帧 JSON Schema（可选：校验/生成 TS 类型）
+│   ├── protocol.md                         # 帧定义 + 字段 + 示例（唯一来源，共 23 个 type）
+│   └── schema.sql                          # 13 张表 DDL（与 EF 迁移保持同步）
 │
 ├── apps/
 │   ├── web/                                # Vue 3 客户端核心（唯一业务前端）
@@ -196,25 +199,15 @@ EriseChat/
 │   │       ├── main.ts
 │   │       ├── App.vue
 │   │       ├── router/index.ts             # 路由 + 登录守卫
-│   │       ├── core/                       # 与 UI 无关的基础设施
-│   │       │   ├── ws.ts                   # 连接状态机、帧编解码、心跳、重连、发送队列、reqId 匹配
-│   │       │   ├── sync.ts                 # lastSeq 补拉、去重排序、缺口检测
-│   │       │   ├── http.ts                 # REST 封装、JWT 注入、统一错误码
-│   │       │   ├── db.ts                   # IndexedDB（会话 + 最近消息）
-│   │       │   └── config.ts               # 服务器地址、protocolVersion、超时/重试常量
-│   │       ├── api/                        # REST 薄封装（与 server/Api 一一对应）
-│   │       │   ├── auth.ts
-│   │       │   ├── users.ts
-│   │       │   ├── conversations.ts
-│   │       │   ├── messages.ts
-│   │       │   ├── files.ts
-│   │       │   └── admin.ts
-│   │       ├── stores/                     # Pinia
-│   │       │   ├── auth.ts
-│   │       │   ├── conversations.ts
-│   │       │   ├── messages.ts
-│   │       │   ├── contacts.ts
-│   │       │   └── settings.ts
+│   │       ├── core/                       # 与 UI 无关的基础设施（约 100 个文件，含同名 *.test.ts；此处仅列主要模块）
+│   │       │   ├── ws.ts / sync.ts / http.ts / db.ts / config.ts
+│   │       │   ├── storageMigration.ts     # 1.2.0 旧 localStorage key 一次性迁移
+│   │       │   ├── update.ts / updateAndroid.ts / version.ts
+│   │       │   └── …                       # 附件、搜索、收藏、转发、表情、通知、草稿等纯函数（以仓库为准）
+│   │       ├── api/                        # REST 薄封装（9 个 .ts）
+│   │       │   └── auth / users / conversations / messages / files / favorites / friends / sessions / version
+│   │       ├── stores/                     # Pinia（10 个 store + 1 个测试）
+│   │       │   └── auth / conversations / messages / drafts / favorites / friends / presence / search / settings / typing
 │   │       ├── pages/
 │   │       │   ├── Login.vue               # 登录/注册（含服务器地址配置）
 │   │       │   ├── Chat.vue                # 会话列表 + 聊天
@@ -331,14 +324,18 @@ Chat.Server/
 │   ├── FrameCodec.cs             # 帧编解码（DTO 在 Chat.Protocol）
 │   ├── MessageHub.cs             # 收帧分发：send/ack/sync/read/typing
 │   └── HeartbeatService.cs
-├── Modules/
+├── Modules/                      # 业务模块（现有 11 个，按仓库实际目录）
+│   ├── Admin/
 │   ├── Auth/                     # 验证码、JWT、限流、登录锁定
-│   ├── Email/                    # IEmailSender、SMTP/HTTP API、模板、Mock
-│   ├── Users/
 │   ├── Conversations/            # 单聊去重、群成员、系统消息
-│   ├── Messages/                 # 发送事务、seq、幂等、同步查询
+│   ├── Email/                    # IEmailSender、SMTP/HTTP API、模板、Mock
+│   ├── Favorites/
 │   ├── Files/                    # 上传/下载鉴权、路径安全、孤儿清理
-│   └── Admin/                    # 建号、禁用、审计
+│   ├── Friends/
+│   ├── Messages/                 # 发送事务、seq、幂等、同步查询
+│   ├── Realtime/
+│   ├── Release/
+│   └── Users/
 ├── Data/
 │   ├── ChatDbContext.cs
 │   ├── Migrations/
@@ -435,12 +432,12 @@ pages/ ──► components/ ──► stores/ ──► api/  (REST)
 4. 接收按 `messageId` 去重、按 `seq` 排序；`seq > lastSeq+1` 立即 `sync.request`。
 5. 启动/重连/回前台补拉，`hasMore=true` 继续直到追平。
 6. 未读 = 会话最新 `seq` − 我的 `last_read_seq`；滚到底部上报已读。
-7. 单活动连接：新登录踢旧（`kicked`），断线不删数据。
+7. 多端在线：每账号默认 3 个连接（`App:MaxConnectionsPerUser` 可配 1~10），超限踢最早建立的连接（`kicked` + `4001`），已读通过 `read.updated` 同步本人其他连接；断线不删数据。
 8. 重连退避 1/2/5/10/30s + 随机抖动。
 
 ### 11.2 数据与时间
 
-- 表结构 10 张：`users`、`email_codes`、`sessions`、`conversations`、`conversation_members`、`messages`、`files`、`invites`、`admin_audit_logs`、`app_settings`（字段见计划 §4.4 与 `protocol/schema.sql`）。
+- 表结构 13 张：`users`、`email_codes`、`sessions`、`files`、`conversations`、`conversation_members`、`messages`、`invites`、`admin_audit_logs`、`app_settings`、`friends`、`friend_requests`、`favorites`（字段见计划 §4.4 与 `protocol/schema.sql`）。
 - 主键 GUID（`users.id`、`conversations.id` 等）；`clientMsgId` 用客户端 UUID。
 - 消息类型：`text` / `image` / `file` / `system`；内容存 `content_json`。
 - 时间列统一 UTC 毫秒（`created_at` 等），前端本地化。
@@ -582,3 +579,4 @@ P2 待办（语音消息、搜索、撤回、多设备、群已读、自动更�
 | V1.0 | 2026-10-25 | 初版（按 m00029）：整体项目说明 + 文件级目录架构；与计划 V2.3.1、`AGENTS.md` 1.1 对齐；明确模块分层、依赖方向、构建流水线与里程碑目录产出 |
 | V1.1 | 2026-10-25 | 按 m00148 补充工程规范：测试文件统一放 `docs/test/`（不再建根级 `tests/`）、默认不跑测试与分批最小范围、提交信息格式与交付说明五要素；版本对齐计划 V2.3.2、`AGENTS.md` 1.2 |
 | V1.2 | 2026-10-25 | 按 m00204 明确文档分工：`README.md` 为项目介绍唯一出处，`AGENTS.md` 仅放约束；本文降级为详细展开（不重复项目介绍与硬约束）；同步 `AGENTS.md` 1.4、计划附录 C/D；后续 `AGENTS.md` 去重修订至 1.5（2026-10-25，仅文档编辑，本文内容不变） |
+| V1.3 | 2026-11-11 | 文档与实现对齐：§3 峰值在线改为多端 3 连接、部署改为主路径 Docker Compose 单容器（备用 systemd）；§7 标注为结构示意并按现状重列 `protocol/`（仅 protocol.md 与 schema.sql、13 张表）、`server/Chat.Server/Modules/`（11 个模块）、`apps/web/src/{core,api,stores}`；§11.1 第 7 条与 §11.2 表数同步；对齐 1.2.0 版本现状。未改协议帧/字段/表结构、未改运行时标识或代码逻辑；测试与 E2E 未运行。 |

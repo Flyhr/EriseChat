@@ -22,7 +22,7 @@
 ## 1. 前提
 
 - 服务器已按 [docs/deploy.md](deploy.md) §3 完成首次部署：`/opt/erisechat/{src,data,.env}` 存在，容器 `erisechat-server` 运行中；
-- 开发机工作区干净（未提交的改动不会进入源码包）：`git status --short` 无输出；
+- 开发机工作区干净（工作区改动不会进入源码包）：`git status --short` 无输出；
 - 服务器环境（2026-10-29 已核查）：**Ubuntu Server 26.04.1 LTS**、**Docker Engine 29.1.3**、**Docker Compose 2.40.3**、Tailscale 1.104.4、UFW 已启用、DaoCloud 镜像加速生效；`curl` / `python3` 已装，**未装 `unzip`**（§3 用 python3 解压）；
 - 权限：若 `docker ps` 报 `permission denied`，先 `sudo usermod -aG docker ggbond` 并重新登录；`sudo` 需要密码，命令前加 `sudo`；
 - 配置项（JWT/SMTP/端口）在 `/opt/erisechat/.env`（权限 600），重新部署会**复用**该文件，不会被覆盖；
@@ -98,6 +98,7 @@ ssh chat "sudo bash -lc 'cd /opt/erisechat/src && docker compose ps && docker co
 | 仅配置（SMTP/JWT/端口） | 编辑 `/opt/erisechat/.env` 后 `sudo SKIP_BUILD=1 bash /opt/erisechat/src/infra/docker/deploy.sh`（只重启，不重建） |
 
 上传新安装包示例：
+> 说明：本节及 §6 表中的 `1.1.1` 为**占位示例**，仅用于演示脚本参数；当前实际版本为 **1.2.0**。`APP_VERSION` 与产物文件名按实际发版版本替换。
 
 ```powershell
 scp EriseChat-Setup-1.1.1.exe chat:/tmp/

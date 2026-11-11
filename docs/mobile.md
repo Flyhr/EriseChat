@@ -2,26 +2,26 @@
 
 > 本文是 Android 客户端（Capacitor 壳 + `apps/web` 构建产物）的安装、配置、构建、签名与真机联调说明。
 > 协议与表结构见 `protocol/protocol.md`、`protocol/schema.sql`；服务器部署见 `docs/deploy.md`；项目介绍以 `README.md` 为准。
-> 本文最近更新：2026-11-09（F-39：补充任务 E 构建结果与真机验收状态）。
+> 本文最近更新：2026-11-11（同步 1.2.0 命名统一后的产物、签名与版本基线）。
 
 ## 1. 交付物
 
 | 文件 | 说明 |
 |---|---|
-| `EriseChat-1.1.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
+| `EriseChat-1.2.0.apk` | Android 安装包（自签名，侧载安装，不上架应用商店） |
 | 下载地址 | 服务端 `GET /download` 下载页（`data/downloads/` 放安装包） |
 
-- 当前产物（F-39 任务 E 重打，2026-11-09）：`data/downloads/EriseChat-1.1.0.apk`（3,789,395 B，SHA256 `86cd03566b2b8c75a30d9ccc66f065d322117d0b2b6e2aacf392a873a8cf05e1`，含后台消息提醒前台服务与 OkHttp；此前 F-31 重打为 3,358,404 B / `634425b2…74a72`、F-29 重打为 3,357,072 B / `cba771aa…2f3d`、F-27 首次为 3,351,022 B / `703656ce…180d5b`，均已由本次取代），versionCode 10100 / versionName 1.1.0，v2 自签名校验通过，证书 SHA-256 与 1.0.0 完全一致），`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**
-- 历史基线（已保留，用于回滚）：`data/downloads/EriseChat-1.0.0.apk`（3,301,201 B，versionCode 10000、versionName 1.0.0），仍可通过 `/download/files/EriseChat-1.0.0.apk` 下载
+- 当前产物（1.2.0 命名统一后重打，2026-11-10）：`data/downloads/EriseChat-1.2.0.apk`（3,792,395 B，SHA256 `ada9eb963b26157cb3a47f5bc1025928d846ada013d7d25f76041e105ad528cb`），versionCode 10200 / versionName 1.2.0，包名 `com.erisechat.mobile`，v2 自签名校验通过；`/download` 页面显示大小与下载链接。**每次重新打包后 SHA256 会变化，以打包脚本输出为准**。历史基线（1.1.0 / 1.0.0）仍保留在 `data/downloads/`，但旧名前缀不再被 `GET /download` 白名单识别、不作为回滚路径
+- 历史基线（仅留存，不作回滚路径）：1.0.0 APK（3,301,201 B，versionCode 10000 / versionName 1.0.0）仍保留在 `data/downloads/`，文件名沿用发布时的旧前缀；1.2.0 起 `GET /download` 白名单只识别 `EriseChat-` 前缀，旧名产物不再出现在下载页（见 `docs/deploy.md` §7.3 / `docs/update-deploy.md` §11）
 - 包名：`com.erisechat.mobile`（与 Windows 壳 `com.erisechat.desktop` 区分）
-- 版本：`versionName` 为 `1.1.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.1.0 → 10100）
+- 版本：`versionName` 为 `1.2.0`，`versionCode` 规则 `major*10000 + minor*100 + patch`（1.0.0 → 10000，1.2.0 → 10200）
 - 最低系统：Android 8.0（API 26）；目标/编译 API 36
 - 自签名安装包在部分手机上会提示「未知来源/风险应用」，需用户确认后安装
 
 ## 2. 安装与首次登录
 
 1. 手机允许浏览器/文件管理器「安装未知应用」（设置 → 安全 → 安装未知应用）。
-2. 把 `EriseChat-1.1.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
+2. 把 `EriseChat-1.2.0.apk` 传到手机并安装（USB 数据线、局域网下载页、文件管理器三种方式见 §5.5）。
 3. 打开 EriseChat；打包态登录页会显示「服务器地址」区块（未配置时自动展开），填写后点「保存并检测」：
    - 默认（USB 联调，配合 §5.5 的 adb reverse）：`http://127.0.0.1:6580`
    - 登录页「服务器地址」上方有「快速选择」下拉：内置「服务器（Tailscale HTTPS）」与「本机调试（USB 端口映射）」两项，选中后自动保存并检测，便于本地调试与服务器之间快速切换；选「自定义地址…」时仍可手动填写。预设列表可用构建期变量 `VITE_SERVER_PRESETS` 覆盖（格式见 `apps/web/.env.example`）。
@@ -107,27 +107,27 @@ keyPassword=<与上面一致>
 
 ```bash
 cd /d/Code/EriseChat
-bash infra/build-apk.sh 1.1.0
+bash infra/build-apk.sh 1.2.0
 ```
 
 方式二：在 cmd 中显式调用 Git Bash：
 
 ```bat
 cd /d D:\Code\EriseChat
-"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0
+"D:\Git\bin\bash.exe" infra/build-apk.sh 1.2.0
 ```
 
 脚本流程：`apps/web` 构建（含 UI 最新代码）→ `npx cap sync android` → `./gradlew assembleRelease` → 复制为
-`data/downloads/EriseChat-1.1.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
+`data/downloads/EriseChat-1.2.0.apk` 并打印 SHA256。产物 `apps/mobile/android/app/build/`、`data/downloads/*.apk` 均不入库。
 
 - 首次构建需下载 Gradle/AGP 依赖（数分钟到十几分钟，缓存于 `~/.gradle`）；之后增量打包约 **1~2 分钟**。
-- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EriseChat-1.1.0.apk`、文件大小与 SHA256。
+- 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EriseChat-1.2.0.apk`、文件大小与 SHA256。
 - 脚本默认 `JAVA_HOME=D:/softWare/jdk21`（可用环境变量覆盖），SDK 路径读 `apps/mobile/android/local.properties`。
 - 改完 `apps/web` 后**必须重新打包**（`cap sync` 只是把 `apps/web/dist` 拷进 Android 工程，APK 内是打包时的 Web 产物）。
 
 版本号规则与三端（服务端 `/api/health`、Windows 安装包、APK）保持一致；发版时同时修改
 `apps/desktop/package.json`、`apps/web/package.json`、`apps/mobile/android/app/build.gradle`（`versionCode` 按
-`major*10000 + minor*100 + patch` 递增，例如 1.1.0 → 10100，否则覆盖安装会被系统拒绝）。
+`major*10000 + minor*100 + patch` 递增，例如 1.2.0 → 10200，否则覆盖安装会被系统拒绝）。
 
 ### 5.4 静态校验（可选）
 
@@ -136,12 +136,12 @@ cd /d D:\Code\EriseChat
 ```bash
 export JAVA_HOME=D:/softWare/jdk21
 SDK=D:/softWare/android-sdk
-"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EriseChat-1.1.0.apk | head
-"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EriseChat-1.1.0.apk
-unzip -l data/downloads/EriseChat-1.1.0.apk | grep assets/public/index.html
+"$SDK/build-tools/36.0.0/aapt2.exe" dump badging data/downloads/EriseChat-1.2.0.apk | head
+"$SDK/build-tools/36.0.0/apksigner.bat" verify --verbose data/downloads/EriseChat-1.2.0.apk
+unzip -l data/downloads/EriseChat-1.2.0.apk | grep assets/public/index.html
 ```
 
-校验基线（1.1.0，历史 1.0.0 见括号）：`package=com.erisechat.mobile`、`versionCode=10100`（1.0.0 为 10000）、`versionName=1.1.0`（1.0.0）、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EriseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要），证书 SHA-256 `2a5eef2be5a636ecfb021d1ad384a28d1ff48c365b678fd1435085a5adedbe3a`（与 1.0.0 一致，是覆盖安装的前提）。
+校验基线（1.2.0）：`package=com.erisechat.mobile`、`versionCode=10200`、`versionName=1.2.0`、`minSdkVersion=26`、`targetSdkVersion=36`、`application-label='EriseChat'`、`INTERNET` 权限；签名 `Verifies` 且 v2 scheme=true（v1 未启用，minSdk 26 无需要），证书 SHA-256 `2a5eef2be5a636ecfb021d1ad384a28d1ff48c365b678fd1435085a5adedbe3a`（沿用同一 keystore，与历史版本一致）。1.2.0 起因 `applicationId` 变更，跨版本升级需卸载旧版后安装，见 §2.1。
 
 ### 5.5 安装到手机（三种方式）
 
@@ -151,21 +151,21 @@ unzip -l data/downloads/EriseChat-1.1.0.apk | grep assets/public/index.html
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EriseChat-1.1.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe install -r D:\Code\EriseChat\data\downloads\EriseChat-1.2.0.apk
 D:\softWare\android-sdk\platform-tools\adb.exe shell dumpsys package com.erisechat.mobile | findstr "versionName versionCode"
 ```
 
 `devices` 应显示一行 `device`（显示 `unauthorized` 时在手机上点「允许 USB 调试」）。
 
-看到 `Success` 即安装完成；`versionName=1.1.0`、`versionCode=10100` 为当前包（1.0.0 为 10000）。`adb install -r` 为覆盖安装：应用数据目录与 IndexedDB 缓存保留（真机已验证 `firstInstallTime` 不变、`lastUpdateTime` 更新），聊天数据始终以服务端为准；**卸载会清应用数据**（服务端数据不受影响，不建议为升级而卸载）。
+看到 `Success` 即安装完成；`versionName=1.2.0`、`versionCode=10200` 为当前包。同一 1.2.0 版本内 `adb install -r` 覆盖安装会保留应用数据目录与 IndexedDB 缓存，聊天数据始终以服务端为准；**从 1.1.0 及更早版本升级时，因 `applicationId` 变更需先卸载旧版再安装，属预期行为，见 §2.1**（卸载会清本机应用数据，服务端聊天数据不受影响）。
 
 **B. adb push 到手机，手动点安装（适合把 APK 留在手机上）**
 
 ```bat
-D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EriseChat-1.1.0.apk /sdcard/Download/
+D:\softWare\android-sdk\platform-tools\adb.exe push D:\Code\EriseChat\data\downloads\EriseChat-1.2.0.apk /sdcard/Download/
 ```
 
-然后在手机「文件管理 → Download」中点开 `EriseChat-1.1.0.apk` 安装。
+然后在手机「文件管理 → Download」中点开 `EriseChat-1.2.0.apk` 安装。
 
 **C. 局域网下载页（手机与电脑同一 Wi-Fi）**
 
@@ -199,7 +199,7 @@ ipconfig
 
 **D. 其他传输方式**：微信/QQ「文件传输助手」传 APK 后点开安装亦可；只需保证 APK 完整（对比 SHA256）。
 
-安装后核对：桌面出现 EriseChat 图标；`设置 → 应用 → EriseChat → 版本 1.1.0`。如需覆盖升级但提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
+安装后核对：桌面出现 EriseChat 图标；`设置 → 应用 → EriseChat → 版本 1.2.0`。从 1.1.0 及更早版本升级需先卸载旧版（见 §2.1）；若提示「应用签名不一致」，说明 keystore 变了，只能先卸载再装（服务端聊天数据不受影响）。
 
 ### 5.6 本机联调（服务端 + 手机，USB 或局域网）
 
@@ -269,18 +269,18 @@ ipconfig
 
 ### 5.8 一键流程速查（复制即用）
 
-**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EriseChat-1.1.0.apk`）
+**① Git Bash：打包**（含最新 Web UI；成功后生成 `data\downloads\EriseChat-1.2.0.apk`）
 
 ```bat
 cd /d/Code/EriseChat
-"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0
+"D:\Git\bin\bash.exe" infra/build-apk.sh 1.2.0
 ```
 
 **② cmd：USB 安装到已连接的手机**（adb 在 `D:\softWare\android-sdk\platform-tools\`）
 
 ```bat
 D:\softWare\android-sdk\platform-tools\adb.exe devices
-D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EriseChat-1.1.0.apk
+D:\softWare\android-sdk\platform-tools\adb.exe install -r data\downloads\EriseChat-1.2.0.apk
 ```
 
 **③ 另开终端：启动服务端**（开发模式，验证码固定 `123456`）
@@ -304,7 +304,7 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 
 | 现象 | 排查 |
 |---|---|
-| 在 cmd 执行 `bash infra/build-apk.sh` 报 `WSL (10 - Relay) ERROR ... execvpe(/bin/bash) failed` | cmd 的 `bash` 指向 WSL，不是 Git Bash。改用 `"D:\Git\bin\bash.exe" infra/build-apk.sh 1.1.0`，或开始菜单打开 Git Bash 执行（见 §5.3） |
+| 在 cmd 执行 `bash infra/build-apk.sh` 报 `WSL (10 - Relay) ERROR ... execvpe(/bin/bash) failed` | cmd 的 `bash` 指向 WSL，不是 Git Bash。改用 `"D:\Git\bin\bash.exe" infra/build-apk.sh 1.2.0`，或开始菜单打开 Git Bash 执行（见 §5.3） |
 | 打包报 `ERROR: 找不到 JDK` / `缺少 local.properties` | 按 §5.1 设置 `JAVA_HOME`（默认 `D:/softWare/jdk21`）与 `apps/mobile/android/local.properties` 的 `sdk.dir` |
 | Gradle 下载依赖很慢/失败 | 首次构建需下载 Gradle/AGP；`gradle-wrapper.properties` 已配腾讯镜像，网络受限时检查代理 |
 | `adb devices` 为空 / `unauthorized` | 打开手机开发者选项与 USB 调试；换数据线（需支持数据传输）；手机上点「允许 USB 调试」；`adb kill-server && adb start-server` 后重试 |
