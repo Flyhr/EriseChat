@@ -6,7 +6,7 @@ import {
   validateGroupForm,
 } from './groupForm'
 
-// UI-03 批次5：建群表单校验纯函数单测（与后端 title 1~100、成员去重后 ≥1 的规则一致）。
+// UI-03 批次5：建群表单校验纯函数单测（与后端 title 1~50、成员去重后 ≥1 的规则一致）。
 
 describe('uniqueMemberIds', () => {
   it('去重并保持首次出现顺序', () => {
@@ -32,7 +32,7 @@ describe('validateGroupForm', () => {
     expect(validateGroupForm('a', ['u-1'])).toBeNull()
     expect(validateGroupForm('群'.repeat(GROUP_TITLE_MAX_LENGTH), ['u-1'])).toBeNull()
     expect(validateGroupForm('群'.repeat(GROUP_TITLE_MAX_LENGTH + 1), ['u-1'])).toBe(
-      '群名称不能超过 100 个字符',
+      `群名称不能超过 ${GROUP_TITLE_MAX_LENGTH} 个字符`,
     )
   })
 

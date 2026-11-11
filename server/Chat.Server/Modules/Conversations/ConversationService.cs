@@ -45,6 +45,9 @@ public sealed class ConversationService
 {
     private const int TitleMaxLength = 100;
 
+    /// <summary>群名最大长度（F-14 建群与改名共用；2026-11-11 由 100 收紧为 50）。</summary>
+    private const int GroupTitleMaxLength = 50;
+
     /// <summary>群公告最大长度（F-14，接口层校验；库表列为 TEXT）。</summary>
     private const int AnnouncementMaxLength = 500;
 
@@ -1218,7 +1221,7 @@ public sealed class ConversationService
         return normalized;
     }
 
-    /// <summary>群名：必填、去首尾空格、1~100 字符（计划 §4.6，v1 建群后不改名）。</summary>
+    /// <summary>群名：必填、去首尾空格、1~50 字符（计划 §4.6；建群与改名共用）。</summary>
     private static string NormalizeGroupTitle(string? title)
     {
         var normalized = title?.Trim();
@@ -1227,9 +1230,9 @@ public sealed class ConversationService
             throw ApiException.ValidationFailed("群聊名称不能为空");
         }
 
-        if (normalized.Length > TitleMaxLength)
+        if (normalized.Length > GroupTitleMaxLength)
         {
-            throw ApiException.ValidationFailed($"群聊名称最多 {TitleMaxLength} 个字符");
+            throw ApiException.ValidationFailed($"群聊名称最多 {GroupTitleMaxLength} 个字符");
         }
 
         return normalized;

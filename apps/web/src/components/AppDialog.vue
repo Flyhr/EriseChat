@@ -1,6 +1,10 @@
 // 确认弹窗（UI-D P4）：外壳改用 Naive UI NModal，保留原有 props / emit / 默认插槽与焦点归还逻辑。
 // 面板视觉仍由 --ec-* token 控制；busy 期间禁用 Esc/遮罩关闭的语义不变。
 // 只负责展示与派发 confirm/cancel，不直接执行业务请求；调用方在 busy 期间保持打开。
+// 根节点必须是 div（2026-11-11 修复「弹窗内输入框无法输入」）：NModal 内部 FocusTrap 的 getMainEl()
+// 取「起始哨兵后的第一个 DIV 兄弟」作为内容区，根节点若用 section 会把结束哨兵当成内容区，
+// 于是弹窗内任何元素一获得焦点就被抢回哨兵——输入框无法输入、按钮也无法键盘聚焦。
+// 注意：本条注释不要写尖括号标签字面量，SFC 解析器会把它当成模板标签导致构建失败。
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NModal } from 'naive-ui'
@@ -86,7 +90,7 @@ function onConfirm(): void {
     @update:show="onShowUpdate"
     @mask-click="close"
   >
-    <section
+    <div
       ref="panel"
       class="ec-dialog__panel"
       :class="{ 'ec-dialog__panel--wide': wide }"
@@ -113,7 +117,7 @@ function onConfirm(): void {
           {{ confirmText }}
         </button>
       </footer>
-    </section>
+    </div>
   </NModal>
 </template>
 

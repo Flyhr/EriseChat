@@ -122,7 +122,9 @@ watch(
     <div class="new-group">
       <p v-if="errorMessage" class="new-group__error" role="alert">{{ errorMessage }}</p>
 
-      <label class="new-group__label" for="new-group-title">群名称（必填，1~100 字符）</label>
+      <label class="new-group__label" for="new-group-title">
+        群名称（必填，1~{{ GROUP_TITLE_MAX_LENGTH }} 字符）
+      </label>
       <input
         id="new-group-title"
         v-model="title"

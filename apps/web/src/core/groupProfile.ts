@@ -2,8 +2,8 @@
 // 只做展示层校验与格式化，不发请求、不依赖 DOM；服务端仍做最终校验。
 import type { Conversation } from '../types/frames'
 
-/** 群名称最大长度（与服务端 ConversationService.TitleMaxLength 一致）。 */
-export const GROUP_TITLE_MAX_LENGTH = 100
+/** 群名称最大长度（与服务端 ConversationService.GroupTitleMaxLength 一致；2026-11-11 由 100 收紧为 50）。 */
+export const GROUP_TITLE_MAX_LENGTH = 50
 
 /** 群公告最大长度（与服务端 ConversationService.AnnouncementMaxLength 一致）。 */
 export const ANNOUNCEMENT_MAX_LENGTH = 500
@@ -33,7 +33,7 @@ export function canEditGroupProfile(
   return self?.role === 'owner'
 }
 
-/** 群名称校验：trim 后 1~100 字符；返回 trim 后的值或错误文案。 */
+/** 群名称校验：trim 后 1~50 字符；返回 trim 后的值或错误文案。 */
 export function validateGroupTitle(raw: string): GroupTitleValidation {
   const value = (raw ?? '').trim()
   if (value.length === 0) {
