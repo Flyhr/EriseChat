@@ -253,15 +253,17 @@ onBeforeUnmount(() => {
   max-width: min(260px, 60vw);
   height: 36px;
   padding: 0 var(--ec-space-2) 0 4px;
+  border: 1px solid var(--ec-media-border);
   border-radius: var(--ec-radius-pill);
-  background: var(--ec-surface-hover);
+  background: var(--ec-media-surface);
   color: var(--ec-text-primary);
+  box-shadow: var(--ec-shadow-media);
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .voice-player:hover {
-    background: var(--ec-brand-050);
+    background: var(--ec-media-surface-hover);
   }
 }
 
@@ -312,7 +314,7 @@ onBeforeUnmount(() => {
   height: 3px;
   overflow: hidden;
   border-radius: var(--ec-radius-pill);
-  background: var(--ec-border);
+  background: var(--ec-media-track);
 }
 
 .voice-player__fill {
@@ -330,7 +332,7 @@ onBeforeUnmount(() => {
 }
 
 .voice-player--error {
-  background: var(--ec-surface-hover);
+  background: var(--ec-media-surface);
   color: var(--ec-danger);
 }
 
@@ -341,7 +343,9 @@ onBeforeUnmount(() => {
 /* 自己发送的语音在蓝底气泡内：改为半透明白底 + 白色进度，保证对比度；
    媒体消息不套气泡（.message-bubble--plain）时沿用默认浅色胶囊。 */
 :global(.message-bubble--self:not(.message-bubble--plain)) .voice-player {
+  border-color: transparent;
   background: rgb(255 255 255 / 22%);
+  box-shadow: none;
   color: var(--ec-text-inverse);
 }
 

@@ -205,7 +205,8 @@ async function download(): Promise<void> {
   font-size: var(--ec-font-size-secondary);
 }
 
-/* 文件卡片：无边框、无气泡底色，仅靠图标块与悬停反馈区分。 */
+/* 文件卡片：不套气泡，但保留独立底色 + 描边 + 投影，避免与浅蓝聊天底混在一起。
+   色值全部走 --ec-media-* token，切换主题（含后续深色）时自动跟随。 */
 .message-attachment__file {
   display: flex;
   align-items: center;
@@ -213,7 +214,10 @@ async function download(): Promise<void> {
   min-width: 220px;
   max-width: min(320px, 60vw);
   padding: var(--ec-space-1) var(--ec-space-2);
+  border: 1px solid var(--ec-media-border);
   border-radius: var(--ec-radius-md);
+  background: var(--ec-media-surface);
+  box-shadow: var(--ec-shadow-media);
 }
 
 .message-attachment__icon {
@@ -224,7 +228,7 @@ async function download(): Promise<void> {
   width: 32px;
   height: 32px;
   border-radius: var(--ec-radius-sm);
-  background: var(--ec-surface-hover);
+  background: var(--ec-media-icon-surface);
   color: var(--ec-brand-600);
 }
 
@@ -268,10 +272,11 @@ async function download(): Promise<void> {
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 @media (hover: hover) and (pointer: fine) {
   .message-attachment__file:hover {
-    background: var(--ec-surface-hover);
+    background: var(--ec-media-surface-hover);
   }
 
   .message-attachment__download:hover:not(:disabled) {
+    background: var(--ec-media-icon-surface);
     color: var(--ec-brand-600);
   }
 }

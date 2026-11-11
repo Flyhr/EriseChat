@@ -46,6 +46,13 @@
   --ec-bubble-self-border: transparent; /* 渐变气泡不描边 */
   --ec-bubble-other: #ffffff; /* 对方气泡白色（D-05） */
   --ec-bubble-other-border: #e7eef9; /* 对方气泡冷蓝描边 */
+  /* 无气泡媒体卡（文件/语音）：聊天底是浅蓝渐变，需白底 + 描边 + 投影拉开层次；
+     新增主题（含深色）只需覆写这组颜色 token，组件不写死色值。 */
+  --ec-media-surface: #ffffff; /* 媒体卡底色 */
+  --ec-media-surface-hover: #f5f9ff; /* 媒体卡悬停底色 */
+  --ec-media-border: #cbd5e1; /* 媒体卡描边：比 --ec-border 深一档，浅蓝底上可辨 */
+  --ec-media-icon-surface: #eff6ff; /* 文件类型图标块底色 */
+  --ec-media-track: #dbe4f0; /* 语音进度条轨道 */
   --ec-warning: #b45309; /* 警示文字：取可读深橙（白底约 4.8:1） */
   --ec-text-inverse: #ffffff; /* 深色底上的文字（白字属可解释例外值） */
   --ec-scrollbar-thumb: var(--ec-border-strong);
@@ -59,6 +66,7 @@
   --ec-shadow-bubble: 0 2px 8px rgba(15, 23, 42, 0.06); /* 对方气泡 */
   --ec-shadow-bubble-self: 0 4px 14px rgba(37, 99, 235, 0.22); /* 自己渐变气泡 */
   --ec-composer-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); /* 输入卡片浮起阴影 */
+  --ec-shadow-media: 0 2px 8px rgba(15, 23, 42, 0.08); /* 无气泡媒体卡浮起阴影 */
 
   /* ==================== 字体与排版（§3.2；不捆绑字体文件） ==================== */
   --ec-font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,

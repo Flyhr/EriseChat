@@ -31,4 +31,10 @@ html[data-ec-theme='azure'] {
   --ec-overlay: rgba(15, 23, 42, 0.78);
   --ec-overlay-border: rgba(255, 255, 255, 0.4);
   --ec-overlay-hover: rgba(255, 255, 255, 0.12);
+  /* 无气泡媒体卡（文件/语音）：白底 + 深一档描边，与浅蓝聊天渐变拉开对比。 */
+  --ec-media-surface: #ffffff;
+  --ec-media-surface-hover: #f5f9ff;
+  --ec-media-border: #cbd5e1;
+  --ec-media-icon-surface: #eff6ff;
+  --ec-media-track: #dbe4f0;
 }
