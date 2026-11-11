@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import AppDialog from './AppDialog.vue'
 import Avatar from './Avatar.vue'
 import EmptyState from './EmptyState.vue'
+import { otherMemberOf } from '../core/conversationTitle'
 import { filterForwardTargets, forwardPreviewOf } from '../core/forward'
 import { resolveApiBase } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
@@ -11,7 +12,7 @@ import { showToast } from '../core/toast'
 import { messagesApi } from '../api/messages'
 import { useConversationsStore } from '../stores/conversations'
 import { useMessagesStore } from '../stores/messages'
-import type { Message } from '../types/frames'
+import type { Conversation, Message } from '../types/frames'
 
 // F-40：多选/单条消息转发弹窗（AppDialog wide）。
 // 目标会话排除来源会话；文本/图片/文件/语音统一走服务端 `/api/messages/forward`，
@@ -49,6 +50,12 @@ const emit = defineEmits<{
 }>()
 
 const conversations = useConversationsStore()
+
+/** 目标会话头像：群聊用群头像，单聊用对端成员头像（与聊天列表/顶栏一致）。 */
+function avatarOf(conversation: Conversation): string | undefined {
+  if (conversation.type === 'group') return conversation.avatarFileId ?? undefined
+  return otherMemberOf(conversation, props.selfUserId)?.avatarFileId
+}
 const messagesStore = useMessagesStore()
 
 const query = ref('')
@@ -295,7 +302,7 @@ async function confirmForward(): Promise<void> {
           <Avatar
             :display-name="conversation.title"
             :size="32"
-            :avatar-file-id="conversation.avatarFileId ?? undefined"
+            :avatar-file-id="avatarOf(conversation)"
           />
           <span class="forward-dialog__title">{{ conversation.title }}</span>
           <span class="forward-dialog__type">{{ conversation.type === 'group' ? '群聊' : '单聊' }}</span>

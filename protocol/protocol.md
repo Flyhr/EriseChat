@@ -674,6 +674,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
     - `GET /api/favorites`：返回当前账号的收藏列表（按收藏时间倒序），响应为数组；元素：
       - `messageId`、`conversationId`、`conversationTitle`、`senderName`：收藏时的来源信息（标题/昵称取当前值）；
+      - `senderAvatarFileId`（string|null，2026-11-11 追加，可空）：发送者头像 `files.id`，供收藏页展示真实头像；旧服务端不返回时客户端回退首字母头像；
       - `favoritedAt`（UTC 毫秒）；`available`（boolean，原消息当前是否仍可访问）；
       - `message`（object|null）：`available=true` 时为原消息最新快照（含编辑后的 `content`/`editedAt`；格式同 `message.new.message`）；`available=false` 时恒为 `null`，客户端不得展示正文、文件名或附件预览，只显示「原消息不可用」。
       - 不可用原因：原消息已撤回、原消息不存在、或当前账号已失去该会话访问权。收藏条目不随消息撤回/退出会话自动删除，由用户手动移除。

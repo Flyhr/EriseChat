@@ -172,7 +172,11 @@ onMounted(() => {
         :class="{ 'favorite-item--unavailable': !item.available }"
       >
         <div class="favorite-item__main">
-          <Avatar :display-name="item.available ? item.senderName : '?'" :size="36" />
+          <Avatar
+            :display-name="item.available ? item.senderName : '?'"
+            :avatar-file-id="item.senderAvatarFileId ?? undefined"
+            :size="36"
+          />
           <div class="favorite-item__body">
             <p class="favorite-item__meta">
               <span class="favorite-item__sender">{{ item.available ? item.senderName : '未知发送者' }}</span>

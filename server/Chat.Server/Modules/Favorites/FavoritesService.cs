@@ -19,7 +19,9 @@ public sealed record FavoriteItemDto(
     string SenderName,
     bool Available,
     long FavoritedAt,
-    ProtocolMessage? Message);
+    ProtocolMessage? Message,
+    /// <summary>发送者头像 files.id（2026-11-11 追加，可空；旧客户端忽略该字段）。</summary>
+    string? SenderAvatarFileId = null);
 
 /// <summary>
 /// 个人收藏（F-38，protocol/protocol.md §7 第 13 条）：SQLite 为事实源，只保存账号 + 原消息引用 + 收藏时间。
@@ -80,10 +82,10 @@ public sealed class FavoritesService
             .ToDictionaryAsync(conversation => conversation.Id, cancellationToken);
 
         var senderIds = messages.Values.Select(message => message.SenderId).Distinct(StringComparer.Ordinal).ToList();
-        var senderNames = await _db.Users.AsNoTracking()
+        var senderProfiles = await _db.Users.AsNoTracking()
             .Where(user => senderIds.Contains(user.Id))
-            .Select(user => new { user.Id, user.DisplayName })
-            .ToDictionaryAsync(row => row.Id, row => row.DisplayName, cancellationToken);
+            .Select(user => new { user.Id, user.DisplayName, user.AvatarFileId })
+            .ToDictionaryAsync(row => row.Id, row => row, cancellationToken);
 
         var directTitles = await LoadDirectConversationTitlesAsync(userId, conversations.Values, cancellationToken);
 
@@ -98,14 +100,16 @@ public sealed class FavoritesService
 
             var available = message.DeletedAt is null && memberSet.Contains(message.ConversationId);
             conversations.TryGetValue(message.ConversationId, out var conversation);
+            senderProfiles.TryGetValue(message.SenderId, out var sender);
             items.Add(new FavoriteItemDto(
                 favorite.MessageId,
                 message.ConversationId,
                 ConversationTitleOf(conversation, directTitles),
-                senderNames.GetValueOrDefault(message.SenderId) ?? "未知用户",
+                sender?.DisplayName ?? "未知用户",
                 available,
                 favorite.CreatedAt,
-                available ? ConversationService.ToProtocolMessage(message) : null));
+                available ? ConversationService.ToProtocolMessage(message) : null,
+                sender?.AvatarFileId));
         }
 
         return items;
@@ -200,10 +204,10 @@ public sealed class FavoritesService
             .AnyAsync(member => member.UserId == favorite.UserId && member.ConversationId == message.ConversationId, cancellationToken);
         var conversation = await _db.Conversations.AsNoTracking()
             .FirstOrDefaultAsync(row => row.Id == message.ConversationId, cancellationToken);
-        var senderName = await _db.Users.AsNoTracking()
+        var sender = await _db.Users.AsNoTracking()
             .Where(user => user.Id == message.SenderId)
-            .Select(user => user.DisplayName)
-            .FirstOrDefaultAsync(cancellationToken) ?? "未知用户";
+            .Select(user => new { user.DisplayName, user.AvatarFileId })
+            .FirstOrDefaultAsync(cancellationToken);
 
         var directTitles = conversation is null
             ? new Dictionary<string, string>(StringComparer.Ordinal)
@@ -214,10 +218,11 @@ public sealed class FavoritesService
             favorite.MessageId,
             message.ConversationId,
             ConversationTitleOf(conversation, directTitles),
-            senderName,
+            sender?.DisplayName ?? "未知用户",
             available,
             favorite.CreatedAt,
-            available ? ConversationService.ToProtocolMessage(message) : null);
+            available ? ConversationService.ToProtocolMessage(message) : null,
+            sender?.AvatarFileId);
     }
 
     private async Task<IReadOnlyDictionary<string, string>> LoadDirectConversationTitlesAsync(

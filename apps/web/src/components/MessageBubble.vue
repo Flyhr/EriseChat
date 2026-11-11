@@ -25,6 +25,8 @@ const props = withDefaults(
     /** 群聊中展示发送者头像与昵称（非自己消息）。 */
     showSender?: boolean
     senderName?: string
+    /** 发送者头像 files.id（F-23）；缺省时回退首字母头像。 */
+    senderAvatarFileId?: string
     /** 是否群聊（F-18：撤回占位文案区分「对方」/「{昵称}」）。 */
     isGroup?: boolean
     /** F-09：被引用消息发送者昵称（群聊展示「昵称：摘要」；单聊可留空）。 */
@@ -44,6 +46,7 @@ const props = withDefaults(
     self: false,
     showSender: false,
     senderName: '',
+    senderAvatarFileId: undefined,
     replySenderName: '',
     isGroup: false,
     mentionNames: () => [],
@@ -256,7 +259,13 @@ const timeText = computed(() =>
     <span v-if="selectable" class="message-row__check" :class="{ 'message-row__check--on': selected }" aria-hidden="true">
       <AppIcon v-if="selected" name="check" :size="12" />
     </span>
-    <Avatar v-if="showSender" class="message-row__avatar" :display-name="senderName || '?'" :size="32" />
+    <Avatar
+      v-if="showSender"
+      class="message-row__avatar"
+      :display-name="senderName || '?'"
+      :avatar-file-id="senderAvatarFileId"
+      :size="32"
+    />
     <div class="message-row__body">
       <span v-if="showSender && senderName" class="message-row__sender">{{ senderName }}</span>
       <div

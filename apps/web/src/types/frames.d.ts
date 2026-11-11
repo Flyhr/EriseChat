@@ -403,6 +403,8 @@ export interface FavoriteItem {
   conversationId: string
   conversationTitle: string
   senderName: string
+  /** 发送者头像 files.id（服务端 2026-11-11 追加；旧服务端不返回时回退首字母头像）。 */
+  senderAvatarFileId?: string | null
   available: boolean
   favoritedAt: number
   message: Message | null

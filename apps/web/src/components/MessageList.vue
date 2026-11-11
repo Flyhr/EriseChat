@@ -133,6 +133,15 @@ const memberNameById = computed(() => {
   return map
 })
 
+/** 发送者头像：直接取会话成员上的 avatarFileId（与群成员面板/会话列表同源）。 */
+const memberAvatarById = computed(() => {
+  const map = new Map<string, string>()
+  for (const member of props.members ?? []) {
+    if (member.avatarFileId) map.set(member.userId, member.avatarFileId)
+  }
+  return map
+})
+
 function receiptOf(message: Message): ReadReceiptState | undefined {
   if (!props.showReadReceipt || message.messageId !== lastOwnMessageId.value) return undefined
   return readStateOf(props.peerReadSeq, message.seq)
@@ -492,6 +501,7 @@ onMounted(() => {
           :self="item.message.senderId === selfUserId"
           :show-sender="showSenderOf(item.message)"
           :sender-name="senderNameOf(item.message)"
+          :sender-avatar-file-id="memberAvatarById.get(item.message.senderId)"
           :reply-sender-name="replySenderNameOf(item.message)"
           :is-group="isGroup"
           :receipt="receiptOf(item.message)"

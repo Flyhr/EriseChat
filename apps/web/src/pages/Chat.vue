@@ -882,6 +882,19 @@ const peerReadSeqForDisplay = computed(() =>
 /** 单聊对端在线状态（M3-09）：undefined 表示未知（v1 无初始查询，不显示成离线）。 */
 const peerPresence = computed(() => presence.stateOf(peerUserId.value))
 
+/**
+ * 顶栏头像：群聊用群头像（conversations.avatar_file_id），单聊用对端成员头像。
+ * 此前单聊误传群头像字段（恒为 null），导致顶栏永远是首字母占位。
+ */
+const headerAvatarFileId = computed(() => {
+  const conversation = activeConversation.value
+  if (!conversation) return null
+  if (conversation.type === 'group') return conversation.avatarFileId ?? null
+  const peerId = peerUserId.value
+  if (!peerId) return null
+  return conversation.members.find((member) => member.userId === peerId)?.avatarFileId ?? null
+})
+
 /** 当前会话「输入中」提示（M3-09）：单聊「对方正在输入…」、群聊「X 正在输入…」/多人。 */
 const typingText = computed(() => {
   const conversation = activeConversation.value
@@ -1661,7 +1674,7 @@ function onWindowDrop(event: DragEvent): void {
           :is-group="isGroup"
           :member-count="memberCount"
           :peer-presence="peerPresence"
-          :avatar-file-id="activeConversation.avatarFileId ?? null"
+          :avatar-file-id="headerAvatarFileId"
           :show-back="true"
           @open-group="toggleGroupDrawer"
           @open-files="toggleFilesPanel"
