@@ -507,8 +507,6 @@ async function removeAvatar(): Promise<void> {
 
 <template>
   <div class="group-panel">
-    <p class="group-panel__subtitle">{{ members.length }} 位成员 · 在线 {{ onlineCount }} 人</p>
-
     <p v-if="errorMessage" class="group-panel__error" role="alert">{{ errorMessage }}</p>
 
     <section v-if="conversation.type === 'group'" class="group-panel__section group-panel__profile">
@@ -584,7 +582,10 @@ async function removeAvatar(): Promise<void> {
     </section>
 
     <!-- UI-D P3：参考图 03 的分区标题与成员计数。 -->
-    <h3 class="group-panel__section-title">群成员 · {{ members.length }}</h3>
+    <div class="group-panel__section-head">
+      <h3 class="group-panel__section-title">群成员 · {{ members.length }}</h3>
+      <span class="group-panel__online">在线 {{ onlineCount }} 人</span>
+    </div>
 
     <ul class="group-panel__members">
       <li v-for="member in members" :key="member.userId" class="group-panel__member">
@@ -653,11 +654,10 @@ async function removeAvatar(): Promise<void> {
       </template>
     </section>
 
-    <section class="group-panel__section group-panel__leave">
-      <button v-if="!isOwner" type="button" class="group-panel__danger" :disabled="busy" @click="askLeaveGroup">
+    <section v-if="!isOwner" class="group-panel__section group-panel__leave">
+      <button type="button" class="group-panel__danger" :disabled="busy" @click="askLeaveGroup">
         退出群聊
       </button>
-      <p v-else class="group-panel__hint">群主不能退出群聊；如需退出，请先在成员列表把群主转让给其他成员。</p>
     </section>
 
     <AppDialog
@@ -767,23 +767,31 @@ async function removeAvatar(): Promise<void> {
 
 <style scoped>
 /* UI-D P3：参考图 03 的分区标题（群成员 + 计数）。 */
+.group-panel__section-head {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
 .group-panel__section-title {
-  margin: var(--ec-space-2) 0 0;
+  margin: 0;
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
   font-weight: var(--ec-font-weight-semibold);
+}
+
+/* 在线人数与「群成员 · N」同一行右对齐（原顶部副标题已删除）。 */
+.group-panel__online {
+  flex: none;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
 }
 
 .group-panel {
   display: flex;
   flex-direction: column;
   gap: var(--ec-space-3);
-}
-
-.group-panel__subtitle {
-  margin: 0;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
 }
 
 .group-panel__toggle,
@@ -944,12 +952,12 @@ async function removeAvatar(): Promise<void> {
   line-height: 16px;
 }
 
+/* 分区之间只用留白分隔，不画横线（用户要求「邀请成员」上下不要明显边框线）。 */
 .group-panel__section {
   display: flex;
   flex-direction: column;
   gap: var(--ec-space-2);
   padding-top: var(--ec-space-3);
-  border-top: 1px solid var(--ec-border);
 }
 
 .group-panel__search {
