@@ -3,7 +3,9 @@
    1) 新代码统一使用 --ec-* token；旧组件通过文件末尾的 --color-* / --space-* 别名渐进迁移，
       组件内不写死颜色与魔法数字。
    2) 每个派生值在注释里标明来源（§3.1 定值 / 按 §3.1 同色系推导），避免散落硬编码。
-   3) 不捆绑字体文件；图标使用内联 SVG；深色主题只预留结构（计划 D-10），本阶段不实现。 */
+   3) 不捆绑字体文件；图标统一由 AppIcon.vue 使用 Phosphor 线性集。
+   4) 颜色 token 由 styles/themes/azure.css 按 data-ec-theme 提供（本文件 :root 为回退基线）；
+      派生值只引用变量，切换主题时自动跟随。本阶段只保留主题结构，不提供可点击入口。 */
 :root {
   /* ==================== 颜色（聊天主题「澄蓝」，2026-10-26 落地） ==================== */
   --ec-brand-500: #3b82f6; /* 品牌主色：图标/强调/气泡渐变起点 */
@@ -40,7 +42,7 @@
   --ec-surface-hover: #f2f7ff; /* 列表项/按钮悬停浅蓝底（brand-050 与白之间） */
   --ec-border-strong: #cbd5e1; /* 滚动条滑块/强分割线：border 加深一档 */
   --ec-bubble-self: #2563eb; /* 自己的气泡主体色（渐变由 --ec-bubble-self-bg 提供） */
-  --ec-bubble-self-bg: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); /* 自己气泡渐变 */
+  --ec-bubble-self-bg: linear-gradient(135deg, var(--ec-brand-500) 0%, var(--ec-brand-600) 100%); /* 自己气泡渐变（随主题色） */
   --ec-bubble-self-border: transparent; /* 渐变气泡不描边 */
   --ec-bubble-other: #ffffff; /* 对方气泡白色（D-05） */
   --ec-bubble-other-border: #e7eef9; /* 对方气泡冷蓝描边 */

@@ -12,6 +12,7 @@ import { useFriendsStore } from './stores/friends'
 import { useMessagesStore } from './stores/messages'
 import { useDraftsStore } from './stores/drafts'
 import './styles/variables.css'
+import './styles/themes/azure.css'
 import './styles/global.css'
 
 // 应用入口：只做装配。登录态恢复在 stores/auth 创建时完成（localStorage + expiresAt 校验）；

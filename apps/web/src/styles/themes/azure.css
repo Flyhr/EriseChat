@@ -1,0 +1,34 @@
+/* 主题「澄蓝」（azure）：当前唯一的 UI 主题方案，由 index.html 的 data-ec-theme 选中。
+   本文件只声明主题可变量（品牌色、背景、气泡、文字、状态色）；
+   variables.css :root 中的同值定义是未加载主题文件时的回退基线，派生值只引用变量、自动跟随主题。
+   后续新增主题时复制本文件改选择器与色值即可，业务组件与 --ec-* 调用方无需改动。
+   本阶段只做结构预留：设置页不提供可点击的主题切换入口（UI 验收标准图 05）。 */
+html[data-ec-theme='azure'] {
+  --ec-brand-500: #3b82f6;
+  --ec-brand-600: #2563eb;
+  --ec-brand-700: #1d4ed8;
+  --ec-brand-100: #dbeafe;
+  --ec-brand-050: #eff6ff;
+  --ec-nav-bg: #f1f5fd;
+  --ec-list-bg: #ffffff;
+  --ec-chat-bg-a: #f8fbff;
+  --ec-chat-bg-b: #eef5ff;
+  --ec-chat-bg-c: #e9f1fe;
+  --ec-chat-bg-d: #e9f1fe;
+  --ec-chat-glow-a: rgba(219, 234, 254, 0.75);
+  --ec-chat-glow-b: rgba(224, 231, 255, 0.55);
+  --ec-text-primary: #0f172a;
+  --ec-text-secondary: #5f6d7e;
+  --ec-text-tertiary: #94a3b8;
+  --ec-border: #e2e8f0;
+  --ec-border-soft: #eef3fb;
+  --ec-success: #059669;
+  --ec-online: #059669;
+  --ec-danger: #dc2626;
+  --ec-focus-ring: #2563eb;
+  --ec-disabled: #a8b2bf;
+  --ec-scrim: rgba(15, 23, 42, 0.45);
+  --ec-overlay: rgba(15, 23, 42, 0.78);
+  --ec-overlay-border: rgba(255, 255, 255, 0.4);
+  --ec-overlay-hover: rgba(255, 255, 255, 0.12);
+}

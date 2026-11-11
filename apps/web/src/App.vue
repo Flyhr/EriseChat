@@ -28,6 +28,8 @@ import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useSettingsStore } from './stores/settings'
 import { useVisualViewport } from './core/useVisualViewport'
+import { NConfigProvider } from 'naive-ui'
+import { ecThemeOverrides } from './core/theme'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
 // 其余路由为「左侧一级导航 + 内容区」外壳，页面自身负责内部滚动。
@@ -231,21 +233,24 @@ function reconnect(): void {
 </script>
 
 <template>
-  <div class="ec-app-root" :class="{ 'ec-app-root--keyboard': keyboardOpen }">
-    <ConnectionBanner v-if="auth.isLoggedIn" :state="wsState" @reconnect="reconnect" />
-    <RouterView v-if="isBlankLayout" />
-    <div v-else class="ec-app-shell">
-      <SideNav />
-      <main class="ec-app-main">
-        <RouterView />
-      </main>
-      <MobileTabBar v-if="showMobileTabBar && !keyboardOpen" />
+  <!-- Naive UI 主题入口：abstract 不渲染额外 DOM，避免影响 scoped 布局与 file:// 加载。 -->
+  <NConfigProvider abstract :theme-overrides="ecThemeOverrides">
+    <div class="ec-app-root" :class="{ 'ec-app-root--keyboard': keyboardOpen }">
+      <ConnectionBanner v-if="auth.isLoggedIn" :state="wsState" @reconnect="reconnect" />
+      <RouterView v-if="isBlankLayout" />
+      <div v-else class="ec-app-shell">
+        <SideNav />
+        <main class="ec-app-main">
+          <RouterView />
+        </main>
+        <MobileTabBar v-if="showMobileTabBar && !keyboardOpen" />
+      </div>
+      <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
+      <AppToast />
+      <!-- F-11：消息搜索面板（全局单例，左导航/聊天顶栏/移动端列表共用）。 -->
+      <SearchDialog />
     </div>
-    <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
-    <AppToast />
-    <!-- F-11：消息搜索面板（全局单例，左导航/聊天顶栏/移动端列表共用）。 -->
-    <SearchDialog />
-  </div>
+  </NConfigProvider>
 </template>
 
 <style scoped>

@@ -1,36 +1,85 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { APP_ICONS, type AppIconName } from '../core/icons'
+import { computed, type Component } from 'vue'
+import {
+  PhArrowLeft,
+  PhBell,
+  PhBellSlash,
+  PhChatCircleDots,
+  PhCheck,
+  PhDotsThree,
+  PhDownloadSimple,
+  PhFileText,
+  PhGearSix,
+  PhImageSquare,
+  PhLinkSimple,
+  PhMagnifyingGlass,
+  PhMicrophone,
+  PhPalette,
+  PhPaperPlaneTilt,
+  PhPaperclip,
+  PhPause,
+  PhPencilSimple,
+  PhPlay,
+  PhPlus,
+  PhPushPin,
+  PhShieldCheck,
+  PhSignOut,
+  PhSmiley,
+  PhStar,
+  PhUser,
+  PhUsersThree,
+  PhX,
+} from '@phosphor-icons/vue'
+import type { AppIconName } from '../core/icons'
 
-// 统一内联 SVG 图标（UI-01，计划 §3.2 / §16.4）：18px 基准、1.8 描边、currentColor；
-// 不引入图标库；装饰性图标 aria-hidden，语义由外层按钮/链路的 aria-label、文本提供。
+// 统一图标（UI-D P1）：全站图标收敛到 Phosphor 线性集，保留原 name/size API，
+// 既有组件无需改动即可完成第一个自绘组件替换；装饰性图标始终 aria-hidden。
+// core/icons.ts 保留 AppIconName 类型与旧图形数据作为历史资产，不再参与渲染。
+const ICONS: Record<AppIconName, Component> = {
+  chat: PhChatCircleDots,
+  contacts: PhUser,
+  groups: PhUsersThree,
+  settings: PhGearSix,
+  search: PhMagnifyingGlass,
+  plus: PhPlus,
+  image: PhImageSquare,
+  file: PhFileText,
+  paperclip: PhPaperclip,
+  emoji: PhSmiley,
+  close: PhX,
+  more: PhDotsThree,
+  send: PhPaperPlaneTilt,
+  download: PhDownloadSimple,
+  user: PhUser,
+  logout: PhSignOut,
+  check: PhCheck,
+  back: PhArrowLeft,
+  mute: PhBellSlash,
+  pin: PhPushPin,
+  edit: PhPencilSimple,
+  bell: PhBell,
+  palette: PhPalette,
+  link: PhLinkSimple,
+  shield: PhShieldCheck,
+  star: PhStar,
+  mic: PhMicrophone,
+  play: PhPlay,
+  pause: PhPause,
+}
+
 const props = withDefaults(defineProps<{ name: AppIconName; size?: number }>(), { size: 18 })
-const icon = computed(() => APP_ICONS[props.name])
+const icon = computed(() => ICONS[props.name])
 </script>
 
 <template>
-  <svg
+  <component
+    :is="icon"
+    :size="size"
+    weight="regular"
     class="ec-icon"
-    :width="size"
-    :height="size"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    stroke-width="1.8"
-    stroke-linecap="round"
-    stroke-linejoin="round"
     aria-hidden="true"
     focusable="false"
-  >
-    <path v-for="path in icon.paths ?? []" :key="path" :d="path" />
-    <circle
-      v-for="circle in icon.circles ?? []"
-      :key="`${circle.cx}-${circle.cy}-${circle.r}`"
-      :cx="circle.cx"
-      :cy="circle.cy"
-      :r="circle.r"
-    />
-  </svg>
+  />
 </template>
 
 <style scoped>
