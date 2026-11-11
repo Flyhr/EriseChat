@@ -35,6 +35,7 @@ describe('parseStoredSettings', () => {
     expect(parseStoredSettings('{"soundEnabled":false}')).toEqual({
       soundEnabled: false,
       desktopNotificationsEnabled: false,
+      androidBackgroundNotificationsEnabled: false,
     })
   })
 
@@ -44,10 +45,16 @@ describe('parseStoredSettings', () => {
     )
   })
 
-  it('正确处理两个布尔字段', () => {
+  it('正确处理三个布尔字段（含 Android 后台通知开关）', () => {
     expect(
-      parseStoredSettings('{"soundEnabled":false,"desktopNotificationsEnabled":true}'),
-    ).toEqual({ soundEnabled: false, desktopNotificationsEnabled: true })
+      parseStoredSettings(
+        '{"soundEnabled":false,"desktopNotificationsEnabled":true,"androidBackgroundNotificationsEnabled":true}',
+      ),
+    ).toEqual({
+      soundEnabled: false,
+      desktopNotificationsEnabled: true,
+      androidBackgroundNotificationsEnabled: true,
+    })
   })
 })
 
@@ -68,6 +75,7 @@ describe('useSettingsStore 持久化', () => {
     expect(JSON.parse(storage.getItem(SETTINGS_STORAGE_KEY) ?? '{}')).toEqual({
       soundEnabled: false,
       desktopNotificationsEnabled: true,
+      androidBackgroundNotificationsEnabled: false,
     })
 
     // 模拟刷新页面：新的 pinia 实例重新创建 store，应从 localStorage 恢复。

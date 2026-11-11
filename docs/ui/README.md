@@ -37,3 +37,5 @@
 - 文档边界：主题层文件路径只记在本文件与 `docs/internal-plan.md` 附录 D；`docs/web.md` 保持用户既有改动原样，未纳入本专项提交。
 - 联系人两级结构与登录三模式核对后确认已具备参考图要求，本轮未改动；移动端底部导航保留现有 5 项入口（参考图为 3 项，删减会丢失已上线功能）。
 - 视觉修正（背景缝隙，2026-11-11）：用户截图反馈顶栏下方有一条浅色缝隙。根因是 `.chat-page__typing`（为防列表跳动而常驻的 18px 预留区）排在 `.message-list` 之前，而渐变只挂在 `.message-list` 上。修复为把 `--ec-chat-gradient` 上移到共同容器 `.chat-page__chat`、`.message-list` 改透明；**顶栏 `ChatHeader` 与输入卡片 `SendBox` 保持不变**（区别于已回退的 `65518d4`）。
+- 既有失败测试收口（2026-11-11）：`stores/settings.test.ts`（3 例）与 `core/messageActions.test.ts`（3 例）并非源码回归，而是 F-39（`androidBackgroundNotificationsEnabled`）与 F-40（多选 `select`、附件 `forward`）上线后测试期望未同步。仅更新 6 处期望值与 2 处用例名以匹配现行行为，**未改任何源码**；2 文件 25 例全部通过。`core/notify.test.ts` 使用独立 `IncomingNotifyState` 夹具，不受影响。复核：`vue-tsc`/`vite build` 通过，首屏共享 chunk gzip 81.0 KB（≤100）、全站 JS+CSS 244.3 KB（≤260）。
+- 静态核验（2026-11-11，非目视验收）：响应式断点覆盖四档目标宽度（1440/1200→`≥1200` 与 `≤1199`、`900`→`801~1199`、`390`→`≤800`+`≤480`）；`ToastBridge` 三态 `useMessage` 注册与卸载清理、`SearchInput` 的 `update:value`/`focusin`/`keydown.esc`、`AppDialog` 的 Esc 与 `previousFocus` 焦点归还均在代码实现。**九图逐图对照、100%/125% 缩放、Android 安全区及 toast/搜索框/弹窗的实际渲染与交互仍待浏览器/真机目视验收**（按 §11.4 启动前需取得同意）。
