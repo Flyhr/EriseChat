@@ -1,8 +1,9 @@
-// 自绘确认弹窗（UI-03 批次1，计划 §5.11 / §16.3）：替代 window.confirm，
-// 支持危险操作（tone="danger"）、忙碌态、Esc/遮罩取消、打开聚焦与关闭后焦点归还。
+// 确认弹窗（UI-D P4）：外壳改用 Naive UI NModal，保留原有 props / emit / 默认插槽与焦点归还逻辑。
+// 面板视觉仍由 --ec-* token 控制；busy 期间禁用 Esc/遮罩关闭的语义不变。
 // 只负责展示与派发 confirm/cancel，不直接执行业务请求；调用方在 busy 期间保持打开。
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { NModal } from 'naive-ui'
 
 const props = withDefaults(
   defineProps<{
@@ -45,6 +46,11 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
+/** NModal 的 show 变为 false（含遮罩/内部关闭）时统一派发 cancel，busy 期间由 close() 拦截。 */
+function onShowUpdate(show: boolean): void {
+  if (!show) close()
+}
+
 watch(
   () => props.open,
   async (open) => {
@@ -72,58 +78,48 @@ function onConfirm(): void {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="ec-dialog" role="presentation" @mousedown.self="close">
-      <section
-        ref="panel"
-        class="ec-dialog__panel"
-        :class="{ 'ec-dialog__panel--wide': wide }"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="title"
-      >
-        <h2 class="ec-dialog__title">{{ title }}</h2>
-        <p v-if="message" class="ec-dialog__message">{{ message }}</p>
-        <div v-if="$slots.default" class="ec-dialog__body">
-          <slot />
-        </div>
-        <footer class="ec-dialog__actions">
-          <button type="button" class="ec-dialog__btn" :disabled="busy" @click="emit('cancel')">
-            {{ cancelText }}
-          </button>
-          <button
-            type="button"
-            class="ec-dialog__btn ec-dialog__btn--primary"
-            :class="{ 'ec-dialog__btn--danger': tone === 'danger' }"
-            :disabled="busy"
-            @click="onConfirm"
-          >
-            {{ confirmText }}
-          </button>
-        </footer>
-      </section>
-    </div>
-  </Teleport>
+  <NModal
+    :show="open"
+    :mask-closable="!busy"
+    :close-on-esc="false"
+    :auto-focus="false"
+    @update:show="onShowUpdate"
+    @mask-click="close"
+  >
+    <section
+      ref="panel"
+      class="ec-dialog__panel"
+      :class="{ 'ec-dialog__panel--wide': wide }"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="title"
+    >
+      <h2 class="ec-dialog__title">{{ title }}</h2>
+      <p v-if="message" class="ec-dialog__message">{{ message }}</p>
+      <div v-if="$slots.default" class="ec-dialog__body">
+        <slot />
+      </div>
+      <footer class="ec-dialog__actions">
+        <button type="button" class="ec-dialog__btn" :disabled="busy" @click="emit('cancel')">
+          {{ cancelText }}
+        </button>
+        <button
+          type="button"
+          class="ec-dialog__btn ec-dialog__btn--primary"
+          :class="{ 'ec-dialog__btn--danger': tone === 'danger' }"
+          :disabled="busy"
+          @click="onConfirm"
+        >
+          {{ confirmText }}
+        </button>
+      </footer>
+    </section>
+  </NModal>
 </template>
 
 <style scoped>
-.ec-dialog {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* UI-04 批次3：底部/顶部安全区，避免按钮被系统手势区遮挡。 */
-  padding: calc(var(--ec-space-4) + env(safe-area-inset-top, 0px))
-    var(--ec-space-4)
-    calc(var(--ec-space-4) + env(safe-area-inset-bottom, 0px));
-  background: var(--ec-scrim);
-}
-
 .ec-dialog__panel {
   width: min(420px, calc(100vw - var(--ec-space-8)));
-  max-height: calc(100vh - var(--ec-space-8));
   max-height: calc(100dvh - var(--ec-space-8));
   display: flex;
   flex-direction: column;

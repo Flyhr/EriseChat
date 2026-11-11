@@ -28,5 +28,9 @@
 - 主题层：`apps/web/src/styles/themes/azure.css` + `index.html` 的 `data-ec-theme="azure"`；`core/theme.ts` 把色板映射为 Naive UI `themeOverrides`。
 - 组件库：`naive-ui` + `@phosphor-icons/vue` + `@vueuse/core`（均 MIT）渐进引入，后续逐步替换全部自绘组件；首个替换组件为 `AppIcon.vue`。
 - 已完成：P0 依赖与兼容性验证、P1 主题层与图标基座、P2-A 导航/会话列表/会话行/顶栏/断线条、P2-B 消息气泡（14px 圆角与尾角、时间/已读内嵌、连续消息分组）与紧凑输入区、断线待发送提示、P3 外观设置信息卡、群成员分区标题、表情面板搜索、移动端欢迎语、空状态与 ≥1200 桌面外层浮起卡片。
-- 待完成：P4 余下自绘组件逐个替换、九图逐图截图对照、1440/1200/900/390 四档宽度与 100%/125% 缩放验收。
+- P4 已完成部分：`SettingsSwitch` → `NSwitch`、`AppDialog` → `NModal`，均保持原 props / emit / 默认插槽与焦点归还逻辑，调用方零改动。
+- 体积阈值（P4 确立）：首屏共享 chunk gzip ≤100 KB（实测 63.2 KB）、全站 JS+CSS gzip ≤260 KB（实测 228.6 KB）。`NModal` 带来的 `AppDialog` 共享 chunk gzip 37.2 KB 为一次性组件库基座成本，后续组件替换复用该 chunk。
+- 待完成（需单独批次）：`AppToast`（命令式 `core/toast.ts` 队列，需引入 `NMessageProvider` 并重构调用链）、`SearchInput`（`NInput` 需较多 `:deep()` 覆盖以保留胶囊外观）、`SettingsGroup` / `SettingsRow`（布局容器，替换收益低）、`DrawerShell`（当前 0 个使用点，按 §2.9 需用户确认后再处置）。
+- 人工验收待执行：九图逐图截图对照、1440/1200/900/390 四档宽度、100%/125% 缩放、Android 安全区；本轮未做浏览器/真机验收。
+- 文档边界：主题层文件路径只记在本文件与 `docs/internal-plan.md` 附录 D；`docs/web.md` 保持用户既有改动原样，未纳入本专项提交。
 - 联系人两级结构与登录三模式核对后确认已具备参考图要求，本轮未改动；移动端底部导航保留现有 5 项入口（参考图为 3 项，删减会丢失已上线功能）。

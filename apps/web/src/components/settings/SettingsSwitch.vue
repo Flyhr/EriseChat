@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// 开关（SET-01，F-01 通知开关的通用化）：role=switch 受控组件。
-// 视觉尺寸 44×24，移动端行高由父级行保证 ≥44px 触控区域；动效在 reduced-motion 下关闭。
-defineProps<{
+import { NSwitch } from 'naive-ui'
+
+// 开关（UI-D P4）：内部改用 Naive UI NSwitch，保留原 modelValue / label / disabled 与 emit API，
+// 调用方无需改动即可完成自绘组件替换；品牌色由 NConfigProvider 的 themeOverrides 提供。
+const props = defineProps<{
   modelValue: boolean
   /** 无障碍名称，随状态切换为「开启/关闭 xxx」。 */
   label: string
@@ -9,71 +11,17 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{ (event: 'update:modelValue', value: boolean): void }>()
+
+function onUpdate(value: boolean): void {
+  emit('update:modelValue', value)
+}
 </script>
 
 <template>
-  <button
-    type="button"
-    role="switch"
-    class="ec-switch"
-    :class="{ 'ec-switch--on': modelValue }"
-    :aria-checked="modelValue"
-    :aria-label="modelValue ? `关闭${label}` : `开启${label}`"
-    :disabled="disabled"
-    @click="emit('update:modelValue', !modelValue)"
-  >
-    <span class="ec-switch__thumb" aria-hidden="true" />
-  </button>
+  <NSwitch
+    :value="props.modelValue"
+    :disabled="props.disabled"
+    :aria-label="props.modelValue ? `关闭${props.label}` : `开启${props.label}`"
+    @update:value="onUpdate"
+  />
 </template>
-
-<style scoped>
-.ec-switch {
-  position: relative;
-  flex: none;
-  width: 44px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-border);
-  cursor: pointer;
-  transition: background-color var(--ec-transition-fast) var(--ec-ease);
-}
-
-.ec-switch--on {
-  background: var(--ec-brand-600);
-}
-
-.ec-switch__thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--ec-surface);
-  box-shadow: 0 1px 2px rgb(15 23 42 / 18%);
-  transition: transform var(--ec-transition-fast) var(--ec-ease);
-}
-
-.ec-switch--on .ec-switch__thumb {
-  transform: translateX(20px);
-}
-
-.ec-switch:focus-visible {
-  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-  outline-offset: var(--ec-focus-offset);
-}
-
-.ec-switch:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ec-switch,
-  .ec-switch__thumb {
-    transition: none;
-  }
-}
-</style>
