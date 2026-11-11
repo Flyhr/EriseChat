@@ -839,17 +839,17 @@ async function removeAvatar(): Promise<void> {
   list-style: none;
 }
 
-/* F-41 优化：成员改为自适应多列网格（每列 ≥128px），去掉邮箱行与行内「转让/移除」按钮，
-   长列表滚动量约减半；完整信息与成员管理动作集中在点击后的资料浮窗。 */
+/* F-41：成员为单列紧凑行——去掉邮箱行与行内「转让/移除」按钮，行高约 37px；
+   完整信息与成员管理动作集中在点击后的资料浮窗。 */
 .group-panel__members {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 2px var(--ec-space-1);
+  display: flex;
+  flex-direction: column;
 }
 
 .group-panel__member {
   display: flex;
   min-width: 0;
+  border-bottom: 1px solid var(--ec-border);
 }
 
 .group-panel__candidate {
@@ -867,7 +867,7 @@ async function removeAvatar(): Promise<void> {
   gap: var(--ec-space-1);
   align-items: center;
   min-width: 0;
-  padding: var(--ec-space-1);
+  padding: var(--ec-space-1) var(--ec-space-2) var(--ec-space-1) var(--ec-space-1);
   border: none;
   border-radius: var(--ec-radius-sm);
   background: transparent;
