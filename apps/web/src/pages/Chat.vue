@@ -1208,20 +1208,26 @@ function onVoiceError(message: string): void {
   showToast(message, 'error')
 }
 
-// 附件上传队列（F-35）：选择后入队，串行上传并逐项展示真实进度；取消/失败不影响队列其他项。
+// 附件上传队列（F-35）：选择后入队并逐项展示真实进度；取消/失败不影响队列其他项。
+// 并发策略：不同会话之间并行上传，同一会话内仍按入队顺序串行；全局并发上限见 MAX_CONCURRENT_UPLOADS。
 // 说明：表情/语音/头像上传不在本批范围，仍走 uploadBusy 的旧链路。
 const uploadItems = ref<UploadItem[]>([])
 const uploadControllers = new Map<string, AbortController>()
-let uploadProcessing = false
-/** 兼容表情/语音上传的互斥标记；附件队列使用下方的 queueBusy。 */
+/** 全局并发上限：跨会话并行，但不超过该值，避免内存与带宽峰值。 */
+const MAX_CONCURRENT_UPLOADS = 3
+/** 单会话并发上限：同一会话内保持串行，避免多张大图同时压缩占内存。 */
+const MAX_CONCURRENT_UPLOADS_PER_CONVERSATION = 1
+let uploadPumping = false
+/** 兼容表情/语音上传的互斥标记；附件队列的忙碌状态按会话计算（visibleQueueBusy）。 */
 const uploadBusy = ref(false)
 const uploadError = ref<string | null>(null)
-const queueBusy = computed(() =>
-  uploadItems.value.some((item) => item.status === 'uploading' || item.status === 'pending'),
-)
 /** 输入区只展示当前会话的附件项：切换会话不把其他会话的上传中/失败项带过来。 */
 const visibleUploadItems = computed(() =>
   uploadItems.value.filter((item) => item.conversationId === activeId.value),
+)
+/** 当前会话是否有待上传/上传中的附件：只影响本会话的输入区状态，不再跨会话互相禁用。 */
+const visibleQueueBusy = computed(() =>
+  visibleUploadItems.value.some((item) => item.status === 'uploading' || item.status === 'pending'),
 )
 
 // 退出登录/切换账号：关闭群成员面板、清空附件队列与页内提示（附件属于原账号）。
@@ -1357,21 +1363,35 @@ function handleFileSelected(files: File[]): void {
     }),
   )
   uploadItems.value = [...uploadItems.value, ...created]
-  void processUploadQueue()
+  void pumpUploads()
 }
 
-/** 串行处理 pending 项：前一项结束（成功/失败/取消）后才开始下一项，避免内存峰值。 */
-async function processUploadQueue(): Promise<void> {
-  if (uploadProcessing) return
-  uploadProcessing = true
+/**
+ * 调度 pending 项：跨会话并行，受「全局上限 3 + 单会话上限 1」约束。
+ * 每项结束（成功/失败/取消）后再次调用本函数续跑，避免一次性拉起全部队列。
+ */
+function pumpUploads(): void {
+  if (uploadPumping) return
+  uploadPumping = true
   try {
     for (;;) {
-      const next = uploadItems.value.find((item) => item.status === 'pending')
-      if (!next) break
-      await processUploadItem(next.id)
+      const active = uploadItems.value.filter((item) => item.status === 'uploading')
+      if (active.length >= MAX_CONCURRENT_UPLOADS) return
+      const perConversation = new Map<string, number>()
+      for (const item of active) {
+        perConversation.set(item.conversationId, (perConversation.get(item.conversationId) ?? 0) + 1)
+      }
+      const next = uploadItems.value.find(
+        (item) =>
+          item.status === 'pending' &&
+          (perConversation.get(item.conversationId) ?? 0) < MAX_CONCURRENT_UPLOADS_PER_CONVERSATION,
+      )
+      if (!next) return
+      // processUploadItem 在首个 await 前已把状态置为 uploading，循环下一轮据此计数。
+      void processUploadItem(next.id)
     }
   } finally {
-    uploadProcessing = false
+    uploadPumping = false
   }
 }
 
@@ -1467,6 +1487,8 @@ async function processUploadItem(id: string): Promise<void> {
     patchUploadItem(id, { status: 'failed', error: message })
   } finally {
     uploadControllers.delete(id)
+    // 腾出并发槽位后续跑同会话/其他会话的 pending 项。
+    pumpUploads()
   }
 }
 
@@ -1477,6 +1499,7 @@ function cancelUpload(id: string): void {
   uploadControllers.get(id)?.abort()
   uploadControllers.delete(id)
   patchUploadItem(id, { status: 'cancelled', error: undefined })
+  pumpUploads()
 }
 
 /** 移出等待/失败/已取消的附件项（上传中请先取消）；失败项可先重试，也可直接移出。 */
@@ -1538,7 +1561,7 @@ function retryUpload(id: string): void {
     return
   }
   patchUploadItem(id, { status: 'pending', progress: 0, error: undefined })
-  void processUploadQueue()
+  void pumpUploads()
 }
 
 // 拖拽上传（F-06）：根容器显示投放提示；window 兜底阻止浏览器/Electron 直接打开文件。
@@ -1556,8 +1579,8 @@ function onDragEnter(event: DragEvent): void {
 function onDragOver(event: DragEvent): void {
   if (!hasFiles(event.dataTransfer)) return
   event.preventDefault()
-  const busy = uploadBusy.value || queueBusy.value
-  if (event.dataTransfer) event.dataTransfer.dropEffect = busy ? 'none' : 'copy'
+  // 上传按会话独立：其他会话上传中不再阻止在当前会话投放，文件进入各自队列等待。
+  if (event.dataTransfer) event.dataTransfer.dropEffect = uploadBusy.value ? 'none' : 'copy'
 }
 
 function onDragLeave(event: DragEvent): void {
@@ -1571,7 +1594,7 @@ function onDrop(event: DragEvent): void {
   event.preventDefault()
   dragDepth = 0
   dragActive.value = false
-  if (uploadBusy.value || queueBusy.value) {
+  if (uploadBusy.value) {
     uploadError.value = '上传中，请稍候'
     return
   }
@@ -1732,7 +1755,7 @@ function onWindowDrop(event: DragEvent): void {
                 ref="sendBoxRef"
                 :conversation-id="activeId ?? ''"
                 :initial-draft="activeId ? drafts.draftOf(activeId) : ''"
-                :uploading="uploadBusy || queueBusy"
+                :uploading="uploadBusy || visibleQueueBusy"
                 :upload-error="uploadError"
                 :upload-items="visibleUploadItems"
                 :emoji-open="activeDrawer === 'emoji'"
