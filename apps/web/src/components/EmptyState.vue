@@ -39,16 +39,18 @@ defineProps<{
   text-align: center;
 }
 
+/* UI-D P3：空状态视觉锚点放大并引入品牌色，避免空页面过于单薄。 */
 .empty-state__icon {
   display: grid;
-  width: 48px;
-  height: 48px;
-  margin-bottom: var(--ec-space-1);
+  width: 56px;
+  height: 56px;
+  margin-bottom: var(--ec-space-2);
   place-items: center;
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-nav-bg);
-  color: var(--ec-text-secondary);
+  border: 1px solid var(--ec-brand-100);
+  border-radius: var(--ec-radius-panel);
+  background: var(--ec-brand-050);
+  box-shadow: 0 0 0 5px var(--ec-surface);
+  color: var(--ec-brand-600);
 }
 
 .empty-state__title {

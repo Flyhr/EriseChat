@@ -291,6 +291,19 @@ function reconnect(): void {
   }
 }
 
+/* UI-D P3：≥1200 桌面把应用收为一张浮起卡片（参考图 01~07 的外层画布）。
+   1200 以下保持全屏，避免影响窄桌面、Electron 最小窗口与移动端安全区。 */
+@media (min-width: 1200px) {
+  .ec-app-root {
+    height: calc(var(--ec-vvh, 100dvh) - 24px);
+    margin: 12px;
+    border: 1px solid var(--ec-border);
+    border-radius: var(--ec-radius-lg);
+    background: var(--ec-bg-canvas);
+    box-shadow: var(--ec-shadow-lg);
+  }
+}
+
 /* blank 布局（登录页）铺满外壳高度；页面自身仍在内容区居中（计划 §2.2 / §5.7）。 */
 .ec-app-root > .login-page {
   flex: 1;

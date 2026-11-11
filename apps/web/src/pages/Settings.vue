@@ -1056,7 +1056,7 @@ async function saveProfile(): Promise<void> {
 
         <!-- 外观 -->
         <div v-else-if="activeSectionId === 'appearance'" class="settings-content__body">
-          <SettingsGroup title="主题">
+          <SettingsGroup title="主题模式">
             <div class="settings-themes">
               <div class="settings-theme settings-theme--active" role="status">
                 <span class="settings-theme__preview settings-theme__preview--light" aria-hidden="true" />
@@ -1073,10 +1073,31 @@ async function saveProfile(): Promise<void> {
                 </span>
               </div>
             </div>
-            <SettingsRow label="消息字号与密度" vertical>
-              <ComingSoonHint label="消息字号与密度">标准</ComingSoonHint>
-            </SettingsRow>
           </SettingsGroup>
+          <!-- UI-D P3：参考图 05 的其余外观信息卡。只读展示当前值，不提供无后端支持的假入口。 -->
+          <section class="settings-appearance" aria-label="外观信息">
+            <div class="settings-appearance__card">
+              <div class="settings-appearance__info">
+                <h3 class="settings-appearance__name">聊天背景</h3>
+                <p class="settings-appearance__desc">柔和蓝白渐变（默认）</p>
+              </div>
+              <span class="settings-appearance__swatch" aria-hidden="true" />
+            </div>
+            <div class="settings-appearance__card">
+              <div class="settings-appearance__info">
+                <h3 class="settings-appearance__name">消息文字大小</h3>
+                <p class="settings-appearance__desc">聊天正文与会话摘要</p>
+              </div>
+              <span class="settings-appearance__value">14px</span>
+            </div>
+            <div class="settings-appearance__card">
+              <div class="settings-appearance__info">
+                <h3 class="settings-appearance__name">会话列表密度</h3>
+                <p class="settings-appearance__desc">会话行高 72px</p>
+              </div>
+              <span class="settings-appearance__value">舒适</span>
+            </div>
+          </section>
         </div>
 
         <!-- 连接与关于 -->
@@ -1760,6 +1781,63 @@ async function saveProfile(): Promise<void> {
 .settings-theme__check {
   flex: none;
   color: var(--ec-brand-600);
+}
+
+/* UI-D P3：外观信息卡（只读展示当前值，不提供未实现的开关或下拉）。 */
+.settings-appearance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--ec-space-3);
+}
+
+.settings-appearance__card {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 88px;
+  padding: var(--ec-space-4);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-panel);
+  background: var(--ec-surface);
+  box-shadow: var(--ec-shadow-sm);
+}
+
+.settings-appearance__info {
+  min-width: 0;
+}
+
+.settings-appearance__name {
+  margin: 0 0 4px;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.settings-appearance__desc {
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: 1.4;
+}
+
+.settings-appearance__value {
+  flex: none;
+  padding: 4px 10px;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-size: 13px;
+  font-weight: var(--ec-font-weight-medium);
+}
+
+.settings-appearance__swatch {
+  flex: none;
+  width: 56px;
+  height: 40px;
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-chat-gradient);
 }
 
 /* ==================== 移动端 ==================== */

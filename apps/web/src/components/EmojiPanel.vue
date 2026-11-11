@@ -18,6 +18,19 @@ const emit = defineEmits<{ pick: [emoji: string]; 'pick-custom': [file: File] }>
 type TabKey = 'emoji' | 'custom'
 const tab = ref<TabKey>('emoji')
 
+// UI-D P3：按分组名或精确 Emoji 字符过滤（数据只含 Unicode 字符，无别名，故不做模糊搜表情名）。
+const search = ref('')
+const visibleGroups = computed(() => {
+  const keyword = search.value.trim()
+  if (!keyword) return EMOJI_GROUPS
+  return EMOJI_GROUPS.map((group) => ({
+    label: group.label,
+    emojis: group.label.includes(keyword)
+      ? group.emojis
+      : group.emojis.filter((emoji) => emoji === keyword),
+  })).filter((group) => group.emojis.length > 0)
+})
+
 // ===== 最近使用（本设备 localStorage，仅内置 Unicode 表情） =====
 const recentEmojis = ref<string[]>([])
 const recentVisible = computed(() => recentEmojis.value.slice(0, 12))
@@ -222,8 +235,20 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <!-- UI-D P3：参考图 02 的搜索框；按分组名或精确 Emoji 过滤。 -->
+    <div class="ec-emoji-panel__search">
+      <AppIcon name="search" :size="16" />
+      <input
+        v-model="search"
+        type="search"
+        class="ec-emoji-panel__search-input"
+        placeholder="搜索分类或表情"
+        aria-label="搜索表情"
+      />
+    </div>
+
     <div v-show="tab === 'emoji'" id="ec-emoji-panel-emoji" class="ec-emoji-panel__body" role="tabpanel" aria-labelledby="ec-emoji-tab-emoji">
-      <section v-if="recentVisible.length > 0" class="ec-emoji-panel__group">
+      <section v-if="recentVisible.length > 0 && !search.trim()" class="ec-emoji-panel__group">
         <h3 class="ec-emoji-panel__label">最近使用</h3>
         <div class="ec-emoji-panel__grid">
           <button
@@ -239,7 +264,8 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section v-for="group in EMOJI_GROUPS" :key="group.label" class="ec-emoji-panel__group">
+      <p v-if="search.trim() && visibleGroups.length === 0" class="ec-emoji-panel__hint">没有匹配的表情</p>
+      <section v-for="group in visibleGroups" :key="group.label" class="ec-emoji-panel__group">
         <h3 class="ec-emoji-panel__label">{{ group.label }}</h3>
         <div class="ec-emoji-panel__grid">
           <button
@@ -341,6 +367,38 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* UI-D P3：表情搜索框。 */
+.ec-emoji-panel__search {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-2);
+  align-items: center;
+  margin: var(--ec-space-2) var(--ec-space-3) 0;
+  padding: 0 var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-tertiary);
+}
+
+.ec-emoji-panel__search:focus-within {
+  border-color: var(--ec-brand-500);
+}
+
+.ec-emoji-panel__search-input {
+  width: 100%;
+  height: 30px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.ec-emoji-panel__search-input::placeholder {
+  color: var(--ec-text-tertiary);
+}
+
 /* 悬浮卡片：绝对定位于发送框上方（定位由 Chat 页提供），打开/关闭不改变消息区高度。 */
 .ec-emoji-panel {
   display: flex;

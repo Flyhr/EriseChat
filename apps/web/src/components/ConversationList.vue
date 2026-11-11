@@ -221,7 +221,10 @@ async function onUpdateSettings(payload: {
   <section class="ec-conversation-list" aria-label="会话列表">
     <!-- UI-D P2：补回参考图的列表标题（F-11 移除后信息层级偏弱）。 -->
     <div class="ec-conversation-list__titlebar">
-      <h1 class="ec-conversation-list__title">消息</h1>
+      <div class="ec-conversation-list__greeting">
+        <p class="ec-conversation-list__eyebrow">欢迎回来</p>
+        <h1 class="ec-conversation-list__title">消息</h1>
+      </div>
     </div>
     <header class="ec-conversation-list__header">
       <SearchInput
@@ -305,6 +308,31 @@ async function onUpdateSettings(payload: {
   align-items: center;
   height: 44px;
   padding: 0 var(--ec-space-4);
+}
+
+.ec-conversation-list__greeting {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* UI-D P3：参考图 08 的欢迎语只在移动端出现，桌面保持单行标题。 */
+.ec-conversation-list__eyebrow {
+  display: none;
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+@media (max-width: 800px) {
+  .ec-conversation-list__titlebar {
+    height: 56px;
+  }
+
+  .ec-conversation-list__eyebrow {
+    display: block;
+  }
 }
 
 .ec-conversation-list__title {

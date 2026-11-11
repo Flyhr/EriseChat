@@ -446,6 +446,9 @@ async function removeAvatar(): Promise<void> {
       <p v-if="!canEditProfile" class="group-panel__hint">仅群主可修改群资料</p>
     </section>
 
+    <!-- UI-D P3：参考图 03 的分区标题与成员计数。 -->
+    <h3 class="group-panel__section-title">群成员 · {{ members.length }}</h3>
+
     <ul class="group-panel__members">
       <li v-for="member in members" :key="member.userId" class="group-panel__member">
         <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
@@ -619,6 +622,14 @@ async function removeAvatar(): Promise<void> {
 </template>
 
 <style scoped>
+/* UI-D P3：参考图 03 的分区标题（群成员 + 计数）。 */
+.group-panel__section-title {
+  margin: var(--ec-space-2) 0 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
 .group-panel {
   display: flex;
   flex-direction: column;
