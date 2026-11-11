@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import ConnectionBanner from './components/ConnectionBanner.vue'
-import AppToast from './components/AppToast.vue'
+import ToastBridge from './components/ToastBridge.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
 import SearchDialog from './components/SearchDialog.vue'
 import SideNav from './components/SideNav.vue'
@@ -28,7 +28,7 @@ import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useSettingsStore } from './stores/settings'
 import { useVisualViewport } from './core/useVisualViewport'
-import { NConfigProvider } from 'naive-ui'
+import { NConfigProvider, NMessageProvider } from 'naive-ui'
 import { ecThemeOverrides } from './core/theme'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
@@ -235,6 +235,10 @@ function reconnect(): void {
 <template>
   <!-- Naive UI 主题入口：abstract 不渲染额外 DOM，避免影响 scoped 布局与 file:// 加载。 -->
   <NConfigProvider abstract :theme-overrides="ecThemeOverrides">
+    <!-- UI-D：全局轻提示桥接到 Naive UI message，独立于主布局之外，不影响 flex 外壳。 -->
+    <NMessageProvider>
+      <ToastBridge />
+    </NMessageProvider>
     <div class="ec-app-root" :class="{ 'ec-app-root--keyboard': keyboardOpen }">
       <ConnectionBanner v-if="auth.isLoggedIn" :state="wsState" @reconnect="reconnect" />
       <RouterView v-if="isBlankLayout" />
@@ -245,8 +249,7 @@ function reconnect(): void {
         </main>
         <MobileTabBar v-if="showMobileTabBar && !keyboardOpen" />
       </div>
-      <!-- UI-03：全局轻提示（core/toast.ts 队列），全应用只挂载一次。 -->
-      <AppToast />
+      <!-- 轻提示由 ToastBridge 经 NMessageProvider 统一渲染。 -->
       <!-- F-11：消息搜索面板（全局单例，左导航/聊天顶栏/移动端列表共用）。 -->
       <SearchDialog />
     </div>
