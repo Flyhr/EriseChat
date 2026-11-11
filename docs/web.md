@@ -37,6 +37,31 @@ npm run dev        # http://127.0.0.1:5173
 - 两浏览器验收：一个普通窗口 + 一个无痕窗口，用两个不同邮箱账号注册/登录（两者共享同一浏览器存储会互相顶号）。
 - 登录页支持「记住密码」（F-30）：仅在密码登录模式显示，勾选后把邮箱与密码**明文**保存在本机 `localStorage['erisechat.savedLogin']`，下次打开登录页进入密码模式时自动回填；取消勾选立即删除，退出登录不自动清除；仅适用于内部信任模型，不加密、不上传服务端、不写日志。token 默认有效期 3 天（`Jwt__ExpireDays` 环境变量可覆盖，旧 token 仍按签发时有效期过期）。
 
+### 2.1 重启本地服务端（改了服务端代码后必做）
+
+`dotnet run` 启动的是编译后的进程，**修改服务端 C# 代码后不会热更新**，必须重启；只改前端（`apps/web`）时 Vite HMR 即时生效，不需要重启服务端。
+
+```bash
+# 1) 找到占用 6580 的进程（Git Bash；cmd/PowerShell 用 netstat -ano | findstr :6580）
+netstat -ano | grep ":6580"
+
+# 2) 结束该 PID（把 12345 换成上一步最后一列的 PID）
+taskkill /PID 12345 /F
+
+# 3) 在仓库根目录重新启动（前台运行，Ctrl+C 停止）
+dotnet run --project server/Chat.Server
+
+# 4) 健康检查：本地地址务必绕过系统代理，否则可能被代理拦截返回 502
+curl --noproxy '*' http://127.0.0.1:6580/api/health
+# 期望：{"status":"ok","serverTime":...,"version":"1.2.0","protocolVersion":1,"db":"ok"}
+```
+
+- 不想占用终端时，也可直接运行已构建产物（工作目录必须是项目目录，否则 `appsettings.json` / `wwwroot` 解析不到）：
+  `cd server/Chat.Server && ASPNETCORE_ENVIRONMENT=Development ./bin/Debug/net10.0/Chat.Server.exe`
+- 停止服务端后 `bin/Debug` 才不会被占用，此时 `dotnet build server/Chat.Server.sln` 才能正常覆盖输出；进程占用时会报 `MSB3027`/`MSB3021` 文件被锁。
+- 只想做编译校验、不想停服务时用 `dotnet build server/Chat.Server.sln -c Release`（输出到 `bin/Release`，与运行中的 Debug 进程不冲突）。
+- 生产环境（Docker Compose）：`sudo docker compose restart erisechat`，详见 `docs/deploy.md` §3。
+
 ## 3. 服务端地址配置
 
 | 场景 | 地址来源 | 说明 |
