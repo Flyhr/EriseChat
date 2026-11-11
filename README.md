@@ -11,7 +11,7 @@
 - **交付物**：Windows 安装包 `EriseChat-Setup-x.y.z.exe`、Android APK `EriseChat-x.y.z.apk`（侧载安装）、云服务器上的服务端（含 Web 端与 `GET /download` 下载页）；iPhone 仅出方案、本期不实现。
 - **技术骨架**：一套 Vue 3 前端核心复用到 Web / Windows（Electron）/ Android（Capacitor）；服务端是唯一事实源，客户端 IndexedDB 只是缓存。
 - **里程碑**：M0~M5 已完成（2026-10-26；M4 交付 Windows 安装包与 `GET /download`，M5 产出 Android APK）；**M6（100 连接稳定性、备份恢复演练、10~20 人内测）未开始**。F 系列后续能力的逐项流水账已移至 `docs/internal-plan.md` 附录 D（本地文档，不入库）。
-- **能力现状**：协议 [protocol/protocol.md](protocol/protocol.md) 共 **23 个 type**、`protocolVersion=1`；表结构 [protocol/schema.sql](protocol/schema.sql) 共 **13 张表**。邮箱验证码/密码登录与 JWT、单聊/群聊、文本/图片/文件/语音消息、`seq` 严格递增与 `clientMsgId` 幂等、断线补拉与 IndexedDB 缓存、已读/typing/在线状态、消息搜索与会话内搜索、撤回与编辑、多选与附件转发、服务端收藏跨设备同步、好友/群资料/群头像/群置顶/共享文件/自定义表情/@提及/群主转让、附件上传队列、客户端更新检查（F-29）均已落地；**多端在线为每账号默认 3 个连接（`App:MaxConnectionsPerUser` 可配 1~10），超限踢最早建立的连接（`kicked` + 4001），已读通过 `read.updated` 同步本人其他连接**（F-22）；Android 后台消息提醒由原生前台服务提供（F-39，真机验收待执行）。
+- **能力现状**：协议 [protocol/protocol.md](protocol/protocol.md) 共 **23 个 type**、`protocolVersion=1`；表结构 [protocol/schema.sql](protocol/schema.sql) 共 **13 张表**。邮箱验证码/密码登录与 JWT、单聊/群聊、文本/图片/文件/语音消息、`seq` 严格递增与 `clientMsgId` 幂等、断线补拉与 IndexedDB 缓存、已读/typing/在线状态、消息搜索与会话内搜索、撤回与编辑、多选与附件转发、服务端收藏跨设备同步、好友/群资料/群头像/群置顶/共享文件/自定义表情/@提及/群主转让、群成员资料卡（F-41）、附件上传队列、客户端更新检查（F-29）均已落地；**多端在线为每账号默认 3 个连接（`App:MaxConnectionsPerUser` 可配 1~10），超限踢最早建立的连接（`kicked` + 4001），已读通过 `read.updated` 同步本人其他连接**（F-22）；Android 后台消息提醒由原生前台服务提供（F-39，真机验收待执行）。
 - **交付物与版本**：Windows `EriseChat-Setup-1.2.0.exe`、Android `EriseChat-1.2.0.apk`、Web 前端与服务端均为 **1.2.0**（三端与服务端一致，`protocolVersion` 仍为 1）；命名统一为 EriseChat 后 `appId`/`applicationId` 与 JWT issuer/audience 变更，**旧版客户端需卸载重装、1.2.0 上线后所有用户需重新登录**（见 [docs/desktop.md](docs/desktop.md) §2.1、[docs/mobile.md](docs/mobile.md) §2.1）。
 - **未完成与风险**：M6 稳定性与备份恢复演练、公网部署与 SMTP 发码通道、1.2.0 exe/APK 全新安装与登录收发验收、F-39 N01~N12 真机验收、F-40 回归测试、10~20 人内测尚未执行；服务器需按 [docs/deploy.md](docs/deploy.md) §7.3 / [docs/update-deploy.md](docs/update-deploy.md) §11 完成旧命名迁移。代码已提交（`39c2ac6` 全量命名统一，HEAD `6060caf`），**测试 / E2E 仍未运行**（按 `AGENTS.md` §11.2 默认不跑，需执行时按 §11.4 申请）。
 - **目标周期**：约 6~7 周 MVP（Windows 安装包 + Android APK + 服务器云端部署 + 可用聊天闭环；**iPhone 不在本期**）。
@@ -124,5 +124,5 @@ sudo bash infra/backup.sh                       # 服务器备份（每日 cron 
 
 ## 下一步
 
-1. **已完成**：M0~M5 里程碑；F 系列后续能力（消息搜索 F-11、会话内搜索 F-19、会话置顶/免打扰 F-10、个人资料 F-12、账号安全 F-13、群资料 F-14、群头像 F-23、共享文件 F-15、自定义表情 F-21、消息撤回/编辑 F-18、多端在线 F-22、语音消息 F-28、客户端更新检查 F-29、后台提醒 F-39、多选与附件转发 F-40）与 UI-00~UI-05 改造；1.2.0 全量命名统一与三端产物重打均已提交。
+1. **已完成**：M0~M5 里程碑；F 系列后续能力（消息搜索 F-11、会话内搜索 F-19、会话置顶/免打扰 F-10、个人资料 F-12、账号安全 F-13、群资料 F-14、群头像 F-23、共享文件 F-15、自定义表情 F-21、消息撤回/编辑 F-18、多端在线 F-22、语音消息 F-28、客户端更新检查 F-29、后台提醒 F-39、多选与附件转发 F-40、群成员资料卡 F-41）与 UI-00~UI-05 改造；1.2.0 全量命名统一与三端产物重打均已提交。
 2. **下一步（真实待办，均未执行）**：① 1.2.0 exe/APK 全新安装与登录收发验收；② F-39 N01~N12 真机验收；③ F-40 回归测试；④ M6 稳定性、备份恢复演练与 10~20 人内测；⑤ 公网部署与 SMTP 发码通道；⑥ 服务器按 [docs/deploy.md](docs/deploy.md) §7.3 / [docs/update-deploy.md](docs/update-deploy.md) §11 完成旧命名迁移。按 `AGENTS.md` §11.2 默认不运行测试，需执行时按 §11.4 先申请。

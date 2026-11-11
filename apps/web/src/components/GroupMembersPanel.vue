@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
 import { usersApi, type UserProfile } from '../api/users'
 import AppDialog from './AppDialog.vue'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
+import MemberProfileCard from './MemberProfileCard.vue'
 import PresenceDot from './PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
 import { compressImageFile } from '../core/imageCompress'
@@ -22,6 +23,8 @@ import {
 } from '../core/groupProfile'
 import { canTransferOwner, sortMembers } from '../core/groupChat'
 import { showToast } from '../core/toast'
+import { useConversationsStore } from '../stores/conversations'
+import { useFriendsStore } from '../stores/friends'
 import { usePresenceStore } from '../stores/presence'
 import type { Conversation, ConversationMember } from '../types/frames'
 
@@ -30,6 +33,7 @@ import type { Conversation, ConversationMember } from '../types/frames'
 // 被移出/退出由服务端 conv.updated.removedConversationIds 推送（本面板主动退出时也直接 emit left）。
 // M3-09：成员行展示在线状态圆点，头部展示在线人数。
 // UI-02（计划 §5.6 group 抽屉）：本组件改为抽屉内容，遮罩/Esc/焦点返回统一由 DrawerShell 负责。
+// F-41：点击成员行打开资料浮窗，可发起单聊或好友申请（好友关系以 friends store 为准）。
 const props = defineProps<{
   conversation: Conversation
   selfUserId: string
@@ -38,9 +42,13 @@ const props = defineProps<{
 const emit = defineEmits<{
   updated: [conversation: Conversation]
   left: [conversationId: string]
+  /** F-41：浮窗「发送消息」创建/复用单聊后，交由页面跳转。 */
+  'open-chat': [conversationId: string]
 }>()
 
 const presence = usePresenceStore()
+const friends = useFriendsStore()
+const conversations = useConversationsStore()
 
 const busy = ref(false)
 const errorMessage = ref('')
@@ -87,6 +95,123 @@ const selfMember = computed(() =>
 )
 const isOwner = computed(() => selfMember.value?.role === 'owner')
 const memberIds = computed(() => new Set(props.conversation.members.map((member) => member.userId)))
+
+// F-41：成员资料浮窗。anchor 为被点击成员行的视口矩形，桌面据此把浮窗开在成员列表左侧；
+// anchorEl 保留该行元素，视口变化或成员列表滚动后据此重算锚点，避免浮窗与行脱位。
+const memberCard = ref<{
+  member: ConversationMember
+  anchorEl: HTMLElement | null
+  anchor: { left: number; right: number; top: number }
+} | null>(null)
+const memberCardBusy = ref(false)
+const memberCardRequesting = ref(false)
+const memberCardError = ref('')
+const cardMember = computed(() => memberCard.value?.member ?? null)
+const cardDisplayName = computed(() => {
+  const member = cardMember.value
+  if (!member) return ''
+  return friends.displayNameOf(member.userId) || member.displayName
+})
+/** 与当前用户的关系：好友列表与待处理申请均来自 friends store（登录/重连时全量拉取）。 */
+const cardRelation = computed<'friend' | 'outgoing' | 'incoming' | 'none'>(() => {
+  const userId = cardMember.value?.userId
+  if (!userId) return 'none'
+  if (friends.isFriend(userId)) return 'friend'
+  if (friends.outgoing.some((request) => request.toUserId === userId)) return 'outgoing'
+  if (friends.incoming.some((request) => request.fromUserId === userId)) return 'incoming'
+  return 'none'
+})
+
+function openMemberCard(member: ConversationMember, event: MouseEvent): void {
+  const target = event.currentTarget
+  const rect = target instanceof HTMLElement ? target.getBoundingClientRect() : null
+  memberCardError.value = ''
+  memberCard.value = {
+    member,
+    anchorEl: target instanceof HTMLElement ? target : null,
+    anchor: rect
+      ? { left: rect.left, right: rect.right, top: rect.top }
+      : { left: 0, right: 0, top: 0 },
+  }
+}
+
+function closeMemberCard(): void {
+  memberCard.value = null
+  memberCardError.value = ''
+}
+
+// 视口缩放/旋转与成员列表滚动会让先前记录的矩形失效：同一帧内合并事件后按行元素重算。
+let anchorFrame = 0
+function syncMemberCardAnchor(): void {
+  if (!memberCard.value || anchorFrame) return
+  anchorFrame = requestAnimationFrame(() => {
+    anchorFrame = 0
+    const current = memberCard.value
+    if (!current) return
+    // 行元素已随列表重渲染卸载时直接关闭，避免浮窗停在旧位置。
+    if (!current.anchorEl?.isConnected) {
+      closeMemberCard()
+      return
+    }
+    const rect = current.anchorEl.getBoundingClientRect()
+    const { left, right, top } = current.anchor
+    if (left === rect.left && right === rect.right && top === rect.top) return
+    current.anchor = { left: rect.left, right: rect.right, top: rect.top }
+  })
+}
+
+onMounted(() => {
+  window.addEventListener('resize', syncMemberCardAnchor, { passive: true })
+  window.addEventListener('scroll', syncMemberCardAnchor, { capture: true, passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncMemberCardAnchor)
+  window.removeEventListener('scroll', syncMemberCardAnchor, true)
+  if (anchorFrame) cancelAnimationFrame(anchorFrame)
+  anchorFrame = 0
+})
+
+/** 浮窗「发送消息」：创建或复用与对方的单聊（服务端按 direct_key 去重），再交给页面跳转。 */
+async function startChatWithCardMember(): Promise<void> {
+  const member = cardMember.value
+  if (!member || memberCardBusy.value) return
+  memberCardBusy.value = true
+  memberCardError.value = ''
+  try {
+    const conversation = await conversations.createDirect(member.userId)
+    closeMemberCard()
+    emit('open-chat', conversation.conversationId)
+  } catch (error) {
+    memberCardError.value = friendlyError(error)
+  } finally {
+    memberCardBusy.value = false
+  }
+}
+
+/** 浮窗「添加好友」：发送好友申请；对方此前也申请过时服务端自动接受（store 内提示）。 */
+async function addFriendFromCard(): Promise<void> {
+  const member = cardMember.value
+  if (!member || memberCardRequesting.value) return
+  memberCardRequesting.value = true
+  memberCardError.value = ''
+  try {
+    await friends.sendRequest(member.userId)
+  } catch (error) {
+    memberCardError.value = friendlyError(error)
+  } finally {
+    memberCardRequesting.value = false
+  }
+}
+
+// 好友数据由 App 在登录/重连时拉取；面板首次打开补一次兜底，避免把好友误显示为陌生人。
+void friends.ensureLoaded().catch(() => undefined)
+
+// 切换会话后浮窗仍指向上一会话的成员，关闭以免误操作。
+watch(
+  () => props.conversation.conversationId,
+  () => closeMemberCard(),
+)
 
 function roleLabel(member: ConversationMember): string {
   return member.role === 'owner' ? '群主' : '成员'
@@ -451,15 +576,23 @@ async function removeAvatar(): Promise<void> {
 
     <ul class="group-panel__members">
       <li v-for="member in members" :key="member.userId" class="group-panel__member">
-        <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
-        <span class="group-panel__member-info">
-          <span class="group-panel__member-name">
-            <PresenceDot :online="presence.stateOf(member.userId)" />
-            {{ member.displayName }}
-            <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
+        <button
+          type="button"
+          class="group-panel__member-main"
+          :aria-label="`查看 ${member.displayName} 的资料`"
+          aria-haspopup="dialog"
+          @click="openMemberCard(member, $event)"
+        >
+          <Avatar :display-name="member.displayName" :avatar-file-id="member.avatarFileId" :size="32" />
+          <span class="group-panel__member-info">
+            <span class="group-panel__member-name">
+              <PresenceDot :online="presence.stateOf(member.userId)" />
+              {{ member.displayName }}
+              <em v-if="member.userId === selfUserId" class="group-panel__me">（我）</em>
+            </span>
+            <span class="group-panel__member-email">{{ member.email }}</span>
           </span>
-          <span class="group-panel__member-email">{{ member.email }}</span>
-        </span>
+        </button>
         <span class="group-panel__role">{{ roleLabel(member) }}</span>
         <button
           v-if="canTransferTo(member)"
@@ -618,6 +751,22 @@ async function removeAvatar(): Promise<void> {
       @confirm="clearAnnouncement"
       @cancel="clearAnnouncementOpen = false"
     />
+
+    <MemberProfileCard
+      :open="cardMember !== null"
+      :member="cardMember"
+      :display-name="cardDisplayName"
+      :presence="cardMember ? presence.stateOf(cardMember.userId) : undefined"
+      :relation="cardRelation"
+      :is-self="cardMember?.userId === selfUserId"
+      :anchor="memberCard?.anchor ?? null"
+      :busy="memberCardBusy"
+      :requesting="memberCardRequesting"
+      :error="memberCardError"
+      @close="closeMemberCard"
+      @start-chat="startChatWithCardMember"
+      @send-request="addFriendFromCard"
+    />
   </div>
 </template>
 
@@ -704,6 +853,35 @@ async function removeAvatar(): Promise<void> {
   align-items: center;
   padding: var(--ec-space-2) 0;
   border-bottom: 1px solid var(--ec-border);
+}
+
+/* F-41：成员行主体改为按钮（点击打开资料浮窗），保持原有头像 + 昵称/邮箱布局。 */
+.group-panel__member-main {
+  display: flex;
+  flex: 1;
+  gap: var(--ec-space-2);
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-panel__member-main:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
+/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
+@media (hover: hover) and (pointer: fine) {
+  .group-panel__member-main:hover .group-panel__member-name {
+    color: var(--ec-brand-600);
+  }
 }
 
 .group-panel__member-info,
@@ -935,6 +1113,10 @@ async function removeAvatar(): Promise<void> {
 @media (max-width: 800px) {
   .group-panel__link,
   .group-panel__clear {
+    min-height: 44px;
+  }
+
+  .group-panel__member-main {
     min-height: 44px;
   }
 }

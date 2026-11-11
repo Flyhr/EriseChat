@@ -1058,6 +1058,12 @@ function onLeftGroup(conversationId: string): void {
   conversations.handleRemovedConversations([conversationId])
 }
 
+// F-41：群成员资料浮窗「发送消息」——收起群资料侧栏后跳到与对方的单聊。
+function onOpenMemberChat(conversationId: string): void {
+  activeDrawer.value = null
+  selectConversation(conversationId)
+}
+
 // 表情面板悬浮在发送框上方（UI-02）：绝对定位不参与文档流，开合不挤动聊天内容；
 // 点击面板外任意位置或按 Esc 收起（不需要面板内关闭按钮）。
 function toggleEmojiDrawer(): void {
@@ -1078,7 +1084,8 @@ function onEmojiOutsidePointer(event: MouseEvent): void {
 function onEmojiEscape(event: KeyboardEvent): void {
   if (event.key !== 'Escape') return
   // F-21：面板内弹窗打开时，Esc 应先交给 AppDialog 关闭确认框，不连带收起面板。
-  if (document.querySelector('.ec-dialog')) return
+  // F-41：成员资料浮窗同理，Esc 只关浮窗，不连带收起整个侧栏。
+  if (document.querySelector('.ec-dialog, .member-card')) return
   activeDrawer.value = null
 }
 
@@ -1751,6 +1758,7 @@ function onWindowDrop(event: DragEvent): void {
                 :self-user-id="selfUserId"
                 @updated="onGroupUpdated"
                 @left="onLeftGroup"
+                @open-chat="onOpenMemberChat"
               />
               <ConversationFilesPanel
                 v-else-if="asideTab === 'files' && activeId"
