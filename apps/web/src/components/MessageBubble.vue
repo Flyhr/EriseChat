@@ -4,6 +4,7 @@ import type { Message, VoiceContent } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
 import { hasSelfMention, splitRichText } from '../core/mentions'
+import { isNativeShell, openExternalUrl } from '../core/externalLink'
 import { replyCardText } from '../core/replyPreview'
 import Avatar from './Avatar.vue'
 import AppIcon from './AppIcon.vue'
@@ -153,6 +154,17 @@ function onPreview(): void {
   // F-18：已撤回的图片不再提供预览。
   if (recalled.value) return
   emit('preview-image', messageKeyOf(props.message))
+}
+
+/**
+ * F-07：外部链接点击。Web/Electron 不拦截，保留 <a target="_blank"> 的默认行为
+ * （桌面壳由 setWindowOpenHandler 交给系统浏览器）；Android 壳内 WebView 不支持新窗口，
+ * 改为调 @capacitor/browser 用系统浏览器打开，避免「点了没反应」。
+ */
+function onLinkClick(href: string, event: MouseEvent): void {
+  if (!isNativeShell()) return
+  event.preventDefault()
+  void openExternalUrl(href)
 }
 
 /** F-09：引用摘要（已落库消息取服务端 reply；pending 用本地 replyPreview，不可跳转）。 */
@@ -315,6 +327,7 @@ const timeText = computed(() =>
                 :href="segment.href"
                 target="_blank"
                 rel="noopener noreferrer"
+                @click="onLinkClick(segment.href, $event)"
                 >{{ segment.value }}</a
               >
               <span
