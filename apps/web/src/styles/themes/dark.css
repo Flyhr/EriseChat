@@ -1,0 +1,93 @@
+/* 主题「深蓝」（dark）：按 docs/ui/README.md §9.2 覆写全部语义 token。
+   variables.css 的 :root 是浅色回退基线；index.html 在首屏前按用户设置预置 data-ec-theme，
+   App.vue 在设置变更时写入。组件只引用 --ec-*，不感知当前主题。
+   --ec-chat-gradient / --ec-scrollbar-thumb 是引用其他 token 的派生值，覆写被引用项后自动跟随。 */
+html[data-ec-theme='dark'] {
+  color-scheme: dark;
+
+  /* 品牌与状态 */
+  --ec-brand-500: #60a5fa;
+  --ec-brand-600: #2563eb;
+  --ec-brand-700: #1d4ed8;
+  --ec-brand-100: #1e3a5f;
+  --ec-brand-050: #162b47;
+  --ec-success: #34d399;
+  --ec-online: #34d399;
+  --ec-danger: #f87171;
+  --ec-warning: #fbbf24;
+  --ec-warning-soft: #3a2a10;
+  --ec-warning-border: #78501a;
+  --ec-warning-surface: #2a1e0e;
+  --ec-warning-strong: #3a2a12;
+  --ec-disabled: #5a6780;
+
+  /* 文本 */
+  --ec-text-primary: #e8eef9;
+  --ec-text-secondary: #a8b8cf;
+  --ec-text-tertiary: #7c8da8;
+  --ec-text-inverse: #ffffff;
+  --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
+
+  /* 表面与背景 */
+  --ec-bg-canvas: #0b1220;
+  --ec-nav-bg: #0f172a;
+  --ec-list-bg: #111c30;
+  --ec-surface: #16223a;
+  --ec-surface-hover: #1d2c47;
+  --ec-chat-bg-a: #0e1a2e;
+  --ec-chat-bg-b: #101d33;
+  --ec-chat-bg-c: #132039;
+  --ec-chat-bg-d: #132039;
+  --ec-chat-glow-a: rgba(37, 99, 235, 0.16);
+  --ec-chat-glow-b: rgba(79, 70, 229, 0.12);
+  --ec-header-bg: rgba(15, 23, 42, 0.86);
+  --ec-chip-surface: rgba(22, 34, 58, 0.8);
+  --ec-row-active-bg: linear-gradient(90deg, rgba(30, 58, 95, 0.95), rgba(22, 34, 58, 0.5));
+  --ec-date-badge-bg: rgba(30, 44, 70, 0.92);
+
+  /* 边框与分隔 */
+  --ec-border: #58709a; /* 组件边界对卡片表面约 3.2:1，满足非文本对比要求 */
+  --ec-border-soft: #1e2c44; /* 弱分割线：装饰性，不承载组件边界信息 */
+  --ec-border-strong: #7c90b0;
+  --ec-bubble-other: #1b2942;
+  --ec-bubble-other-border: #58709a;
+  --ec-bubble-self: #2563eb;
+  --ec-bubble-self-border: transparent;
+
+  /* 白字气泡仍用深蓝渐变，保证白色正文 ≥4.5:1；亮蓝只用于图标与焦点环。 */
+  --ec-bubble-self-bg: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+
+  /* 媒体卡 */
+  --ec-media-surface: #1b2942;
+  --ec-media-surface-hover: #22334f;
+  --ec-media-border: #58709a;
+  --ec-media-icon-surface: #1e3557;
+  --ec-media-track: #2f405c;
+
+  /* 阴影与遮罩 */
+  --ec-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --ec-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --ec-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --ec-shadow-bubble: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --ec-shadow-bubble-self: 0 4px 14px rgba(37, 99, 235, 0.3);
+  --ec-composer-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --ec-shadow-media: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --ec-shadow-badge: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --ec-scrim: rgba(3, 8, 18, 0.66);
+  --ec-overlay: rgba(3, 8, 18, 0.9);
+  --ec-overlay-border: rgba(255, 255, 255, 0.35);
+  --ec-overlay-hover: rgba(255, 255, 255, 0.14);
+
+  /* 焦点与选中 */
+  --ec-focus-ring: #60a5fa;
+  --ec-focus-shadow: 0 0 0 3px rgba(96, 165, 250, 0.24);
+  --ec-drop-overlay: rgba(59, 130, 246, 0.16);
+
+  /* 蓝色气泡上的叠加色保持白色半透明 */
+  --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
+  --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
+
+  /* 设置页主题预览是静态示意图，两套主题下保持同一组颜色以便对照 */
+  --ec-theme-preview-light: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+  --ec-theme-preview-dark: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}

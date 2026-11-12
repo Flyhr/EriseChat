@@ -9,8 +9,10 @@ export const SETTINGS_STORAGE_KEY = 'erisechat.settings'
 /** 外观设置的取值白名单：解析持久化数据时按此校验，避免非法字符串导致样式静默失效。 */
 export const MESSAGE_FONT_SIZES = ['small', 'medium', 'large'] as const
 export const LIST_DENSITIES = ['comfortable', 'compact'] as const
+export const EC_THEMES = ['azure', 'dark'] as const
 export type MessageFontSize = (typeof MESSAGE_FONT_SIZES)[number]
 export type ListDensity = (typeof LIST_DENSITIES)[number]
+export type EcTheme = (typeof EC_THEMES)[number]
 
 /** 客户端本地设置集合。 */
 export interface ClientSettings {
@@ -24,6 +26,8 @@ export interface ClientSettings {
   messageFontSize: MessageFontSize
   /** 会话列表密度：comfortable=72px 行高 / compact=56px。 */
   listDensity: ListDensity
+  /** 界面主题：azure=澄蓝浅色 / dark=深蓝深色；只存本机，不同步服务端。 */
+  theme: EcTheme
 }
 
 /** 默认值：提示音开启、系统通知关闭（需要用户显式授权/开启）。 */
@@ -33,6 +37,7 @@ export const DEFAULT_SETTINGS: ClientSettings = {
   androidBackgroundNotificationsEnabled: false,
   messageFontSize: 'medium',
   listDensity: 'comfortable',
+  theme: 'azure',
 }
 
 /** 未保存过偏好时的默认设置：桌面壳的系统通知是原生能力、无需浏览器授权，默认开启。 */
@@ -68,6 +73,12 @@ export function parseStoredSettings(raw: string | null | undefined): ClientSetti
     ) {
       result.listDensity = parsed.listDensity as ListDensity
     }
+    if (
+      typeof parsed.theme === 'string' &&
+      (EC_THEMES as readonly string[]).includes(parsed.theme)
+    ) {
+      result.theme = parsed.theme as EcTheme
+    }
   } catch {
     // 损坏的 JSON 按默认值处理，下一次保存会覆盖。
   }
@@ -94,6 +105,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const androidBackgroundNotificationsEnabled = ref(stored.androidBackgroundNotificationsEnabled)
   const messageFontSize = ref<MessageFontSize>(stored.messageFontSize)
   const listDensity = ref<ListDensity>(stored.listDensity)
+  const theme = ref<EcTheme>(stored.theme)
 
   function persist(): void {
     writeStoredSettings({
@@ -102,6 +114,7 @@ export const useSettingsStore = defineStore('settings', () => {
       androidBackgroundNotificationsEnabled: androidBackgroundNotificationsEnabled.value,
       messageFontSize: messageFontSize.value,
       listDensity: listDensity.value,
+      theme: theme.value,
     })
   }
 
@@ -135,16 +148,24 @@ export const useSettingsStore = defineStore('settings', () => {
     persist()
   }
 
+  function setTheme(value: EcTheme): void {
+    if (theme.value === value) return
+    theme.value = value
+    persist()
+  }
+
   return {
     soundEnabled,
     desktopNotificationsEnabled,
     androidBackgroundNotificationsEnabled,
     messageFontSize,
     listDensity,
+    theme,
     setSoundEnabled,
     setDesktopNotificationsEnabled,
     setAndroidBackgroundNotificationsEnabled,
     setMessageFontSize,
     setListDensity,
+    setTheme,
   }
 })

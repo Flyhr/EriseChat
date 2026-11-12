@@ -59,7 +59,7 @@ import { useSettingsStore } from '../stores/settings'
 // 设置中心（SET-01 重构）：按「个人资料 / 账号与安全 / 通知与提醒 / 外观 / 连接与关于」分节。
 // 桌面为左侧分类导航 + 右侧内容面板；移动端为分组列表 → 进入分节详情（带返回），
 // 与 Slack / Telegram / 微信 / iOS 设置的分组列表形态一致。只展示真实可用的能力：
-// 消息字号与会话密度已做成真设置；未上线的深色主题仍灰显，不提供假开关、不发假请求。
+// 消息字号、会话密度与深浅色主题均已做成真设置，只展示真实可用的能力，不提供假开关、不发假请求。
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
@@ -1068,21 +1068,33 @@ async function saveProfile(): Promise<void> {
         <!-- 外观 -->
         <div v-else-if="activeSectionId === 'appearance'" class="settings-content__body">
           <SettingsGroup title="主题模式">
-            <div class="settings-themes">
-              <div class="settings-theme settings-theme--active" role="status">
+            <div class="settings-themes" role="group" aria-label="主题模式">
+              <button
+                type="button"
+                class="settings-theme"
+                :class="{ 'settings-theme--active': settings.theme === 'azure' }"
+                :aria-pressed="settings.theme === 'azure'"
+                @click="settings.setTheme('azure')"
+              >
                 <span class="settings-theme__preview settings-theme__preview--light" aria-hidden="true" />
                 <span class="settings-theme__meta">
-                  <span class="settings-theme__name">浅色（当前）</span>
+                  <span class="settings-theme__name">浅色</span>
                 </span>
-                <AppIcon class="settings-theme__check" name="check" :size="18" />
-              </div>
-              <div class="settings-theme settings-theme--disabled" aria-disabled="true">
+                <AppIcon v-if="settings.theme === 'azure'" class="settings-theme__check" name="check" :size="18" />
+              </button>
+              <button
+                type="button"
+                class="settings-theme"
+                :class="{ 'settings-theme--active': settings.theme === 'dark' }"
+                :aria-pressed="settings.theme === 'dark'"
+                @click="settings.setTheme('dark')"
+              >
                 <span class="settings-theme__preview settings-theme__preview--dark" aria-hidden="true" />
                 <span class="settings-theme__meta">
                   <span class="settings-theme__name">深色</span>
-                  <span class="settings-theme__badge">即将上线</span>
                 </span>
-              </div>
+                <AppIcon v-if="settings.theme === 'dark'" class="settings-theme__check" name="check" :size="18" />
+              </button>
             </div>
           </SettingsGroup>
           <!-- UI-D P3：参考图 05 的其余外观信息卡。只读展示当前值，不提供无后端支持的假入口。 -->
@@ -1755,6 +1767,7 @@ async function saveProfile(): Promise<void> {
   padding: var(--ec-space-4);
 }
 
+/* 深色主题解冻后两张卡都可点击；选中态与 hover / focus 只改边框与底色，不产生布局位移。 */
 .settings-theme {
   display: flex;
   gap: var(--ec-space-3);
@@ -1763,6 +1776,16 @@ async function saveProfile(): Promise<void> {
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-md);
   background: var(--ec-surface);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--ec-transition-fast) var(--ec-ease),
+    background var(--ec-transition-fast) var(--ec-ease);
+}
+
+.settings-theme:hover {
+  border-color: var(--ec-brand-500);
+  background: var(--ec-surface-hover);
 }
 
 .settings-theme--active {
@@ -1770,8 +1793,9 @@ async function saveProfile(): Promise<void> {
   box-shadow: 0 0 0 1px var(--ec-brand-600);
 }
 
-.settings-theme--disabled {
-  opacity: 0.7;
+.settings-theme:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .settings-theme__preview {
@@ -1804,21 +1828,12 @@ async function saveProfile(): Promise<void> {
   font-weight: var(--ec-font-weight-medium);
 }
 
-.settings-theme__badge {
-  align-self: flex-start;
-  padding: 1px 6px;
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-full);
-  color: var(--ec-text-tertiary);
-  font-size: var(--ec-font-size-small);
-}
-
 .settings-theme__check {
   flex: none;
   color: var(--ec-brand-600);
 }
 
-/* UI-D P3：外观信息卡（只读展示当前值，不提供未实现的开关或下拉）。 */
+/* UI-D P3 外观信息卡：字号与密度已改为可操作设置，聊天背景仍为只读展示。 */
 .settings-appearance {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

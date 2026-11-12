@@ -30,7 +30,7 @@ import { useSettingsStore } from './stores/settings'
 import { useSearchStore } from './stores/search'
 import { useVisualViewport } from './core/useVisualViewport'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
-import { ecThemeOverrides } from './core/theme'
+import { ecThemeOverridesFor } from './core/theme'
 
 // 根组件（UI-01 布局壳）：/login 使用 blank 布局（全屏，无导航）；
 // 其余路由为「左侧一级导航 + 内容区」外壳，页面自身负责内部滚动。
@@ -223,11 +223,14 @@ watch(
   { immediate: true },
 )
 
-// U-08：外观设置写入根节点属性，由 variables.css 的属性选择器覆盖字号与行高 token；
-// 深色主题仍按 §14.2 冻结，不在此处提供可点击入口。
+// U-08 / 深色主题：外观设置写入根节点属性，由主题文件与 variables.css 的属性选择器
+// 覆写 --ec-* token；组件不感知具体取值。index.html 已在首屏前置入保存的主题避免闪烁。
+const themeOverrides = computed(() => ecThemeOverridesFor(settings.theme))
+
 watch(
-  () => [settings.messageFontSize, settings.listDensity] as const,
-  ([font, density]) => {
+  () => [settings.theme, settings.messageFontSize, settings.listDensity] as const,
+  ([theme, font, density]) => {
+    document.documentElement.dataset.ecTheme = theme
     document.documentElement.dataset.ecFont = font
     document.documentElement.dataset.ecDensity = density
   },
@@ -301,7 +304,7 @@ function reconnect(): void {
 
 <template>
   <!-- Naive UI 主题入口：abstract 不渲染额外 DOM，避免影响 scoped 布局与 file:// 加载。 -->
-  <NConfigProvider abstract :theme-overrides="ecThemeOverrides">
+  <NConfigProvider abstract :theme-overrides="themeOverrides">
     <!-- UI-D：全局轻提示桥接到 Naive UI message，独立于主布局之外，不影响 flex 外壳。 -->
     <NMessageProvider>
       <ToastBridge />
