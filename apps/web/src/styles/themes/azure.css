@@ -37,4 +37,17 @@ html[data-ec-theme='azure'] {
   --ec-media-border: #cbd5e1;
   --ec-media-icon-surface: #eff6ff;
   --ec-media-track: #dbe4f0;
+  /* U-04：与 variables.css 回退基线同值；新增主题时在此覆写这组语义色。 */
+  --ec-focus-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  --ec-drop-overlay: rgba(37, 99, 235, 0.12);
+  --ec-date-badge-bg: rgba(241, 245, 253, 0.92);
+  --ec-shadow-badge: 0 6px 16px rgba(37, 99, 235, 0.28);
+  --ec-warning-soft: #fff1d6;
+  --ec-chip-surface: rgba(255, 255, 255, 0.72);
+  --ec-warning-border: #fed7aa;
+  --ec-warning-surface: #fff7ed;
+  --ec-warning-strong: #ffedd5;
+  --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
+  --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
+  --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
 }

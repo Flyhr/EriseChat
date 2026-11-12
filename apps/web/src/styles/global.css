@@ -162,3 +162,42 @@ textarea,
     scroll-behavior: auto !important;
   }
 }
+
+/* U-01 加载态骨架：静态色块，只用 --ec-* token；不做循环动画，
+   避免 reduced-motion 下闪烁，也避免骨架 → 内容时因动画产生位移。 */
+.ec-skeleton {
+  flex: none;
+  background: var(--ec-border-soft);
+  border-radius: var(--ec-radius-sm);
+}
+
+/* U-02 入场动效：时长与 easing 只取 --ec-* token；reduced-motion 下不引用这两个动画。 */
+@keyframes ec-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ec-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ec-enter {
+    animation: ec-enter var(--ec-transition-base) var(--ec-ease) both;
+  }
+
+  .ec-fade {
+    animation: ec-fade var(--ec-transition-base) var(--ec-ease) both;
+  }
+}

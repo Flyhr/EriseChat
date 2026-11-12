@@ -68,6 +68,24 @@
   --ec-composer-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); /* 输入卡片浮起阴影 */
   --ec-shadow-media: 0 2px 8px rgba(15, 23, 42, 0.08); /* 无气泡媒体卡浮起阴影 */
 
+  /* U-04 回收：原散落在组件里的语义色值，统一在此定义并由主题文件覆写。 */
+  --ec-focus-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12); /* 输入框聚焦外圈：brand-500 12% */
+  --ec-drop-overlay: rgba(37, 99, 235, 0.12); /* 拖拽投放遮罩：brand-600 12% */
+  --ec-date-badge-bg: rgba(241, 245, 253, 0.92); /* 日期胶囊底：nav-bg 92% */
+  --ec-shadow-badge: 0 6px 16px rgba(37, 99, 235, 0.28); /* 新消息浮标投影：brand-600 28% */
+  --ec-warning-soft: #fff1d6; /* 搜索命中高亮底：warning 的浅色派生 */
+  --ec-chip-surface: rgba(255, 255, 255, 0.72); /* 顶栏成员计数等半透明胶囊底 */
+  /* U-04 审计：断线横幅与蓝色气泡上的叠加色，原散落在组件里。 */
+  --ec-warning-border: #fed7aa;
+  --ec-warning-surface: #fff7ed;
+  --ec-warning-strong: #ffedd5;
+  --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
+  --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
+  --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
+  /* 设置页主题预览是静态示意图，不随当前主题变化，故只在 :root 基线声明。 */
+  --ec-theme-preview-light: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+  --ec-theme-preview-dark: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+
   /* ==================== 字体与排版（§3.2；不捆绑字体文件） ==================== */
   --ec-font-sans: 'Inter', 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
     sans-serif;
@@ -102,6 +120,10 @@
   --ec-radius-panel: 14px;
   --ec-radius-lg: 16px;
   --ec-radius-full: 9999px;
+  /* U-04 回收：气泡内边距与移动端圆角，原先直接写在 MessageBubble.vue 里。 */
+  --ec-bubble-padding: 10px 14px; /* 按 §3.2 正文 14px 与气泡圆角推导 */
+  --ec-radius-bubble-mobile: 16px;
+  --ec-radius-bubble-tail-mobile: 5px;
 
   /* ==================== 阴影 / 焦点 / 禁用 / 动效 ==================== */
   --ec-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
@@ -131,6 +153,8 @@
      用 env() 取系统状态栏高度，App 根节点在 ≤800 时据此留出顶部安全区（UI-05 修复）。 */
   --ec-safe-top: env(safe-area-inset-top, 0px);
   --ec-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* 软键盘适配由 core/useVisualViewport.ts 运行时覆写为 px；此处是未启用时的回退基线。 */
+  --ec-vvh: 100dvh;
 
   /* ==================== 兼容别名（旧组件无需改结构即切换蓝白） ==================== */
   --color-primary: var(--ec-brand-600);
