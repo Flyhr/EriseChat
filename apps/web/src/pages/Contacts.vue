@@ -4,7 +4,7 @@
 // - 申请：收到的申请可接受/拒绝，发出的可撤销（实时推送由 friends store 接收）；
 // - 搜索：按邮箱/昵称搜索同事，按 relation 显示加为好友 / 已发送 / 待处理。
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usersApi, type UserProfile } from '../api/users'
 import type { Conversation } from '../types/frames'
@@ -18,6 +18,7 @@ import EmptyState from '../components/EmptyState.vue'
 import NewGroupDialog from '../components/NewGroupDialog.vue'
 import PresenceDot from '../components/PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
+import { enter, type MotionHandle } from '../core/motion'
 import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
@@ -124,6 +125,37 @@ function switchTab(next: ContactsTab): void {
     void ensureFriendsLoaded()
   }
 }
+
+// U-17：好友首屏骨架一次性入场（5 行，受控 stagger）；真实好友行不加 stagger
+// （AGENTS.md §14.9 消息流禁令），切换页签重新出现时重播。
+const loadingRef = ref<HTMLElement | null>(null)
+let loadingMotion: MotionHandle | null = null
+
+const showFriendsSkeleton = computed(
+  () => tab.value === 'friends' && friends.loading && friends.friends.length === 0,
+)
+
+function playSkeletonEntrance(): void {
+  const container = loadingRef.value
+  if (!container) return
+  loadingMotion?.cancel()
+  loadingMotion = enter(Array.from(container.children), { stagger: true })
+}
+
+onMounted(playSkeletonEntrance)
+onBeforeUnmount(() => {
+  loadingMotion?.cancel()
+  loadingMotion = null
+})
+
+watch(
+  showFriendsSkeleton,
+  (show) => {
+    if (show) playSkeletonEntrance()
+    else loadingMotion?.cancel()
+  },
+  { flush: 'post' },
+)
 
 // ---------------------------------------------------------------------------
 // 搜索
@@ -391,6 +423,7 @@ onBeforeUnmount(() => {
         <p v-if="friendLoadError" class="contacts-page__error" role="alert">{{ friendLoadError }}</p>
         <div
           v-if="friends.loading && friends.friends.length === 0"
+          ref="loadingRef"
           class="contacts-page__loading"
           role="status"
           aria-label="联系人加载中"

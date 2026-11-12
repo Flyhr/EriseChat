@@ -29,6 +29,7 @@ import { friendlyError } from '../core/errorMessages'
 import { ApiError } from '../core/http'
 import { compressImageFile } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
+import { enter, type MotionHandle } from '../core/motion'
 import type { MentionCandidateMember } from '../core/mentions'
 import type { MessageActionId } from '../core/messageActions'
 import { createPanelHistoryGuard } from '../core/historyGuard'
@@ -785,6 +786,33 @@ watch(
 watch(activeLoaded, (loaded) => {
   if (loaded && (pendingJumpSeq !== null || pendingJumpMessageId !== null)) void runPendingJump()
 })
+
+// U-17：首屏骨架一次性入场。只作用于 3 行伪消息骨架，消息流本身不加 stagger
+// （AGENTS.md §14.9 消息流禁令）；切会话时骨架重新出现即重播。
+const loadingRef = ref<HTMLElement | null>(null)
+let loadingMotion: MotionHandle | null = null
+
+function playSkeletonEntrance(): void {
+  const container = loadingRef.value
+  if (!container) return
+  loadingMotion?.cancel()
+  loadingMotion = enter(Array.from(container.children), { stagger: true })
+}
+
+onMounted(playSkeletonEntrance)
+onBeforeUnmount(() => {
+  loadingMotion?.cancel()
+  loadingMotion = null
+})
+
+watch(
+  activeLoaded,
+  (loaded) => {
+    if (loaded) loadingMotion?.cancel()
+    else playSkeletonEntrance()
+  },
+  { flush: 'post' },
+)
 
 // 切换会话时清空回复目标，避免把引用带到另一个会话（F-09）。
 watch(activeId, () => {
@@ -1729,6 +1757,7 @@ function onWindowDrop(event: DragEvent): void {
           <div class="chat-page__chat" :aria-busy="!activeLoaded">
             <div
               v-if="!activeLoaded"
+              ref="loadingRef"
               class="chat-page__loading"
               role="status"
               aria-label="消息加载中"

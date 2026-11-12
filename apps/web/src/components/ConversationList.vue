@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Conversation } from '../types/frames'
 import { filterConversations, type ConversationFilter } from '../core/chatLayout'
 import { friendlyError } from '../core/errorMessages'
+import { enter, type MotionHandle } from '../core/motion'
 import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import { useSearchStore } from '../stores/search'
@@ -60,6 +61,34 @@ function unreadOf(conversationId: string): number {
   if (conversationId === props.activeId) return 0
   return conversationsStore.unreadOf(conversationId)
 }
+
+// U-17：首屏骨架一次性入场。骨架行按 --ec-motion-stagger 错峰，总跨度受
+// --ec-motion-stagger-max 约束；真实会话行不加 stagger（AGENTS.md §14.9 消息流禁令）。
+const loadingRef = ref<HTMLElement | null>(null)
+let loadingMotion: MotionHandle | null = null
+
+function playSkeletonEntrance(): void {
+  const container = loadingRef.value
+  if (!container) return
+  loadingMotion?.cancel()
+  // 逐行错峰而不是整块淡入：骨架行数量固定，跨度由 staggerStep 压到上限内。
+  loadingMotion = enter(Array.from(container.children), { stagger: true })
+}
+
+onMounted(playSkeletonEntrance)
+onBeforeUnmount(() => {
+  loadingMotion?.cancel()
+  loadingMotion = null
+})
+
+watch(
+  () => props.loading && visible.value.length === 0,
+  (show) => {
+    if (show) playSkeletonEntrance()
+    else loadingMotion?.cancel()
+  },
+  { flush: 'post' },
+)
 
 /** F-10：置顶/免打扰成功后的轻提示文案，按本次改动的字段决定。 */
 function settingsToastText(
@@ -138,6 +167,7 @@ async function onUpdateSettings(payload: {
 
     <div
       v-if="loading && visible.length === 0"
+      ref="loadingRef"
       class="ec-conversation-list__loading"
       role="status"
       aria-label="会话加载中"
