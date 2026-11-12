@@ -20,12 +20,17 @@ export interface UpdateProgress {
   percent: number
 }
 
-/** 桌面壳检查更新的结果（IPC update:check）。 */
+/** 桌面壳检查更新的结果（IPC update:check）：主进程已核对双清单并持有候选，渲染层不接触 URL/摘要/路径。 */
 export interface DesktopUpdateCheckResult {
   available: boolean
   currentVersion: string
   latestVersion: string
-  artifact: VersionArtifact | null
+  /** 双清单一致且同源校验通过，可走应用内下载安装。 */
+  canInstall: boolean
+  /** canInstall=false 且确有新版本时的原因。 */
+  reason?: string
+  /** 同源 HTTPS 下载页（应用内更新不可用时的手动入口）。 */
+  manualUrl: string
 }
 
 function parseVersionSegment(segment: string): number {

@@ -272,6 +272,10 @@ const latestVersion = ref('')
 const updateAvailable = ref(false)
 const updateMessage = ref('')
 const updateArtifact = ref<VersionArtifact | null>(null)
+/** 桌面端：双清单一致、可走应用内下载安装（P2 起由主进程判定）。 */
+const desktopCanInstall = ref(false)
+/** 桌面端：应用内更新不可用时的同源 HTTPS 下载页。 */
+const desktopManualUrl = ref('')
 const updateDownloading = ref(false)
 const updateProgress = ref(0)
 let stopUpdateProgress: (() => void) | null = null
@@ -291,6 +295,8 @@ async function checkForUpdate(): Promise<void> {
   updateChecking.value = true
   updateMessage.value = ''
   updateArtifact.value = null
+  desktopCanInstall.value = false
+  desktopManualUrl.value = ''
   try {
     if (isDesktopShell()) {
       const response = await checkDesktopUpdate()
@@ -301,10 +307,13 @@ async function checkForUpdate(): Promise<void> {
       }
       latestVersion.value = response.result.latestVersion
       updateAvailable.value = response.result.available
-      updateArtifact.value = response.result.available ? response.result.artifact : null
-      updateMessage.value = response.result.available
-        ? `发现新版本 v${response.result.latestVersion}，可下载并安装`
-        : '已是最新版本'
+      desktopCanInstall.value = response.result.canInstall
+      desktopManualUrl.value = response.result.manualUrl
+      updateMessage.value = !response.result.available
+        ? '已是最新版本'
+        : response.result.canInstall
+          ? `发现新版本 v${response.result.latestVersion}，可下载并安装`
+          : `发现新版本 v${response.result.latestVersion}，${response.result.reason ?? '请手动下载'}`
       return
     }
 
@@ -339,10 +348,9 @@ async function checkForUpdate(): Promise<void> {
   }
 }
 
-/** 下载并安装桌面端更新（F-29-04）：主进程下载 → sha256 校验 → 静默安装并退出。 */
+/** 下载并安装桌面端更新（P2）：主进程持有候选 → updater 下载并校验 SHA-512 → 安装前核对 SHA-256 → 静默重启。 */
 async function downloadAndInstallUpdate(): Promise<void> {
-  const artifact = updateArtifact.value
-  if (!artifact || updateDownloading.value) return
+  if (!desktopCanInstall.value || updateDownloading.value) return
   updateDownloading.value = true
   updateProgress.value = 0
   updateMessage.value = '正在下载更新…'
@@ -351,7 +359,7 @@ async function downloadAndInstallUpdate(): Promise<void> {
     updateProgress.value = progress.percent
   })
   try {
-    const downloaded = await downloadDesktopUpdate(artifact)
+    const downloaded = await downloadDesktopUpdate()
     if (!downloaded.ok) {
       updateMessage.value = downloaded.message ?? '下载更新失败，请稍后重试'
       return
@@ -359,7 +367,7 @@ async function downloadAndInstallUpdate(): Promise<void> {
     updateMessage.value = '下载完成，正在安装…'
     const installed = await installDesktopUpdate()
     if (!installed.ok) {
-      updateMessage.value = installed.message ?? '安装更新失败，请手动运行下载的安装包'
+      updateMessage.value = installed.message ?? '安装更新失败，请手动下载安装包'
     }
   } finally {
     updateDownloading.value = false
@@ -1207,7 +1215,7 @@ async function saveProfile(): Promise<void> {
             </SettingsRow>
             <p v-if="updateMessage" class="settings-field__hint" role="status">{{ updateMessage }}</p>
             <SettingsRow
-              v-if="isDesktopShell() && updateAvailable && updateArtifact"
+              v-if="isDesktopShell() && updateAvailable && desktopCanInstall"
               label="安装更新"
               :hint="updateDownloading ? `下载中 ${updateProgress}%` : '下载完成后将自动安装并重启'"
             >
@@ -1219,6 +1227,13 @@ async function saveProfile(): Promise<void> {
               >
                 {{ updateDownloading ? `下载中 ${updateProgress}%` : '下载并安装' }}
               </button>
+            </SettingsRow>
+            <SettingsRow
+              v-if="isDesktopShell() && updateAvailable && !desktopCanInstall && desktopManualUrl"
+              label="手动更新"
+              hint="在浏览器中打开同源下载页"
+            >
+              <a class="settings-link" :href="desktopManualUrl" target="_blank" rel="noreferrer">打开下载页</a>
             </SettingsRow>
             <SettingsRow
               v-if="!isDesktopShell() && isNativeShell() && updateAvailable && updateArtifact"

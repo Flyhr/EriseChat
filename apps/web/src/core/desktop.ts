@@ -2,7 +2,6 @@
 // 未读角标同步、系统通知点击回调、服务器地址、客户端更新检查（F-29）；Web 版没有该对象，所有调用静默降级。
 // 只暴露白名单能力，不接触 Node/Electron 原始对象（apps/desktop/electron/preload.ts）。
 
-import type { VersionArtifact } from '../api/version'
 import type { DesktopUpdateCheckResult, UpdateProgress } from './update'
 
 /** 通知点击回调（主进程 → 渲染进程），参数为会话 ID（已由主进程校验过格式）。 */
@@ -15,11 +14,11 @@ interface DesktopBridge {
   onNotificationClick?: (callback: NotificationClickCallback) => () => void
   /** 保存服务器地址到壳 settings.json（M4-02；登录页首启配置时与 localStorage 保持一致）。 */
   setServerUrl?: (url: string) => Promise<{ ok: boolean; serverUrl: string }>
-  /** 检查更新（F-29-04）：主进程从当前服务器请求 /api/version 并比较版本。 */
+  /** 检查更新（F-29 / P2）：主进程核对双清单并形成候选，返回是否可应用内安装。 */
   checkUpdate?: () => Promise<{ ok: boolean; message?: string; result?: DesktopUpdateCheckResult }>
-  /** 下载更新包到临时目录并校验 sha256（F-29-04）。 */
-  downloadUpdate?: (artifact: VersionArtifact) => Promise<{ ok: boolean; message?: string }>
-  /** 静默安装已下载的更新包并退出（F-29-04）。 */
+  /** 下载主进程持有的更新候选（P2：渲染层不传 URL、摘要或本地路径）。 */
+  downloadUpdate?: () => Promise<{ ok: boolean; message?: string }>
+  /** 校验 SHA-256 后静默安装并重启（P2）。 */
   installUpdate?: () => Promise<{ ok: boolean; message?: string }>
   /** 订阅下载进度（F-29-04），返回取消订阅函数。 */
   onUpdateProgress?: (listener: (progress: UpdateProgress) => void) => () => void
@@ -130,20 +129,18 @@ export async function checkDesktopUpdate(): Promise<{
   }
 }
 
-/** 下载桌面端安装包（F-29-04，主进程校验 sha256）；失败返回中文提示。 */
-export async function downloadDesktopUpdate(
-  artifact: VersionArtifact,
-): Promise<{ ok: boolean; message?: string }> {
+/** 下载主进程持有的桌面端更新候选（P2，进度经 onUpdateProgress 推送）；失败返回中文提示。 */
+export async function downloadDesktopUpdate(): Promise<{ ok: boolean; message?: string }> {
   const bridge = getBridge()
   if (typeof bridge?.downloadUpdate !== 'function') return { ok: false, message: '当前桌面端不支持下载更新' }
   try {
-    return await bridge.downloadUpdate(artifact)
+    return await bridge.downloadUpdate()
   } catch {
     return { ok: false, message: '下载更新失败，请稍后重试' }
   }
 }
 
-/** 安装已下载的桌面端更新（F-29-04，静默安装后应用退出）。 */
+/** 安装已下载的桌面端更新（P2，主进程核对 SHA-256 后静默安装并重启）。 */
 export async function installDesktopUpdate(): Promise<{ ok: boolean; message?: string }> {
   const bridge = getBridge()
   if (typeof bridge?.installUpdate !== 'function') return { ok: false, message: '当前桌面端不支持安装更新' }
