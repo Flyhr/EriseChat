@@ -36,6 +36,7 @@
 | P1 收口 | 2026-11-12 | 搜索统一为全局面板并加消息 / 联系人 / 群三类 tab；状态反馈抽出 `.ec-state-*` 共享样式与文案规范（§3.7） |
 | P2 深色主题解冻 | 2026-11-12（仅文档） | 撤销 UI-D 冻结（`AGENTS.md` §14.2），新增完整实施规格 §9 |
 | P2 深色主题实现 | 2026-11-12 | 新增 `dark.css` 色板、主题设置与首屏预置、Naive UI overrides 按主题切换、设置页开放浅色 / 深色入口；静态对比度 / 构建 / 体积校验通过（详见 §9） |
+| 导航 hover 反馈 | 2026-11-12 | 左侧主导航原 hover 底色与导航底仅 1.016:1、几乎不可辨；新增导航专用 `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text` 并在两套主题分别定义，hover 时底色与文字/图标色同时变化，不引入位移 |
 
 ## 3. 当前 UI 基线
 
@@ -52,6 +53,8 @@
 - U-04 后新增语义色与尺寸 token（聚焦外圈、拖拽遮罩、日期胶囊底、浮标投影、主题预览渐变、断线横幅橙系、蓝色气泡叠加色、气泡内边距与移动端圆角、命中高亮底、半透明胶囊底、`--ec-vvh` 回退基线），颜色类在 `styles/themes/azure.css` 双写；组件内不再写裸色值（`Avatar.vue` 的 JS 哈希色板与 `core/imageCompress.ts` 的 canvas 填充色属数据资产例外）。
 - `styles/themes/azure.css` + `data-ec-theme="azure"` 提供「澄蓝」浅色主题，`core/theme.ts` 映射 Naive UI `themeOverrides`。
 - **深色主题已实现（2026-11-12）**：新增 `styles/themes/dark.css` 覆写全部语义 token；设置页提供浅色 / 深色两个可点击入口，主题存本机 `localStorage`（`erisechat.settings.theme`），`index.html` 首屏预置避免闪烁，`App.vue` 写 `data-ec-theme` 并切换 Naive UI overrides。不做系统主题自动跟随。实施规格见 §9，约束见 `AGENTS.md` §14.2。
+- 左侧主导航 hover 使用专用 token `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text`（浅色 `#dbeafe` / `#1d4ed8`，深色 `#24395c` / `#bfdbfe`），不再复用 `--ec-surface-hover`；图标为 Phosphor `currentColor`，随文字色一起变化。
+- **已知层级差异**：选中态底色 `--ec-brand-050` 与导航底仍只有 1.004:1，靠左侧 3px 品牌竖条、主色文字与加粗识别；hover 底色现在比选中底略深。若需要「选中 > hover」的严格底色层级，需一并调整选中态底色，本次未改。
 - `AppIcon.vue` 统一 Phosphor 线性图标；禁止用 emoji 充当结构图标、禁止位图图标。
 
 ### 3.3 响应式与多端
