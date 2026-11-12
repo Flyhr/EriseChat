@@ -657,6 +657,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 发行元数据仅在 `release.json` 的 `version` 与 `webVersion`、`artifacts.desktop.version`、`artifacts.android.version` 全部一致时下发；文件缺失、无效或不一致时 `minVersion` 为 null、`releaseNotes` 为空数组。`release.json` 位于下载目录，不对外提供下载。
     - 新客户端按平台版本判断更新：Windows 比较 `artifacts.desktop.version`、Android 比较 `artifacts.android.version`、浏览器比较 `webVersion`；`version` 仍为服务端程序集与产物版本的最大值，仅供总览，不得用于跨平台判断。
     - 该接口返回 `Cache-Control: no-store`，客户端不得缓存清单。
+    - **2026-11-12 分发扩展（P2）**：`/download/files/{fileName}` 在白名单中额外放行固定名 `latest.yml` 与 `EriseChat-Setup-x.y.z.exe.blockmap`，仍执行单段文件名与路径穿越校验；`latest.yml` 返回 `Cache-Control: no-store`，安装包与 blockmap 支持 Range（差分下载依赖）。`release.json` 仍只供服务端内部读取，不对外提供下载。原有 exe/APK 下载与 `/api/version` 契约不变。
 
 11. **消息搜索（REST，v1，F-36）**：`GET /api/messages/search`，需登录，参数：
     - `q`（必填，1~50 字符）：普通模式匹配文本内容与图片/文件名（image/file 消息的 `content.name`，正文里的 URL 字样按普通文本处理）；`linkOnly=true` 的链接模式只匹配文本消息中识别出的 HTTP/HTTPS URL，不匹配普通正文或文件名；不搜索附件正文、不抓取网页；
@@ -785,3 +786,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-28 语音消息） | 2026-11-01 | `message.send` 的 `msgType` 新增 `voice`（向后兼容增量），content 为 VoiceContent `{fileId, durationMs}`（durationMs 1000~60000 整数、客户端上报）；新增音频文件规则：`.webm` / `audio/webm` / 魔数 `1A 45 DF A3`、单文件 ≤5MB，上传下载仍走现有 `/api/files`；voice 消息走现有 Message 路径（落库 messages.file_id、共享文件汇总排除 voice、撤回规则同 image/file）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-29 客户端更新） | 2026-11-02 | 新增 REST `GET /api/version`（匿名），返回 `{ version, protocolVersion, artifacts: { desktop, android } }`；产物字段 `version` / `url`（同源 `/download/files/{fileName}`）/ `size` / `sha256`（小写十六进制）/ `modifiedAt`（UTC 毫秒）；只认 `EriseChat-Setup-x.y.z.exe` / `EriseChat-x.y.z.apk`，同平台取最近修改的合法产物；客户端下载后必须校验 sha256；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（更新清单扩展） | 2026-11-12 | `GET /api/version` 追加四个可选字段 `webVersion` / `minVersion` / `releaseNotes` / `publishedAt`（旧客户端忽略；`version`、`protocolVersion`、`artifacts` 结构不变）；Web 构建产出 `web-version.json`，服务端据此下发 `webVersion`；发行元数据仅在 `release.json` 与 Web、两平台产物版本全部一致时下发；清单按平台版本判断更新，`version` 仅作总览；返回 `Cache-Control: no-store`；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（更新分发扩展） | 2026-11-12 | `/download/files/{fileName}` 额外放行固定名 `latest.yml` 与 `EriseChat-Setup-x.y.z.exe.blockmap`，单段文件名与路径穿越校验不变，安装包与 blockmap 保留 Range；`latest.yml` 返回 `Cache-Control: no-store`；`release.json` 不对外提供；`/api/version` 与原有 exe/APK 下载契约不变 |
