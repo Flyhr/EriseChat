@@ -38,6 +38,7 @@
 | P2 深色主题实现 | 2026-11-12 | 新增 `dark.css` 色板、主题设置与首屏预置、Naive UI overrides 按主题切换、设置页开放浅色 / 深色入口；静态对比度 / 构建 / 体积校验通过（详见 §9） |
 | 导航 hover 反馈 | 2026-11-12 | 左侧主导航原 hover 底色与导航底仅 1.016:1、几乎不可辨；新增导航专用 `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text` 并在两套主题分别定义，hover 时底色与文字/图标色同时变化，不引入位移 |
 | 动效规则固化 | 2026-11-12（**仅规则与文档**） | `AGENTS.md` §14.6 阈值翻倍至 200 / 520 KB，新增 §14.9 固化加载反馈与动效规范；批次 4 主线定为 `motion`，不做清单收窄；不改代码，目视 / 多端验收暂缓至代码修改完成后 |
+| 动效批次 4 落地 | 2026-11-12 | 引入 `motion`（走 `motion/mini` 入口，MIT，gzip +5.2 KB）；新增 `core/motion.ts` 与 `LoadingDots.vue`；补齐 `--ec-ease-in` / `--ec-ease-in-out` / `--ec-motion-stagger(-max)`；首屏骨架受控入场、三处三点加载反馈、深色首屏预置底色（详见 §5「批次 4」） |
 
 ## 3. 当前 UI 基线
 
@@ -51,6 +52,7 @@
 ### 3.2 设计 token 与主题
 
 - `styles/variables.css` 集中全部 `--ec-*`：品牌色（`#2563eb`）、聊天区三段渐变与光晕、文本三级对比、边框、媒体卡 `--ec-media-*`、Inter / YaHei 字体栈、4px 基数间距 `--ec-space-1..8`、圆角（气泡 14px + 尾角 6px）、阴影、`--ec-transition-fast/base/slow`（120 / 160 / 200ms）、四档布局宽、`--ec-safe-top/bottom`；文件末尾保留旧 `--color-*` 兼容别名。
+- **动效 token（批次 4）**：`--ec-ease`（入场，强缓出）、`--ec-ease-in`（退出）、`--ec-ease-in-out`（页面内位移 / 展开收起）、`--ec-motion-stagger`（60ms）、`--ec-motion-stagger-max`（200ms）。CSS 过渡直接引用；JS 动效经 `core/motion.ts` 读取同一组 token（不另立数值），`prefers-reduced-motion` 由 `global.css` 全局降级 + 封装层二次兜底。
 - U-04 后新增语义色与尺寸 token（聚焦外圈、拖拽遮罩、日期胶囊底、浮标投影、主题预览渐变、断线横幅橙系、蓝色气泡叠加色、气泡内边距与移动端圆角、命中高亮底、半透明胶囊底、`--ec-vvh` 回退基线），颜色类在 `styles/themes/azure.css` 双写；组件内不再写裸色值（`Avatar.vue` 的 JS 哈希色板与 `core/imageCompress.ts` 的 canvas 填充色属数据资产例外）。
 - `styles/themes/azure.css` + `data-ec-theme="azure"` 提供「澄蓝」浅色主题，`core/theme.ts` 映射 Naive UI `themeOverrides`。
 - **深色主题已实现（2026-11-12）**：新增 `styles/themes/dark.css` 覆写全部语义 token；设置页提供浅色 / 深色两个可点击入口，主题存本机 `localStorage`（`erisechat.settings.theme`），`index.html` 首屏预置避免闪烁，`App.vue` 写 `data-ec-theme` 并切换 Naive UI overrides。不做系统主题自动跟随。实施规格见 §9，约束见 `AGENTS.md` §14.2。
@@ -68,7 +70,7 @@
 
 ### 3.5 体积阈值
 
-入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至深色主题批次实测约 85.2 KB / 257.9 KB。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
+入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至批次 4 动效落地实测 **92.8 KB / 263.2 KB**（引入 `motion` 后入口 +7.6 KB，其中 `motion/mini` 库体 gzip 5.2 KB；全站 +5.3 KB）。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
 
 ### 3.6 已具备的交互能力
 
@@ -99,7 +101,7 @@
 | 媒体消息 | 图片 / 文件 / 语音不套气泡，媒体卡颜色只走 `--ec-media-*` | §14.3 |
 | 消息操作菜单 | 鼠标只右键触发；手指 / 触控笔保留长按 | §14.4 |
 | 响应式 | 四档断点统一、安全区、三端一套代码 | §14.5 |
-| 体积 | ≤100 KB / ≤260 KB gzip | §14.6 |
+| 体积 | ≤200 KB / ≤520 KB gzip | §14.6 |
 | UI 文档 | 本文件为唯一现行说明；`docs/deprecated/` 全部废弃，不作为依据 | §14.7 |
 | 加载反馈与动效 | 曲线 / 时长 / 动画属性 / reduced-motion / 消息流禁令 / 依赖口径（主线 `motion`） | §14.9 |
 
@@ -137,6 +139,18 @@
 - **深色主题**：**已实现（2026-11-12）**——`AGENTS.md` §14.2 已改为「已实现 + 主题变更前置条件」，设置页开放浅色 / 深色入口，色板与切换链路见 §9。静态对比度（14 组）、token 审计、构建与体积校验已通过；四档宽度 / 缩放 / 真机目视验收仍待按 §11.4 授权执行。
 - **字号与消息密度可调**：已随 U-08 方案 A 落地（见 P1 进度表），从 P2 待办中移除。
 - **群已读明细 F-20**（`AGENTS.md` §10 唯一 P2 待办）：仍需协议与功能评估，未排期。
+
+### 批次 4 动效已落地（2026-11-12）
+
+| 项 | 落地内容 |
+|---|---|
+| U-15 曲线与时长 | `variables.css` 新增 `--ec-ease-in`（退出）、`--ec-ease-in-out`（页面内位移）、`--ec-motion-stagger` 60ms、`--ec-motion-stagger-max` 200ms；`ImagePreview` 缩放与 `SendBox` 位移过渡改用 `--ec-ease-in-out`，入场仍用 `--ec-ease` |
+| U-16 动画基座 | 新增 `core/motion.ts`：`enter()` / `loop()` 两个入口，曲线与时长读取 CSS token（不另立数值）；`prefers-reduced-motion` 在本层兜底；句柄 `cancel()` 供卸载清理；保留 `ENGINE = 'waapi'` 零依赖降级分支。依赖 `motion` 只走 `motion/mini` 入口（gzip 5.2 KB） |
+| U-17 骨架入场 | `Chat` / `ConversationList` / `Contacts` 首屏骨架逐行淡入并上移 8px，行间错峰按元素数压缩到 ≤200ms；真实消息行、会话行、好友行不加 stagger（§14.9 消息流禁令） |
+| U-18 三点反馈 | 新增 `LoadingDots.vue`（`role="status"`、卸载取消在途动画），接入「加载更早消息」「文件面板加载更多」「搜索加载更多」；`min-height: 1.5em` 对齐正文行盒，避免「文案 → 三点」时按钮高度跳动；reduced-motion 下静态三点 + 文案 |
+| U-19 深色不闪白 | `index.html` 首屏预置画布底色与 `color-scheme`，消除样式表加载前的白帧；主题切换仍只切 `data-ec-theme` 属性，不做全屏淡入淡出 |
+
+> 校验：`npm run build`（含 `vue-tsc --noEmit`）通过；入口 chunk gzip **92.8 KB**、全站 JS+CSS gzip **263.2 KB**（≤200 / ≤520）；token 审计无未定义引用。**未运行测试（§11.2）**；目视 / 多端验收仍按裁决暂缓，待按 §11.4 申请。
 
 ### 范围外（不因对标而建议）
 
