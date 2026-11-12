@@ -187,8 +187,13 @@ Directory.CreateDirectory(fileDirectory);
 Directory.CreateDirectory(downloadDirectory);
 
 // 客户端更新检查（F-29）：扫描下载目录取最新安装包，sha256 按「路径+mtime+大小」缓存，文件变化自动失效。
+// Web 构建版本取自随静态资源发布的 web-version.json（2026-11-12 更新清单扩展）。
+var webRootPath = builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
 builder.Services.AddSingleton(sp =>
-    new ReleaseArtifactService(downloadDirectory, sp.GetRequiredService<ILogger<ReleaseArtifactService>>()));
+    new ReleaseArtifactService(
+        downloadDirectory,
+        webRootPath,
+        sp.GetRequiredService<ILogger<ReleaseArtifactService>>()));
 
 // 上传请求体上限：Kestrel 默认 30MB，若不显式放大，50MB 上传会被截断（M3-02）。
 // 表单整体上限同步放大到「上传上限 + 1MB」（留出 multipart 头部/边界余量）。

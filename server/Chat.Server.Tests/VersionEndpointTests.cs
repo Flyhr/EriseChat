@@ -122,7 +122,9 @@ public sealed class VersionEndpointTests : IDisposable
         Assert.Equal("9.9.9", manifest.Artifacts.Desktop?.Version);
     }
 
-    private ReleaseArtifactService CreateService() => new(_root, NullLogger<ReleaseArtifactService>.Instance);
+    // 2026-11-12：服务新增 Web 根目录参数（读取 web-version.json）。测试目录没有该文件，webVersion 为 null。
+    private ReleaseArtifactService CreateService() =>
+        new(_root, _root, NullLogger<ReleaseArtifactService>.Instance);
 
     private string WriteFile(string fileName, byte[] bytes, DateTime? lastWriteUtc = null)
     {
