@@ -409,7 +409,7 @@ const timeText = computed(() =>
 
 .message-bubble--self .message-bubble__time,
 .message-bubble--self .message-bubble__receipt {
-  color: rgba(255, 255, 255, 0.82);
+  color: var(--ec-text-on-self-soft);
 }
 
 .message-system {
@@ -507,7 +507,7 @@ const timeText = computed(() =>
 /* 「澄蓝」主题：气泡 18px 大圆角 + 单侧 6px 尾角；自己为蓝色渐变白字，对方为白底冷蓝描边。 */
 .message-bubble {
   max-width: 100%;
-  padding: 10px 14px;
+  padding: var(--ec-bubble-padding);
   border: 1px solid var(--ec-bubble-other-border);
   border-radius: var(--ec-radius-bubble) var(--ec-radius-bubble) var(--ec-radius-bubble)
     var(--ec-radius-bubble-tail);
@@ -586,7 +586,7 @@ const timeText = computed(() =>
 
 .message-bubble--self .message-bubble__mention {
   color: inherit;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--ec-bubble-self-overlay);
 }
 
 .message-bubble--self .message-bubble__mention--self {
@@ -611,6 +611,12 @@ const timeText = computed(() =>
   justify-content: flex-end;
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
+}
+
+/* U-02：发送状态 → 已读回执的颜色变化走过渡，不产生布局位移。 */
+.message-row__meta,
+.message-row__meta * {
+  transition: color var(--ec-transition-base) var(--ec-ease);
 }
 
 .message-row__time {
@@ -645,7 +651,7 @@ const timeText = computed(() =>
 /* 媒体消息（plain）不套气泡，引用块回到浅色样式。 */
 .message-bubble--self:not(.message-bubble--plain) .message-bubble__reply {
   border-left-color: var(--ec-text-inverse);
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--ec-bubble-self-overlay-soft);
   color: inherit;
 }
 
@@ -710,11 +716,13 @@ const timeText = computed(() =>
   }
 
   .message-bubble {
-    border-radius: 16px 16px 16px 5px;
+    border-radius: var(--ec-radius-bubble-mobile) var(--ec-radius-bubble-mobile)
+      var(--ec-radius-bubble-mobile) var(--ec-radius-bubble-tail-mobile);
   }
 
   .message-bubble--self {
-    border-radius: 16px 16px 5px 16px;
+    border-radius: var(--ec-radius-bubble-mobile) var(--ec-radius-bubble-mobile)
+      var(--ec-radius-bubble-tail-mobile) var(--ec-radius-bubble-mobile);
   }
 }
 </style>

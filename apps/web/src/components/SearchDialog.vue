@@ -585,7 +585,7 @@ onBeforeUnmount(() => {
 
 .ec-search__hit {
   border-radius: 2px;
-  background: var(--ec-warning-soft, #fff1d6);
+  background: var(--ec-warning-soft);
   color: var(--ec-text-primary);
   text-decoration: underline;
   text-underline-offset: 2px;

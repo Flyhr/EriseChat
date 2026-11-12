@@ -746,7 +746,7 @@ function applySession(response: LoginResponse): void {
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-body);
   box-sizing: border-box;
-  transition: border-color var(--ec-transition-fast) var(--ec-transition-ease);
+  transition: border-color var(--ec-transition-fast) var(--ec-ease);
 }
 
 .login-server__field input:focus {
@@ -872,7 +872,7 @@ function applySession(response: LoginResponse): void {
   color: var(--ec-text-primary);
   font-size: var(--ec-font-size-body);
   box-sizing: border-box;
-  transition: border-color var(--ec-transition-fast) var(--ec-transition-ease);
+  transition: border-color var(--ec-transition-fast) var(--ec-ease);
 }
 
 .login-form__field input::placeholder {

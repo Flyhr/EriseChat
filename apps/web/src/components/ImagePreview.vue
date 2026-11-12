@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
   max-height: 100%;
   object-fit: contain;
   transform-origin: center;
-  transition: transform var(--ec-transition-fast) var(--ec-transition-ease);
+  transition: transform var(--ec-transition-fast) var(--ec-ease);
   user-select: none;
   touch-action: pan-y;
 }

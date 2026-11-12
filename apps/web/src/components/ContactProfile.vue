@@ -293,7 +293,7 @@ function saveFriend(): void {
 .contact-profile__field input:focus-visible {
   border-color: var(--ec-brand-500);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  box-shadow: var(--ec-focus-shadow);
 }
 
 .contact-profile__error {

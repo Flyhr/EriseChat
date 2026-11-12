@@ -262,7 +262,7 @@ async function onUpdateSettings(payload: {
 
     <template v-if="isSearchMode">
       <p v-if="visibleSearchResults.length === 0" class="ec-conversation-list__hint">{{ searchHint }}</p>
-      <nav v-else class="ec-conversation-list__items" aria-label="搜索结果">
+      <nav v-else class="ec-conversation-list__items ec-fade" aria-label="搜索结果">
         <SearchResultItem
           v-for="message in visibleSearchResults"
           :key="`${message.conversationId}-${message.messageId}`"
@@ -282,9 +282,23 @@ async function onUpdateSettings(payload: {
       </nav>
     </template>
     <template v-else>
-      <p v-if="loading && visible.length === 0" class="ec-conversation-list__hint">加载中…</p>
+      <div
+        v-if="loading && visible.length === 0"
+        class="ec-conversation-list__loading"
+        role="status"
+        aria-label="会话加载中"
+        aria-busy="true"
+      >
+        <div v-for="index in 6" :key="index" class="ec-conversation-list__loading-row">
+          <div class="ec-skeleton ec-conversation-list__loading-avatar" />
+          <div class="ec-conversation-list__loading-lines">
+            <div class="ec-skeleton ec-conversation-list__loading-line" />
+            <div class="ec-skeleton ec-conversation-list__loading-line ec-conversation-list__loading-line--short" />
+          </div>
+        </div>
+      </div>
       <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
-      <nav v-else class="ec-conversation-list__items">
+      <nav v-else class="ec-conversation-list__items ec-fade">
         <ConversationItem
           v-for="conversation in visible"
           :key="conversation.conversationId"
@@ -461,6 +475,43 @@ async function onUpdateSettings(payload: {
   color: var(--ec-text-secondary);
   font-size: 13px;
   line-height: var(--ec-line-height-body);
+}
+
+/* U-01：会话列表骨架，行高对齐 ConversationItem 的 72px（移动端 68px）。 */
+.ec-conversation-list__loading-row {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  min-height: 72px;
+  padding: var(--ec-space-3) var(--ec-space-4);
+  border-bottom: 1px solid var(--ec-border-soft);
+}
+
+.ec-conversation-list__loading-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ec-radius-full);
+}
+
+.ec-conversation-list__loading-lines {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+}
+
+.ec-conversation-list__loading-line {
+  height: 12px;
+}
+
+.ec-conversation-list__loading-line--short {
+  width: 55%;
+}
+
+@media (max-width: 800px) {
+  .ec-conversation-list__loading-row {
+    min-height: var(--ec-row-min-height-mobile, 68px);
+  }
 }
 
 /* UI-05 移动端：页面标题放大到 22px、发起聊天收成 44×44 图标按钮、

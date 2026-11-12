@@ -491,7 +491,7 @@ onMounted(() => {
       </p>
 
       <template v-for="item in items" :key="item.key">
-        <div v-if="item.kind === 'separator'" class="message-list__date">
+        <div v-if="item.kind === 'separator'" class="message-list__date ec-enter">
           <span>{{ item.label }}</span>
         </div>
         <MessageBubble
@@ -520,6 +520,7 @@ onMounted(() => {
       <MessageBubble
         v-for="item in pending ?? []"
         :key="item.clientMsgId"
+        class="ec-enter"
         :message="item"
         :self="true"
         :status="item.status"
@@ -606,7 +607,7 @@ onMounted(() => {
   margin: var(--ec-space-1) 0;
   padding: 3px var(--ec-space-3);
   border-radius: var(--ec-radius-full);
-  background: rgba(241, 245, 253, 0.92);
+  background: var(--ec-date-badge-bg);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
 }
@@ -620,7 +621,7 @@ onMounted(() => {
   border: none;
   border-radius: var(--ec-radius-full);
   background: var(--ec-brand-600);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+  box-shadow: var(--ec-shadow-badge);
   color: var(--ec-text-inverse);
   font-size: var(--ec-font-size-secondary);
   font-weight: var(--ec-font-weight-medium);

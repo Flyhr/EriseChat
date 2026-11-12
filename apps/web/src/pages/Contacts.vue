@@ -389,7 +389,18 @@ onBeforeUnmount(() => {
       <!-- 好友 -->
       <div v-if="tab === 'friends'" class="contacts-page__section">
         <p v-if="friendLoadError" class="contacts-page__error" role="alert">{{ friendLoadError }}</p>
-        <p v-if="friends.loading && friends.friends.length === 0" class="contacts-page__hint">加载中…</p>
+        <div
+          v-if="friends.loading && friends.friends.length === 0"
+          class="contacts-page__loading"
+          role="status"
+          aria-label="联系人加载中"
+          aria-busy="true"
+        >
+          <div v-for="index in 5" :key="index" class="contacts-page__loading-row">
+            <div class="ec-skeleton contacts-page__loading-avatar" />
+            <div class="ec-skeleton contacts-page__loading-line" />
+          </div>
+        </div>
         <template v-for="group in friends.groupedFriends" :key="group.groupName ?? '__ungrouped'">
           <h3 class="contacts-page__group">{{ group.groupName ?? '未分组' }}</h3>
           <ul class="contacts-page__results">
@@ -731,6 +742,26 @@ onBeforeUnmount(() => {
   font-size: var(--ec-font-size-secondary);
 }
 
+/* U-01：好友列表首屏骨架，行高对齐真实好友行。 */
+.contacts-page__loading-row {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: center;
+  min-height: 56px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+}
+
+.contacts-page__loading-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ec-radius-full);
+}
+
+.contacts-page__loading-line {
+  width: min(220px, 55%);
+  height: 12px;
+}
+
 .contacts-page__results,
 .contacts-page__requests {
   display: flex;
@@ -896,7 +927,7 @@ onBeforeUnmount(() => {
 .contacts-page__dialog-field textarea:focus-visible {
   border-color: var(--ec-brand-500);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  box-shadow: var(--ec-focus-shadow);
 }
 
 .contacts-page__profile {

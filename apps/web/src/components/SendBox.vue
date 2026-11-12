@@ -702,7 +702,7 @@ function onInput(): void {
   border-color: var(--ec-brand-500);
   box-shadow:
     var(--ec-composer-shadow),
-    0 0 0 3px rgba(37, 99, 235, 0.12);
+    var(--ec-focus-shadow);
 }
 
 .send-box__field--error {
@@ -1063,7 +1063,7 @@ function onInput(): void {
 
 .send-box__upload-meta {
   flex: none;
-  font-size: var(--ec-font-size-caption);
+  font-size: var(--ec-font-size-small);
   color: var(--ec-text-secondary);
 }
 
@@ -1093,10 +1093,10 @@ function onInput(): void {
   min-height: 28px;
   padding: 0 var(--ec-space-2);
   border: none;
-  border-radius: var(--ec-radius-small);
+  border-radius: var(--ec-radius-sm);
   background: transparent;
   color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-caption);
+  font-size: var(--ec-font-size-small);
   cursor: pointer;
 }
 
@@ -1112,7 +1112,7 @@ function onInput(): void {
 
 .send-box__upload-error {
   margin: 0;
-  font-size: var(--ec-font-size-caption);
+  font-size: var(--ec-font-size-small);
   color: var(--ec-danger);
 }
 </style>

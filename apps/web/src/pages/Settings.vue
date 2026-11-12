@@ -1748,11 +1748,11 @@ async function saveProfile(): Promise<void> {
 }
 
 .settings-theme__preview--light {
-  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
+  background: var(--ec-theme-preview-light);
 }
 
 .settings-theme__preview--dark {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  background: var(--ec-theme-preview-dark);
 }
 
 .settings-theme__meta {

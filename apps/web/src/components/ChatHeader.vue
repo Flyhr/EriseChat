@@ -177,7 +177,7 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   padding: 3px var(--ec-space-2);
   border: 1px solid var(--ec-border);
   border-radius: var(--ec-radius-full);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--ec-chip-surface);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
   font-weight: var(--ec-font-weight-regular);

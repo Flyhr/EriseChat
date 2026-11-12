@@ -467,7 +467,7 @@ async function confirmForward(): Promise<void> {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: var(--ec-font-size-base);
+  font-size: var(--ec-font-size-body);
   font-weight: 600;
   color: var(--ec-text-primary);
   text-overflow: ellipsis;

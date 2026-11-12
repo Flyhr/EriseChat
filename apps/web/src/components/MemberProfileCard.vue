@@ -79,7 +79,7 @@ const relationHint = computed(() => {
     case 'friend':
       return '已是好友'
     case 'incoming':
-      return '对方已向你发送好友申请，可在「通讯录 → 申请」中处理'
+      return '对方已向你发送好友申请，可在「联系人 → 申请」中处理'
     default:
       return ''
   }

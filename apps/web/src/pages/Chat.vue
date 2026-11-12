@@ -1682,7 +1682,7 @@ function onWindowDrop(event: DragEvent): void {
           @search="openConversationSearch"
         />
         <!-- F-36：群置顶消息条——全员可见，点击定位原消息；仅群主可取消置顶。 -->
-        <div v-if="isGroup && pinnedMessage" class="chat-page__pinned">
+        <div v-if="isGroup && pinnedMessage" class="chat-page__pinned ec-enter">
           <button
             type="button"
             class="chat-page__pinned-main"
@@ -1704,8 +1704,27 @@ function onWindowDrop(event: DragEvent): void {
           </button>
         </div>
         <div class="chat-page__content" :class="{ 'chat-page__content--members': asideOpen }">
-          <div class="chat-page__chat">
-            <p v-if="!activeLoaded" class="chat-page__main-hint">消息加载中…</p>
+          <div class="chat-page__chat" :aria-busy="!activeLoaded">
+            <div
+              v-if="!activeLoaded"
+              class="chat-page__loading"
+              role="status"
+              aria-label="消息加载中"
+              aria-busy="true"
+            >
+              <div
+                v-for="index in 3"
+                :key="index"
+                class="chat-page__loading-row"
+                :class="{ 'chat-page__loading-row--self': index === 2 }"
+              >
+                <div class="ec-skeleton chat-page__loading-avatar" />
+                <div class="chat-page__loading-lines">
+                  <div class="ec-skeleton chat-page__loading-line" />
+                  <div class="ec-skeleton chat-page__loading-line chat-page__loading-line--short" />
+                </div>
+              </div>
+            </div>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <div v-if="locateMode" class="chat-page__locate">
               <span>{{ locateLoading ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
@@ -1859,7 +1878,7 @@ function onWindowDrop(event: DragEvent): void {
         v-else-if="activeId && conversations.loaded"
         icon="chat"
         title="会话不存在或无权访问"
-        description="请从左侧选择已有会话，或到「通讯录」重新发起聊天。"
+        description="请从左侧选择已有会话，或到「联系人」重新发起聊天。"
       />
       <EmptyState
         v-else
@@ -1963,7 +1982,7 @@ function onWindowDrop(event: DragEvent): void {
   align-items: center;
   justify-content: center;
   padding: var(--ec-space-6);
-  background: rgba(37, 99, 235, 0.12);
+  background: var(--ec-drop-overlay);
   border: 2px dashed var(--ec-brand-500);
   border-radius: var(--ec-radius-panel);
   pointer-events: none;
@@ -2268,11 +2287,44 @@ function onWindowDrop(event: DragEvent): void {
   z-index: 20;
 }
 
-.chat-page__main-hint {
-  margin: var(--ec-space-4);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  text-align: center;
+/* U-01：切会话/首屏的伪消息骨架，行高与真实消息行接近，避免加载完成时跳动。 */
+.chat-page__loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-5);
+  padding: var(--ec-space-6) var(--ec-space-4);
+}
+
+.chat-page__loading-row {
+  display: flex;
+  gap: var(--ec-space-3);
+  align-items: flex-start;
+}
+
+.chat-page__loading-row--self {
+  flex-direction: row-reverse;
+  margin-left: auto;
+}
+
+.chat-page__loading-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ec-radius-full);
+}
+
+.chat-page__loading-lines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-2);
+  width: min(280px, 60%);
+}
+
+.chat-page__loading-line {
+  height: 14px;
+}
+
+.chat-page__loading-line--short {
+  width: 60%;
 }
 
 /* 预留固定高度，避免「输入中」提示出现/消失时消息列表明显跳动（M3-09）。 */
@@ -2400,7 +2452,7 @@ function onWindowDrop(event: DragEvent): void {
   padding: 4px var(--ec-space-3);
   border: 1px solid var(--ec-brand-600);
   border-radius: var(--ec-radius-input);
-  background: var(--ec-bg-surface);
+  background: var(--ec-surface);
   color: var(--ec-brand-600);
   font-size: 12px;
   cursor: pointer;

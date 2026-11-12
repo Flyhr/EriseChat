@@ -56,8 +56,8 @@ function onClick(): void {
   align-items: center;
   min-height: 36px;
   padding: 6px var(--ec-space-4);
-  border-bottom: 1px solid #fed7aa;
-  background: #fff7ed;
+  border-bottom: 1px solid var(--ec-warning-border);
+  background: var(--ec-warning-surface);
   color: var(--ec-warning);
   font-size: var(--ec-font-size-secondary);
 }
@@ -86,7 +86,7 @@ function onClick(): void {
 }
 
 .connection-banner__action:hover {
-  background: #ffedd5;
+  background: var(--ec-warning-strong);
 }
 
 @media (max-width: 800px) {
