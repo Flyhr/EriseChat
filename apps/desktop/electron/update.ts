@@ -134,6 +134,15 @@ function bindOriginForOperation(): string {
   return origin
 }
 
+/** 当前配置的 origin；地址缺失或不符合 HTTPS 策略时返回 null（按已切换处理）。 */
+function currentConfiguredOrigin(): string | null {
+  try {
+    return allowedOrigin()
+  } catch {
+    return null
+  }
+}
+
 /** 把 createRequest 的选项还原成规范化 origin；无法识别时返回 null（按不允许处理）。 */
 function requestOrigin(options: UpdaterRequestOptions): string | null {
   const protocol = options.protocol
@@ -401,6 +410,12 @@ async function installUpdate(): Promise<UpdateIpcResult> {
     }
     if (actual !== active.sha256) {
       return { ok: false, message: '安装包校验失败（SHA-256 不一致），请重新下载' }
+    }
+    // settings:set-server-url 不受操作锁约束：校验期间切换服务器时，候选仍指向旧服务器。
+    // 这里用当前配置重新解析 origin，与本次操作绑定的值不一致就作废候选，绝不安装旧服务器的包。
+    if (currentConfiguredOrigin() !== origin) {
+      candidate = null
+      return { ok: false, message: '服务器已切换，请重新检查更新' }
     }
     autoUpdater.quitAndInstall(true, true)
     return { ok: true }
