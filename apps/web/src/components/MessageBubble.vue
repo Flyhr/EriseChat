@@ -222,6 +222,9 @@ function onRowClick(): void {
 /** 移动端：长按 500ms 打开操作菜单；滚动/抬起/取消时清除计时器。 */
 function onPointerDown(event: PointerEvent): void {
   if (props.selectable) return
+  // 鼠标不参与长按：桌面端只由右键（contextmenu）打开菜单，按住左键 500ms 不再弹出。
+  // 手指与触控笔保留长按（手机没有右键，禁用后就没有入口了）。
+  if (event.pointerType === 'mouse') return
   if (event.button !== 0 || isSystem.value || !repliableMessageId()) return
   // F-28-06：语音播放器内的按下（播放键、进度条拖拽）不触发长按菜单，
   // 否则长按拖拽进度条会弹出「回复/收藏」。
@@ -487,7 +490,8 @@ const timeText = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: min(520px, 78%);
+  /* 气泡宽度：上限 640px / 85%（原 520px / 78%，约 65 个半角字符），长段落每行约 80 字符。 */
+  max-width: min(640px, 85%);
   min-width: 0;
 }
 

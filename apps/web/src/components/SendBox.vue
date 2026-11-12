@@ -73,8 +73,9 @@ const props = withDefaults(
   },
 )
 
-/** 输入框最大高度（计划 §5.5：自动增长至约 360px，超出后内部滚动）。 */
-const MAX_TEXTAREA_HEIGHT = 360
+/** 输入框可见行数：默认 3 行，最多 5 行，超出在框内滚动（行高取自 CSS，见 .send-box__input）。 */
+const TEXTAREA_MIN_ROWS = 3
+const TEXTAREA_MAX_ROWS = 5
 
 /** 输入文本（F-04）：挂载时按所在会话的草稿初始化，切换会话时由 watch(conversationId) 重置。 */
 const text = ref(props.initialDraft ?? '')
@@ -172,14 +173,18 @@ function cancelRecording(): void {
   handle.cancel()
 }
 
-/** 依据内容调整 textarea 高度：单行起，超过约 360px 改为内部滚动。 */
+/** 依据内容调整 textarea 高度：默认 3 行、最多 5 行，超过后改为内部滚动。 */
 function resizeInput(): void {
   const el = input.value
   if (!el) return
+  // 行高按实际计算值取，避免主题/字号变化后 3~5 行的像素上限失配（'normal' 时退回 21px）。
+  const lineHeight = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 21
+  const minHeight = lineHeight * TEXTAREA_MIN_ROWS
+  const maxHeight = lineHeight * TEXTAREA_MAX_ROWS
   el.style.height = 'auto'
-  const nextHeight = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)
-  el.style.height = `${nextHeight}px`
-  el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden'
+  const contentHeight = el.scrollHeight
+  el.style.height = `${Math.min(Math.max(contentHeight, minHeight), maxHeight)}px`
+  el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
 }
 
 /** 供 Chat 页在 Emoji 抽屉选择表情后调用：插入到当前光标处并保持焦点，不发送。 */
@@ -548,7 +553,7 @@ function onInput(): void {
         ref="input"
         v-model="text"
         class="send-box__input"
-        rows="1"
+        rows="3"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息"
@@ -814,9 +819,10 @@ function onInput(): void {
 
 .send-box__input {
   width: 100%;
-  /* UI-D P2-B：单行起，随内容自动增高，最大约 360px 后内部滚动。 */
-  min-height: 24px;
-  max-height: 360px;
+  /* 默认 3 行、最多 5 行（1.5 行高 × 14px ≈ 21px/行），超过 5 行由 resizeInput 切为内部滚动。
+     行高变化时这里的像素上下限跟着变，避免与脚本里的行数计算失配。 */
+  min-height: calc(var(--ec-line-height-body, 1.5) * 1em * 3);
+  max-height: calc(var(--ec-line-height-body, 1.5) * 1em * 5);
   padding: 0;
   border: none;
   outline: none;
