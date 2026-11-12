@@ -36,6 +36,8 @@ describe('parseStoredSettings', () => {
       soundEnabled: false,
       desktopNotificationsEnabled: false,
       androidBackgroundNotificationsEnabled: false,
+      messageFontSize: 'medium',
+      listDensity: 'comfortable',
     })
   })
 
@@ -54,6 +56,8 @@ describe('parseStoredSettings', () => {
       soundEnabled: false,
       desktopNotificationsEnabled: true,
       androidBackgroundNotificationsEnabled: true,
+      messageFontSize: 'medium',
+      listDensity: 'comfortable',
     })
   })
 })
@@ -76,6 +80,8 @@ describe('useSettingsStore 持久化', () => {
       soundEnabled: false,
       desktopNotificationsEnabled: true,
       androidBackgroundNotificationsEnabled: false,
+      messageFontSize: 'medium',
+      listDensity: 'comfortable',
     })
 
     // 模拟刷新页面：新的 pinia 实例重新创建 store，应从 localStorage 恢复。
