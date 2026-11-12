@@ -9,6 +9,12 @@ directories:
   output: dist
   buildResources: build
 
+# 更新源（P2）：只用于生成 latest.yml、blockmap 与包内 app-update.yml。
+# 运行时主进程按当前服务器配置 setFeedURL，这里必须是不可解析的占位地址，不得参与实际请求。
+publish:
+  provider: generic
+  url: https://updates.invalid/erisechat
+
 files:
   - dist-electron/**
   - package.json

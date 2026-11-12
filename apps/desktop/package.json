@@ -9,7 +9,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "tsc -p electron/tsconfig.json",
     "typecheck": "tsc -p electron/tsconfig.json --noEmit",
-    "dist": "npm run build && electron-builder --win nsis"
+    "dist": "npm run build && electron-builder --win nsis --publish never"
   },
   "engines": {
     "node": ">=20"
@@ -19,5 +19,8 @@
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
     "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.12"
   }
 }
