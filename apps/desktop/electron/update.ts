@@ -199,8 +199,8 @@ async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
     const manifest = (await response.json()) as VersionManifest
     const artifact = validateArtifact(manifest.artifacts?.desktop, origin)
     const currentVersion = app.getVersion()
-    const manifestVersion = typeof manifest.version === 'string' ? manifest.version.trim() : ''
-    const latestVersion = manifestVersion || artifact?.version || currentVersion
+    // 只比较桌面产物版本：清单总版本会被服务端程序集或 Android 单独升版推高，用它判断会误报。
+    const latestVersion = artifact?.version ?? currentVersion
     const available = Boolean(artifact) && compareVersions(latestVersion, currentVersion) > 0
     return { ok: true, result: { available, currentVersion, latestVersion, artifact } }
   } catch (error) {
