@@ -100,6 +100,8 @@ server/Chat.Server.Tests/
 /docs/ui-upgrade-plan.md
 # UI 优化计划（2026-11-12 提案稿，计划类文档，本地保留不入库）
 /docs/ui-optimization-plan.md
+# 客户端更新计划（2026-11-12，计划类文档，本地保留不入库）
+/docs/update-plan.md
 /docs/ui/ui-00-review.md
 /docs/ui/*/
 /docs/ui/*.png
