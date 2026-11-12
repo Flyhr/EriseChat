@@ -8,14 +8,22 @@ namespace Chat.Server.Api;
 /// <summary>
 /// 下载页与安装包分发（M4-04，计划 §5.5）：
 /// - <c>GET /download</c>：静态 HTML（版本号、Windows 安装包、Android APK 占位、更新日志、SmartScreen 说明）；
-/// - <c>GET /download/files/{fileName}</c>：只允许 <c>EriseChat-Setup-*.exe</c> / <c>EriseChat-*.apk</c> 白名单文件，
-///   经路径穿越校验后以附件下载；文件不存在或非法名一律 404。
-/// 目录来自 AppOptions.DownloadDirectory（默认仓库根 data/downloads），不暴露磁盘路径。
+/// - <c>GET /download/files/{fileName}</c>：只允许 <c>EriseChat-Setup-*.exe</c> / <c>EriseChat-*.apk</c>、
+///   固定名 <c>latest.yml</c> 与 <c>EriseChat-Setup-x.y.z.exe.blockmap</c>（2026-11-12 更新分发扩展），
+///   经路径穿越校验后以附件下载；文件不存在或非法名一律 404。安装包与 blockmap 支持 Range。
+/// 目录来自 AppOptions.DownloadDirectory（默认仓库根 data/downloads），不暴露磁盘路径；release.json 不对外提供。
 /// </summary>
 public static class DownloadEndpoints
 {
+    private const string LatestYmlFileName = "latest.yml";
+
     private static readonly Regex AllowedFileNamePattern = new(
         @"^EriseChat-(?:Setup-.+\.exe|.+\.apk)$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>差分下载的 blockmap：只认与安装包同名的 EriseChat-Setup-x.y.z.exe.blockmap。</summary>
+    private static readonly Regex BlockMapFileNamePattern = new(
+        @"^EriseChat-Setup-\d+\.\d+\.\d+\.exe\.blockmap$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static IEndpointRouteBuilder MapDownloadEndpoints(this IEndpointRouteBuilder app, string downloadDirectory)
@@ -27,14 +35,14 @@ public static class DownloadEndpoints
             .WithName("DownloadPage")
             .AllowAnonymous();
 
-        app.MapGet("/download/files/{fileName}", (string fileName) => DownloadFile(fileName, directory))
+        app.MapGet("/download/files/{fileName}", (string fileName, HttpContext context) => DownloadFile(fileName, directory, context))
             .WithName("DownloadPackageFile")
             .AllowAnonymous();
 
         return app;
     }
 
-    private static IResult DownloadFile(string fileName, string directory)
+    private static IResult DownloadFile(string fileName, string directory, HttpContext context)
     {
         if (!IsAllowedFileName(fileName))
         {
@@ -48,9 +56,19 @@ public static class DownloadEndpoints
             return Results.NotFound();
         }
 
+        if (string.Equals(fileName, LatestYmlFileName, StringComparison.Ordinal))
+        {
+            // latest.yml 必须实时：客户端每次检查都应拿到当前发布，不得使用缓存副本。
+            context.Response.Headers.CacheControl = "no-store";
+        }
+
         var contentType = fullPath.EndsWith(".apk", StringComparison.OrdinalIgnoreCase)
             ? "application/vnd.android.package-archive"
-            : "application/vnd.microsoft.portable-executable";
+            : fullPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                ? "application/vnd.microsoft.portable-executable"
+                : fullPath.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+                    ? "text/yaml; charset=utf-8"
+                    : "application/octet-stream";
         return Results.File(fullPath, contentType, fileName, enableRangeProcessing: true);
     }
 
@@ -69,7 +87,9 @@ public static class DownloadEndpoints
             return false;
         }
 
-        return AllowedFileNamePattern.IsMatch(fileName);
+        return string.Equals(fileName, LatestYmlFileName, StringComparison.Ordinal) ||
+               AllowedFileNamePattern.IsMatch(fileName) ||
+               BlockMapFileNamePattern.IsMatch(fileName);
     }
 
     private static string BuildPage(HttpRequest request, string directory)
