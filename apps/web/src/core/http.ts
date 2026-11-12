@@ -32,6 +32,11 @@ export interface RequestOptions {
   headers?: Record<string, string>
   timeoutMs?: number
   signal?: AbortSignal
+  /**
+   * 是否携带登录令牌并参与 401 统一注销，默认 true。
+   * 匿名接口（如更新清单 /version）传 false：不附带令牌，401 也不得清登录态。
+   */
+  auth?: boolean
 }
 
 // JWT 由 auth store 注入，避免 core 依赖 stores；登录成功后由 auth store 调用 setAccessTokenProvider（M2 已接入）。
@@ -106,6 +111,7 @@ async function send(path: string, options: RequestOptions, acceptJson: boolean):
     headers = {},
     timeoutMs = config.requestTimeoutMs,
     signal,
+    auth = true,
   } = options
 
   const controller = new AbortController()
@@ -116,7 +122,7 @@ async function send(path: string, options: RequestOptions, acceptJson: boolean):
   const finalHeaders: Record<string, string> = acceptJson
     ? { Accept: 'application/json', ...headers }
     : { ...headers }
-  const token = accessTokenProvider()
+  const token = auth ? accessTokenProvider() : null
   if (token) finalHeaders.Authorization = `Bearer ${token}`
 
   let payload: BodyInit | undefined
@@ -146,6 +152,7 @@ async function send(path: string, options: RequestOptions, acceptJson: boolean):
       // 旧请求的 401 不能清掉新登录态：只有 Bearer token 仍是当前 token 时才退出登录。
       if (
         response.status === 401 &&
+        auth &&
         unauthorizedHandler !== null &&
         !isAuthEndpoint(path) &&
         getAccessToken() === token

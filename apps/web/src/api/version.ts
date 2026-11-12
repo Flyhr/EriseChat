@@ -24,5 +24,7 @@ export interface VersionManifest {
 }
 
 export function fetchVersionManifest(): Promise<VersionManifest> {
-  return request<VersionManifest>('/api/version')
+  // 路径不带 /api：request() 会拼上 resolveApiBase()（同源或远端服务器地址 + /api）。
+  // 清单匿名可读：auth=false 不附带登录令牌，401 也不触发统一注销，失败只影响检查状态。
+  return request<VersionManifest>('/version', { auth: false })
 }
