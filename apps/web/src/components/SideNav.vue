@@ -4,6 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
+import AccountCard from './AccountCard.vue'
 import { chatWs, type WsState } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -69,8 +70,26 @@ const activeKey = computed(() => {
 })
 
 const displayName = computed(() => auth.user?.displayName ?? '我的账号')
-const brandSubtitle = computed(() => auth.user?.email ?? 'EriseChat')
-const accountSubtitle = computed(() => '账号与设置')
+
+// 账号信息浮窗（替代原左上角「EriseChat」品牌区）：头像 + 昵称可点，弹窗展示账号信息；
+// 原导航底部的账号卡已移除，避免同一信息出现两次。
+const accountOpen = ref(false)
+const accountTrigger = ref<HTMLElement | null>(null)
+const accountAnchor = ref<{ left: number; right: number; top: number } | null>(null)
+
+function toggleAccount(): void {
+  if (accountOpen.value) {
+    accountOpen.value = false
+    return
+  }
+  const rect = accountTrigger.value?.getBoundingClientRect()
+  accountAnchor.value = rect ? { left: rect.left, right: rect.right, top: rect.top } : null
+  accountOpen.value = true
+}
+
+function closeAccount(): void {
+  accountOpen.value = false
+}
 
 // 连接状态：只订阅 WS 状态变化，不改动连接逻辑（App.vue 仍是唯一连接横幅来源）。
 const connectionState = ref<WsState>(chatWs.state)
@@ -87,13 +106,24 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
 
 <template>
   <nav class="ec-sidenav" aria-label="主导航">
-    <RouterLink class="ec-sidenav__brand" to="/chat" aria-label="EriseChat 消息">
-      <span class="ec-sidenav__logo" aria-hidden="true">E</span>
-      <span class="ec-sidenav__brand-text">
-        <span class="ec-sidenav__brand-name">EriseChat</span>
-        <span class="ec-sidenav__brand-sub">{{ brandSubtitle }}</span>
-      </span>
-    </RouterLink>
+    <button
+      ref="accountTrigger"
+      type="button"
+      class="ec-sidenav__account-trigger"
+      :class="{ 'ec-sidenav__account-trigger--open': accountOpen }"
+      :aria-label="`账号信息：${displayName}`"
+      aria-haspopup="dialog"
+      :aria-expanded="accountOpen"
+      :title="displayName"
+      @click="toggleAccount"
+    >
+      <Avatar
+        :display-name="displayName"
+        :avatar-file-id="auth.user?.avatarFileId"
+        :size="28"
+      />
+      <span class="ec-sidenav__account-name">{{ displayName }}</span>
+    </button>
 
     <p class="ec-sidenav__group">工作空间</p>
     <ul class="ec-sidenav__items">
@@ -134,47 +164,22 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
         <span class="ec-sidenav__connection-dot" aria-hidden="true" />
         <span class="ec-sidenav__connection-label">{{ connectionLabel }}</span>
       </p>
-
-      <RouterLink class="ec-sidenav__account" to="/settings" title="账号与设置">
-        <Avatar
-          :display-name="displayName"
-          :avatar-file-id="auth.user?.avatarFileId"
-          :size="28"
-        />
-        <span class="ec-sidenav__account-text">
-          <span class="ec-sidenav__account-name">{{ displayName }}</span>
-          <span class="ec-sidenav__account-sub">{{ accountSubtitle }}</span>
-        </span>
-        <AppIcon name="more" :size="16" class="ec-sidenav__account-more" />
-      </RouterLink>
     </div>
+
+    <AccountCard
+      :open="accountOpen"
+      :display-name="displayName"
+      :email="auth.user?.email ?? ''"
+      :avatar-file-id="auth.user?.avatarFileId"
+      :anchor="accountAnchor"
+      :trigger="accountTrigger"
+      @close="closeAccount"
+    />
   </nav>
 </template>
 
 <style scoped>
 /* UI-D P2：参考图结构补齐。新增规则放在最前，避免覆盖文件末尾的响应式 media 覆盖。 */
-.ec-sidenav__brand-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.ec-sidenav__brand-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ec-sidenav__brand-sub {
-  overflow: hidden;
-  color: var(--ec-text-secondary);
-  font-size: 11px;
-  font-weight: var(--ec-font-weight-regular);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .ec-sidenav__group {
   margin: var(--ec-space-2) 0 0;
   padding: 0 var(--ec-space-2);
@@ -212,33 +217,9 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
   background: var(--ec-disabled);
 }
 
-.ec-sidenav__account-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.ec-sidenav__account-sub {
-  overflow: hidden;
-  color: var(--ec-text-secondary);
-  font-size: 11px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ec-sidenav__account-more {
-  flex: none;
-  margin-left: auto;
-  color: var(--ec-text-tertiary);
-}
-
 /* 紧凑图标栏（801~1199）：隐藏新增的文字细节，只保留图标与状态点。 */
 @media (max-width: 1199px) {
-  .ec-sidenav__brand-sub,
   .ec-sidenav__group,
-  .ec-sidenav__account-sub,
-  .ec-sidenav__account-more,
   .ec-sidenav__connection-label {
     display: none;
   }
@@ -255,38 +236,36 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
   overflow: hidden;
 }
 
-.ec-sidenav__brand {
+/* 左上角账号入口（原「EriseChat」品牌区）：头像 + 昵称，点击弹出账号信息浮窗。 */
+.ec-sidenav__account-trigger {
   display: flex;
   gap: var(--ec-space-2);
   align-items: center;
+  width: 100%;
   height: 40px;
   padding: 0 var(--ec-space-2);
   margin-bottom: var(--ec-space-2);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
   color: var(--ec-text-primary);
+  font: inherit;
   font-size: 16px;
   font-weight: var(--ec-font-weight-semibold);
-  text-decoration: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ec-transition-fast) var(--ec-ease);
+}
+
+.ec-sidenav__account-trigger--open {
+  background: var(--ec-surface-hover);
 }
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 @media (hover: hover) and (pointer: fine) {
-.ec-sidenav__brand:hover {
-  text-decoration: none;
+.ec-sidenav__account-trigger:hover {
+  background: var(--ec-surface-hover);
 }
-}
-
-.ec-sidenav__logo {
-  display: grid;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: var(--ec-radius-sm);
-  background: var(--ec-brand-600);
-  color: var(--ec-text-inverse);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1;
 }
 
 .ec-sidenav__items {
@@ -376,27 +355,6 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
   white-space: nowrap;
 }
 
-.ec-sidenav__account {
-  display: flex;
-  gap: var(--ec-space-2);
-  align-items: center;
-  min-width: 0;
-  margin-top: auto;
-  padding: var(--ec-space-3) 10px 0;
-  border-top: 1px solid var(--ec-border);
-  color: var(--ec-text-primary);
-  font-size: 13px;
-  text-decoration: none;
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.ec-sidenav__account:hover {
-  color: var(--ec-brand-600);
-  text-decoration: none;
-}
-}
-
 .ec-sidenav__account-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -411,19 +369,17 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
     padding: var(--ec-space-4) var(--ec-space-2);
   }
 
-  .ec-sidenav__brand {
+  .ec-sidenav__account-trigger {
     justify-content: center;
     padding: 0;
   }
 
-  .ec-sidenav__brand-text,
   .ec-sidenav__label,
   .ec-sidenav__account-name {
     display: none;
   }
 
-  .ec-sidenav__item,
-  .ec-sidenav__account {
+  .ec-sidenav__item {
     justify-content: center;
   }
 
@@ -437,11 +393,6 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
     margin-left: 0;
     padding: 0 4px;
     font-size: 10px;
-  }
-
-  .ec-sidenav__account {
-    width: 100%;
-    padding: var(--ec-space-3) 0 0;
   }
 }
 
