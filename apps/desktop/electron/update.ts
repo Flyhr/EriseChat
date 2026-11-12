@@ -2,7 +2,7 @@ import { app, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electro
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { autoUpdater, type UpdateInfo } from 'electron-updater'
+import { autoUpdater, type UpdateCheckResult as UpdaterCheckResult, type UpdateInfo } from 'electron-updater'
 import { getSettings } from './ipc'
 
 // P2：Windows 应用内更新（electron-updater 6.8.12，generic provider）。
@@ -243,8 +243,7 @@ function validateArtifact(raw: unknown, origin: string): UpdateArtifact | null {
 }
 
 /** 双清单一致性：版本相同、只有一个 exe、带 SHA-512，且规范化后的安装包 URL 完全相同。 */
-function validateUpdateInfo(info: UpdateInfo | undefined, artifact: UpdateArtifact, feedUrl: string): string | null {
-  if (!info) return '更新清单不可用'
+function validateUpdateInfo(info: UpdateInfo, artifact: UpdateArtifact, feedUrl: string): string | null {
   if (info.version !== artifact.version) return '更新清单版本与服务器不一致'
   const files = info.files ?? []
   if (files.length !== 1) return '更新清单必须只包含一个安装包'
@@ -299,10 +298,9 @@ async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
 
     const feedUrl = `${origin}${FEED_PATH}`
     autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
-    let updateInfo: UpdateInfo | undefined
+    let checked: UpdaterCheckResult | null
     try {
-      const checked = await autoUpdater.checkForUpdates()
-      updateInfo = checked?.updateInfo
+      checked = await autoUpdater.checkForUpdates()
     } catch (error) {
       return {
         ok: true,
@@ -317,7 +315,23 @@ async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
       }
     }
 
-    const mismatch = validateUpdateInfo(updateInfo, artifact, feedUrl)
+    // 只有 updater 明确判定可更新时才建立候选：isUpdateAvailable=false 时它不会替换内部下载目标，
+    // 若仍用 updateInfo 建立候选，界面会显示可下载，实际却报错或沿用上一次的下载目标。
+    if (!checked?.isUpdateAvailable) {
+      return {
+        ok: true,
+        result: {
+          available: true,
+          currentVersion,
+          latestVersion,
+          canInstall: false,
+          reason: '更新器未确认该版本可更新',
+          manualUrl,
+        },
+      }
+    }
+
+    const mismatch = validateUpdateInfo(checked.updateInfo, artifact, feedUrl)
     if (mismatch) {
       return { ok: true, result: { available: true, currentVersion, latestVersion, canInstall: false, reason: mismatch, manualUrl } }
     }
