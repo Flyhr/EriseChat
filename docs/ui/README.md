@@ -31,7 +31,10 @@
 | 左导航与账号入口 | `ec9012c`、`dbde6bb`、`9b3cd1d` | 左上角由「E + EriseChat」改为头像 + 昵称，点击弹 `AccountCard` 浮窗；移除底部账号卡与连接状态；头像 28→40px；紧凑栏只显示头像 |
 | 输入区与气泡尺寸 | `df775dd` | 输入框默认 3 行、最高 5 行后滚动；气泡上限 `640px / 85%`；**鼠标左键长按不再弹菜单**，只保留右键，手指 / 触控笔仍保留长按 |
 | 其他 | `0fbdd33`、`10a3982`、`b1e6ce7` | Android 壳外链改走系统浏览器；草稿孤儿清理与超限修复；提交信息规范改为 `类型：简述`、不写任务编号 |
-| P0 优化落地 | 2026-11-12（本轮，未提交） | 加载态骨架 + `aria-busy`、动效 token 落地、术语统一「联系人」、硬编码色值回收与 token 审计（详见 §5） |
+| P0 优化落地 | 2026-11-12 | 加载态骨架 + `aria-busy`、动效 token 落地、术语统一「联系人」、硬编码色值回收与 token 审计（详见 §5） |
+| P1 落地 | 2026-11-12 | 全局快捷键、全局搜索入口打通、外观字号 / 密度真设置、首屏 1 秒慢反馈、消息行 hover「⋯」（详见 §5） |
+| P1 收口 | 2026-11-12 | 搜索统一为全局面板并加消息 / 联系人 / 群三类 tab；状态反馈抽出 `.ec-state-*` 共享样式与文案规范（§3.7） |
+| P2 深色主题解冻 | 2026-11-12（**仅文档**） | 撤销 UI-D 冻结（`AGENTS.md` §14.2），新增完整实施规格 §9；代码与设置页灰显保持现状 |
 
 ## 3. 当前 UI 基线
 
@@ -47,7 +50,7 @@
 - `styles/variables.css` 集中全部 `--ec-*`：品牌色（`#2563eb`）、聊天区三段渐变与光晕、文本三级对比、边框、媒体卡 `--ec-media-*`、Inter / YaHei 字体栈、4px 基数间距 `--ec-space-1..8`、圆角（气泡 14px + 尾角 6px）、阴影、`--ec-transition-fast/base/slow`（120 / 160 / 200ms）、四档布局宽、`--ec-safe-top/bottom`；文件末尾保留旧 `--color-*` 兼容别名。
 - U-04 后新增语义色与尺寸 token（聚焦外圈、拖拽遮罩、日期胶囊底、浮标投影、主题预览渐变、断线横幅橙系、蓝色气泡叠加色、气泡内边距与移动端圆角、命中高亮底、半透明胶囊底、`--ec-vvh` 回退基线），颜色类在 `styles/themes/azure.css` 双写；组件内不再写裸色值（`Avatar.vue` 的 JS 哈希色板与 `core/imageCompress.ts` 的 canvas 填充色属数据资产例外）。
 - `styles/themes/azure.css` + `data-ec-theme="azure"` 提供「澄蓝」浅色主题，`core/theme.ts` 映射 Naive UI `themeOverrides`。
-- **深色主题仍冻结**：`Settings.vue:1068-1074` 灰显「即将上线」，主题层只做结构预留、设置页不提供可点击主题入口（UI-D 用户裁决，见 §4）。
+- **深色主题文档已解冻（2026-11-12 用户裁决）**：允许实现，实施规格见 §9；**代码尚未实现**，`Settings.vue` 仍灰显「即将上线」、不提供可点击入口，直到 §9.1 前置条件与 §9.5 验收全部通过。约束口径见 `AGENTS.md` §14.2。
 - `AppIcon.vue` 统一 Phosphor 线性图标；禁止用 emoji 充当结构图标、禁止位图图标。
 
 ### 3.3 响应式与多端
@@ -66,6 +69,18 @@
 
 文本 / 图片 / 文件 / 语音 / 系统消息；撤回与编辑占位；链接识别与安全打开；`@` 提及高亮；引用回复与历史定位；右键 / 长按菜单（回复 / 撤回 / 编辑 / 转发 / 收藏 / 置顶 / 多选）；自定义表情与长按删除；草稿防抖与切会话 flush；未读角标 / 标为未读 / 单聊已读回执；全局搜索与会话内搜索；会话置顶、群置顶消息、免打扰；桌面与 Android 通知、提示音、托盘未读闪烁；首字母头像占位与群头像；空状态、Toast、断线横幅、友好错误文案；Enter 发送 / Shift+Enter 换行 / 输入法组合保护；贴底与「有新消息」浮标；上传进度 / 取消 / 重试、拖拽投放；图片预览缩放；typing 提示。
 
+### 3.7 状态反馈规范（U-09）
+
+共享样式在 `styles/global.css` 的 `.ec-state-*`，**不新增通用状态组件**（`AGENTS.md` §12.3 拒绝提前抽象）：
+
+| 类 | 用途 |
+|---|---|
+| `.ec-state-text` | 加载 / 空 / 慢的提示文字，统一字号、颜色与行高 |
+| `.ec-state-slow` | 慢反馈提示（居中） |
+| `.ec-state-retry` | 重试 / 重连按钮，统一尺寸、圆角、hover 与焦点环 |
+
+约定：提示一行内、只说状态与下一步操作，不写原因或实现细节（§14.1）；容器用 `role="status"` / `role="alert"`；慢反馈统一超过 1 秒才出现，避免快速加载时闪烁；失败态必须提供可点击的重试入口。已接入首屏加载慢提示、消息发送失败重发、断线横幅重连与上传队列操作按钮；空态仍由 `EmptyState.vue` 承载。
+
 ## 4. 现行约束索引
 
 完整可执行的约束在 `AGENTS.md` §14，本表只做索引：
@@ -74,7 +89,7 @@
 |---|---|---|
 | 界面文案 | 禁止解释性文档；只留操作标签、输入提示、状态与错误反馈 | §2.13 / §14.1 |
 | Token 纪律 | 组件不写死色值与魔法数字；新增 token 必须 grep 校验使用点（写错名会静默失效） | §14.2 |
-| 主题层 | 「澄蓝」为默认；深色主题冻结，设置页不提供可点击主题入口 | §14.2 |
+| 主题层 | 「澄蓝」为默认；深色主题已解冻、允许实现，但实施前须满足前置条件；代码实现前设置页仍不提供可点击入口（规格见 §9） | §14.2 |
 | 图标 | `AppIcon.vue` + Phosphor 线性集；禁止 emoji 作结构图标、禁止位图图标 | §14.2 |
 | 媒体消息 | 图片 / 文件 / 语音不套气泡，媒体卡颜色只走 `--ec-media-*` | §14.3 |
 | 消息操作菜单 | 鼠标只右键触发；手指 / 触控笔保留长按 | §14.4 |
@@ -105,16 +120,17 @@
 |---|---|---|
 | 全局快捷键 | 已落地 | `App.vue` 挂全局 keydown：Ctrl/Cmd+K 全局搜索、Ctrl/Cmd+N 发起聊天、Alt+↑/↓ 切会话；输入态、IME、已有浮层与预览方向键一律让行，Esc 仍由各组件自行处理 |
 | 搜索呈现 | **部分** | 打通 `openGlobal()`（原先已实现但无任何调用点）、补齐全局模式结果计数、内联搜索跳转补 `jumpMessageId` 与全局面板对齐。**剩余**：消息 / 联系人 / 群分类 tab 与独立结果面板（需接好友与会话数据源，属下一批） |
-| 外观假设置 | 已落地（方案 A） | 消息文字大小（小 12 / 标准 14 / 大 16px）与会话列表密度（舒适 72 / 紧凑 56px）做成真设置，写入 `html[data-ec-font]` / `data-ec-density` 由 `variables.css` 覆写 token；设置存本机 `localStorage`，深色主题仍按 §14.2 灰显 |
+| 外观假设置 | 已落地（方案 A） | 消息文字大小（小 12 / 标准 14 / 大 16px）与会话列表密度（舒适 72 / 紧凑 56px）做成真设置，写入 `html[data-ec-font]` / `data-ec-density` 由 `variables.css` 覆写 token；设置存本机 `localStorage`，深色主题文档已解冻（§9）、实现待后续，设置页暂仍灰显 |
 | 状态族 | **部分** | 首屏加载超过 1 秒才显示「仍在加载消息…」，避免快速加载时提示闪烁；空态、断线横幅、上传失败重试、发送失败重发沿用既有实现。**剩余**：统一状态组件与文案长度规范 |
 | 操作可发现性 | 已落地 | 消息行 hover / focus 露出「⋯」按钮，复用右键菜单的定位与事件链；常驻占位只切透明度、无布局位移，不引入鼠标左键长按，触屏常显 |
 
-> P1 校验：`npm run build`（含 `vue-tsc --noEmit`）通过；入口 chunk gzip 84.40 KB（≤100）、全站 JS+CSS gzip 257.19 KB（≤260，余量约 2.8 KB）；token 审计无未定义引用。未运行测试（§11.2），未做目视验收。
+> P1 收口校验：`npm run build`（含 `vue-tsc --noEmit`）通过；入口 chunk gzip 85.05 KB（≤100）、全站 JS+CSS gzip 257.29 KB（≤260，余量约 2.7 KB）；token 审计无未定义引用。未运行测试（§11.2），未做目视验收。
 
-### P2 需裁决
+### P2 进度
 
-- **深色主题解冻**：先完成 P0 的 token 审计 + 双主题对比度校验，再由用户裁决是否撤销 UI-D 冻结。
-- **字号与消息密度可调**、**群已读明细 F-20**（`AGENTS.md` §10 唯一 P2 待办）。
+- **深色主题解冻**：**已裁决解冻（2026-11-12）**，`AGENTS.md` §14.2 撤销冻结条款，本文件 §9 给出完整实施规格；本轮只更新文档，代码与设置页灰显保持现状。
+- **字号与消息密度可调**：已随 U-08 方案 A 落地（见 P1 进度表），从 P2 待办中移除。
+- **群已读明细 F-20**（`AGENTS.md` §10 唯一 P2 待办）：仍需协议与功能评估，未排期。
 
 ### 范围外（不因对标而建议）
 
@@ -131,6 +147,7 @@
 - [ ] Toast / 搜索框 / 弹窗的实际渲染，以及 Esc 与焦点归还交互
 - [ ] F-39 后台提醒 N01~N12 真机验收
 - [ ] 每次 UI 改动后 `cd apps/web && npm run build`（含 `vue-tsc --noEmit`），复核体积阈值
+- [ ] 深色主题实现后：按 §9.5 逐项验收双主题对比度、token 覆写与四档宽度表现
 
 > 按 `AGENTS.md` §11.2 默认不运行测试；需要执行时按 §11.4 先申请范围与耗时。
 
@@ -154,3 +171,65 @@
 - 约束变更先改 `AGENTS.md` §14，再同步本文件 §4；界面文案规则变更须同时检查 §2.13。
 - 新截图、对比图、验收包一律放本地且不入库（`AGENTS.md` §4），不得写回 `docs/ui/`。
 - 需要废弃本文件时，同样移入 `docs/deprecated/` 并加废弃横幅，再在此路径新建现行版。
+
+## 9. 深色主题实施规格（文档已解冻，实现待后续）
+
+> **状态（2026-11-12 用户裁决）**：撤销 UI-D「深色主题冻结」，允许实现深色主题。本轮**只更新文档、不改任何代码**；`Settings.vue` 仍灰显「即将上线」、不提供可点击入口，直到代码实现与验收完成。
+> 硬约束见 `AGENTS.md` §14.2；本章是实施规格，不替代硬规则。
+
+### 9.1 实施前置条件（全部满足后才放开设置页入口）
+
+1. **token 审计**：P0 已完成，`apps/web/src` 内 `--ec-*` 定义/引用对比结果为「无未定义引用」；组件内无裸色值（`Avatar.vue` 的 JS 哈希色板与 `core/imageCompress.ts` 的 canvas 填充色属数据资产例外）。
+2. **深色主题文件**：新增 `styles/themes/dark.css`，用 `html[data-ec-theme='dark']` 覆写 §9.2 列出的全部语义 token；`variables.css` 的 `:root` 保持浅色回退基线。
+3. **对比度**：正文与背景 ≥4.5:1；大字号与非文本 UI（图标边界、分割线、按钮描边）≥3:1；浅色与深色两套独立测量，不互相推断。
+4. **构建与目视**：`npm run build` 通过、体积阈值不越；四档宽度 + 100%/125% 缩放 + Android 安全区下两套主题逐项目视验收。
+
+### 9.2 必须覆写的 token 清单
+
+以 `styles/variables.css` / `styles/themes/azure.css` 的实际定义为准，按类别：
+
+| 类别 | token |
+|---|---|
+| 品牌与状态 | `--ec-brand-050/100/500/600/700`、`--ec-success`、`--ec-online`、`--ec-danger`、`--ec-warning`、`--ec-warning-border/surface/strong`、`--ec-warning-soft` |
+| 文本 | `--ec-text-primary/secondary/tertiary`、`--ec-text-inverse`、`--ec-text-on-self-soft`、`--ec-disabled` |
+| 表面与背景 | `--ec-bg-canvas`、`--ec-surface`、`--ec-surface-hover`、`--ec-list-bg`、`--ec-nav-bg`、`--ec-chat-bg-a/b/c/d`、`--ec-chat-glow-a/b`、`--ec-chat-gradient`、`--ec-header-bg`、`--ec-chip-surface` |
+| 边框与分隔 | `--ec-border`、`--ec-border-soft`、`--ec-border-strong`、`--ec-bubble-other-border`、`--ec-bubble-self-border` |
+| 气泡与媒体 | `--ec-bubble-other`、`--ec-bubble-self`、`--ec-bubble-self-bg`、`--ec-media-surface/hover`、`--ec-media-border`、`--ec-media-icon-surface`、`--ec-media-track`、`--ec-bubble-self-overlay`、`--ec-bubble-self-overlay-soft` |
+| 阴影与遮罩 | `--ec-shadow-*` 全组、`--ec-shadow-bubble/self`、`--ec-shadow-media`、`--ec-shadow-badge`、`--ec-composer-shadow`、`--ec-scrim`、`--ec-overlay`、`--ec-overlay-border`、`--ec-overlay-hover` |
+| 焦点与选中 | `--ec-focus-ring`、`--ec-focus-shadow`、`--ec-row-active-bg`、`--ec-drop-overlay`、`--ec-date-badge-bg` |
+| 预览示意 | `--ec-theme-preview-light/dark`（设置页色卡，两套主题下都要保持可辨） |
+
+> 新增 token 必须同时写入 `variables.css`（回退基线）与 `themes/dark.css`（主题覆写），并 grep 校验使用点——CSS 自定义属性写错名会静默失效。尺寸 / 间距 / 圆角 / 动效类 token 不需要按主题覆写。
+
+### 9.3 主题切换机制
+
+- `core/theme.ts` 由静态 `ecThemeOverrides` 改为按当前主题返回 Naive UI `themeOverrides`；`App.vue` 用 computed 传给 `NConfigProvider`，避免组件库控件在深色下仍是浅色。
+- `index.html` 的静态 `data-ec-theme="azure"` 改为运行时驱动：在 `stores/settings.ts` 增加 `theme: 'azure' | 'dark'`（枚举白名单校验、本机 localStorage、不同步服务端），`App.vue` watch 写 `document.documentElement.dataset.ecTheme`；`main.ts` 同时引入两套主题 CSS。
+- 参考 U-08 已落地的 `html[data-ec-font]` / `data-ec-density` 覆写方式，保持「组件不感知具体取值」。
+- **不做**系统主题自动跟随（避免引入 `matchMedia` 监听与首屏闪烁），仅提供显式选择；若后续要做须单独评估。
+
+### 9.4 设置页入口规格
+
+- 「主题模式」保留浅色与深色两张卡；移除深色卡上的「即将上线」灰显与 `aria-disabled`，改为可点击、可键盘聚焦，选中态沿用现有 `check` 图标与 `role="status"`。
+- 界面文案按 §14.1 只留操作标签「浅色」「深色」，不写原理或说明；说明放 `docs/`。
+- 切换后立即生效（无需刷新），且不影响已加载消息、输入草稿与连接状态。
+- 入口放开必须与 §9.1 前置条件、§9.5 验收**同批代码改动**一起落地，不允许先给可点入口再补主题。
+
+### 9.5 验收清单
+
+- [ ] 两套主题下 `--ec-*` 定义/引用审计均无未定义引用，无组件裸色值
+- [ ] 正文对比度 ≥4.5:1；分割线、图标边界、按钮状态在两套主题下均可辨
+- [ ] 媒体卡、日期胶囊、半透明顶栏、图片预览遮罩、断线横幅、主题预览色卡在深色下不糊成一片
+- [ ] Naive UI 控件（弹窗、开关、输入框、消息提示）随主题切换
+- [ ] 会话列表、聊天页、设置页、登录页、收藏页在 1440/1200/900/390 四档与 100%/125% 缩放下无错位
+- [ ] Android 安全区与状态栏、软键盘弹出在深色下正常
+- [ ] `npm run build` 通过；入口 ≤100 KB、全站 ≤260 KB gzip
+- [ ] 切换主题不丢草稿、不断线、不改变已读游标
+
+### 9.6 风险与回滚
+
+- **CSS 变量静默失效**：深色下某个 token 漏覆写不会报错，只会沿用浅色值 → 逐 token 对照 + grep 校验。
+- **半透明与叠加色**：`--ec-header-bg`、`--ec-chip-surface`、`--ec-bubble-self-overlay*` 在深色底上可能失去层次 → 单独目视。
+- **Naive UI 主题 overrides**：组件库控件未跟随会形成「局部浅色」→ 优先修 `core/theme.ts`。
+- **体积**：新增一套主题 CSS 与设置字段后复核阈值。
+- **回滚**：改动只在 `apps/web` 前端样式与设置层，无协议帧、库表、服务端改动；按提交粒度 revert 即可，不影响用户数据。
