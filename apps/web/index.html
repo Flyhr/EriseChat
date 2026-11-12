@@ -11,6 +11,19 @@
         }
       } catch (e) {}
     </script>
+    <style>
+      /* 首屏预置画布底色（U-19）：样式表加载前浏览器默认白底，深色主题会闪一帧白。
+         色值与 styles/variables.css 的 --ec-bg-canvas 一致；运行时仍由 body 背景接管。
+         color-scheme 一并预置，避免深色下滚动条与表单控件先按浅色渲染。 */
+      html {
+        background-color: #f6f9fe;
+      }
+
+      html[data-ec-theme='dark'] {
+        background-color: #0b1220;
+        color-scheme: dark;
+      }
+    </style>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="EriseChat 自建即时通讯客户端" />
