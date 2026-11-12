@@ -649,6 +649,14 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - `artifacts`：object，固定含 `desktop` 与 `android` 两个键，值可能为 `null`（该平台暂无产物）；非 null 时结构为 `{ version, fileName, url, size, sha256, modifiedAt }`：`fileName` 为安装包文件名（供客户端保存下载文件用）、`url` 为同源相对地址 `/download/files/{fileName}`（客户端必须与当前服务器地址拼接后使用，禁止跨源下载）、`size` 为字节数、`sha256` 为小写十六进制摘要（客户端下载完成后必须校验一致才可执行/安装）、`modifiedAt` 为最近修改时间（UTC 毫秒）。
     - 产物只认 `EriseChat-Setup-x.y.z.exe` 与 `EriseChat-x.y.z.apk`（文件名版本号必须为三段数字），同平台存在多个合法版本时取最近修改的一个；`/download` 下载页行为不变。
     - 该接口不新增帧、不改库表，`protocolVersion` 仍为 1；Web 浏览器端只提示刷新页面，桌面/APK 壳负责下载与安装。
+    - **2026-11-12 追加四个可选字段**（只增不改，旧客户端忽略；`version`、`protocolVersion`、`artifacts` 的结构与语义不变）：
+      - `webVersion`：string 或 null，当前部署的 Web 构建版本，取自随静态资源发布的 `web-version.json`；文件缺失或内容非法时为 null，浏览器端不得据此提示刷新或施加最低版本门槛；
+      - `minVersion`：string 或 null，完整发行的最低登录版本；缺失、非法或高于发行版本时按 null 处理（不设门槛）；
+      - `releaseNotes`：string[]，当前发行的纯文本说明，最多 10 条、每条最多 200 字；缺失时为空数组；
+      - `publishedAt`：number 或 null，发行时间（UTC 毫秒）；缺失时为 null。
+    - 发行元数据仅在 `release.json` 的 `version` 与 `webVersion`、`artifacts.desktop.version`、`artifacts.android.version` 全部一致时下发；文件缺失、无效或不一致时 `minVersion` 为 null、`releaseNotes` 为空数组。`release.json` 位于下载目录，不对外提供下载。
+    - 新客户端按平台版本判断更新：Windows 比较 `artifacts.desktop.version`、Android 比较 `artifacts.android.version`、浏览器比较 `webVersion`；`version` 仍为服务端程序集与产物版本的最大值，仅供总览，不得用于跨平台判断。
+    - 该接口返回 `Cache-Control: no-store`，客户端不得缓存清单。
 
 11. **消息搜索（REST，v1，F-36）**：`GET /api/messages/search`，需登录，参数：
     - `q`（必填，1~50 字符）：普通模式匹配文本内容与图片/文件名（image/file 消息的 `content.name`，正文里的 URL 字样按普通文本处理）；`linkOnly=true` 的链接模式只匹配文本消息中识别出的 HTTP/HTTPS URL，不匹配普通正文或文件名；不搜索附件正文、不抓取网页；
@@ -776,3 +784,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（F-22 多端在线） | 2026-11-01 | 连接策略由「单人单连接」改为「每账号最多 3 个连接」（`App:MaxConnectionsPerUser` 可配，裁到 1~10），超限踢「最早建立」的连接；`read.updated` 增加下发给本人其他连接（多端已读同步），群聊仍不向其他成员广播；`kicked` 帧结构与 `4001` 关闭码不变，仅语义/文案扩展；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-28 语音消息） | 2026-11-01 | `message.send` 的 `msgType` 新增 `voice`（向后兼容增量），content 为 VoiceContent `{fileId, durationMs}`（durationMs 1000~60000 整数、客户端上报）；新增音频文件规则：`.webm` / `audio/webm` / 魔数 `1A 45 DF A3`、单文件 ≤5MB，上传下载仍走现有 `/api/files`；voice 消息走现有 Message 路径（落库 messages.file_id、共享文件汇总排除 voice、撤回规则同 image/file）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（F-29 客户端更新） | 2026-11-02 | 新增 REST `GET /api/version`（匿名），返回 `{ version, protocolVersion, artifacts: { desktop, android } }`；产物字段 `version` / `url`（同源 `/download/files/{fileName}`）/ `size` / `sha256`（小写十六进制）/ `modifiedAt`（UTC 毫秒）；只认 `EriseChat-Setup-x.y.z.exe` / `EriseChat-x.y.z.apk`，同平台取最近修改的合法产物；客户端下载后必须校验 sha256；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（更新清单扩展） | 2026-11-12 | `GET /api/version` 追加四个可选字段 `webVersion` / `minVersion` / `releaseNotes` / `publishedAt`（旧客户端忽略；`version`、`protocolVersion`、`artifacts` 结构不变）；Web 构建产出 `web-version.json`，服务端据此下发 `webVersion`；发行元数据仅在 `release.json` 与 Web、两平台产物版本全部一致时下发；清单按平台版本判断更新，`version` 仅作总览；返回 `Cache-Control: no-store`；无新帧、不改库表、`protocolVersion` 仍为 1 |
