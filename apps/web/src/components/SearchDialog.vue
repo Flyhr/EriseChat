@@ -5,10 +5,14 @@ import { conversationTitle } from '../core/conversationTitle'
 import { mergeLocalSearchResults } from '../core/localSearch'
 import NoticeBar from './NoticeBar.vue'
 import SearchResultItem from './SearchResultItem.vue'
+import AppIcon from './AppIcon.vue'
+import { friendlyError } from '../core/errorMessages'
+import { showToast } from '../core/toast'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
+import { useFriendsStore } from '../stores/friends'
 import { useSearchStore } from '../stores/search'
-import type { Message } from '../types/frames'
+import type { Conversation, Friend, Message } from '../types/frames'
 
 // 消息搜索面板（F-11 批次2，计划 §F-11）：全局/会话内共用，App.vue 挂载一次。
 // 只展示 REST 返回的 Message（text 消息），点击结果跳转到对应会话并定位（jumpSeq，复用 F-09 机制）。
@@ -18,6 +22,58 @@ const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
 const search = useSearchStore()
+const friends = useFriendsStore()
+
+/** U-07：全局搜索按消息 / 联系人 / 群聊三类切换；会话内模式只保留消息。 */
+type SearchTab = 'messages' | 'contacts' | 'groups'
+const tabs: { key: SearchTab; label: string }[] = [
+  { key: 'messages', label: '消息' },
+  { key: 'contacts', label: '联系人' },
+  { key: 'groups', label: '群聊' },
+]
+const activeTab = ref<SearchTab>('messages')
+const showTabs = computed(() => search.isGlobal)
+const keyword = computed(() => search.query.trim().toLowerCase())
+
+/** 联系人命中：备注优先，其次昵称与邮箱；只查本机已加载的好友列表，不发新请求。 */
+const contactMatches = computed<Friend[]>(() => {
+  if (!showTabs.value || !keyword.value) return []
+  return friends.friends
+    .filter((friend) => {
+      const name = (friend.remark?.trim() || friend.displayName).toLowerCase()
+      return (
+        name.includes(keyword.value) ||
+        friend.displayName.toLowerCase().includes(keyword.value) ||
+        friend.email.toLowerCase().includes(keyword.value)
+      )
+    })
+    .slice(0, 30)
+})
+
+/** 群聊命中：按群名称过滤会话列表中的群会话。 */
+const groupMatches = computed<Conversation[]>(() => {
+  if (!showTabs.value || !keyword.value) return []
+  return conversations.sorted
+    .filter(
+      (item) => item.type === 'group' && item.title.toLowerCase().includes(keyword.value),
+    )
+    .slice(0, 30)
+})
+
+async function openContact(friend: Friend): Promise<void> {
+  try {
+    const conversation = await conversations.createDirect(friend.userId)
+    search.close()
+    await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  }
+}
+
+async function openGroup(conversation: Conversation): Promise<void> {
+  search.close()
+  await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
+}
 
 const inputRef = ref<HTMLInputElement | null>(null)
 const panelRef = ref<HTMLElement | null>(null)
@@ -104,6 +160,8 @@ const countsText = computed(() => {
   if (!hasKeyword.value) return ''
   // 全局搜索：补齐原先缺失的结果计数（会话内模式仍走下面的本地命中口径）。
   if (search.isGlobal) {
+    if (activeTab.value === 'contacts') return `联系人 ${contactMatches.value.length} 位`
+    if (activeTab.value === 'groups') return `群聊 ${groupMatches.value.length} 个`
     if (search.loading && search.results.length === 0) return '正在搜索…'
     if (search.results.length > 0) {
       return `共 ${displayList.value.length} 条${search.hasMore ? '（可继续加载更多）' : ''}`
@@ -123,6 +181,15 @@ const countsText = computed(() => {
 })
 
 const emptyText = computed(() => {
+  // U-07：联系人 / 群聊结果来自本地 store，不受后台消息搜索的 loading 影响。
+  if (activeTab.value === 'contacts') {
+    if (!keyword.value) return '输入关键词搜索联系人'
+    return contactMatches.value.length > 0 ? '' : '没有找到匹配的联系人'
+  }
+  if (activeTab.value === 'groups') {
+    if (!keyword.value) return '输入关键词搜索群聊'
+    return groupMatches.value.length > 0 ? '' : '没有找到匹配的群聊'
+  }
   if (search.error) return search.error
   if (search.loading && displayList.value.length === 0) return '搜索中…'
   if (!hasKeyword.value) return '输入关键词搜索历史消息'
@@ -168,6 +235,19 @@ async function scrollActiveIntoView(): Promise<void> {
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
+  if (activeTab.value !== 'messages') {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      if (activeTab.value === 'contacts') {
+        const first = contactMatches.value[0]
+        if (first) void openContact(first)
+      } else {
+        const first = groupMatches.value[0]
+        if (first) void openGroup(first)
+      }
+    }
+    return
+  }
   if (event.key === 'ArrowDown') {
     event.preventDefault()
     moveSelection(1)
@@ -212,6 +292,7 @@ watch(
   async (open) => {
     if (open) {
       lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      activeTab.value = 'messages'
       senderInput.value = ''
       fromDate.value = ''
       toDate.value = ''
@@ -269,7 +350,22 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <div class="ec-search__filters">
+        <div v-if="showTabs" class="ec-search__tabs" role="tablist" aria-label="搜索分类">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            class="ec-search__tab"
+            :class="{ 'ec-search__tab--active': activeTab === tab.key }"
+            :aria-selected="activeTab === tab.key"
+            @click="activeTab = tab.key"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <div v-if="activeTab === 'messages'" class="ec-search__filters">
           <input
             v-model="senderInput"
             type="search"
@@ -301,6 +397,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ec-search__body">
+          <template v-if="activeTab === 'messages'">
           <NoticeBar
             v-if="search.offlineFallback"
             class="ec-search__notice"
@@ -341,6 +438,34 @@ onBeforeUnmount(() => {
           >
             {{ search.loadingMore ? '加载中…' : '加载更多' }}
           </button>
+          </template>
+
+          <template v-else-if="activeTab === 'contacts'">
+            <p v-if="countsText" class="ec-search__counts">{{ countsText }}</p>
+            <p v-if="emptyText" class="ec-search__hint">{{ emptyText }}</p>
+            <ul v-else class="ec-search__entity-list" role="listbox" aria-label="联系人结果">
+              <li v-for="friend in contactMatches" :key="friend.userId">
+                <button type="button" class="ec-search__entity" @click="openContact(friend)">
+                  <AppIcon name="contacts" :size="16" />
+                  <span class="ec-search__entity-name">{{ friend.remark?.trim() || friend.displayName }}</span>
+                  <span class="ec-search__entity-sub">{{ friend.email }}</span>
+                </button>
+              </li>
+            </ul>
+          </template>
+
+          <template v-else>
+            <p v-if="countsText" class="ec-search__counts">{{ countsText }}</p>
+            <p v-if="emptyText" class="ec-search__hint">{{ emptyText }}</p>
+            <ul v-else class="ec-search__entity-list" role="listbox" aria-label="群聊结果">
+              <li v-for="item in groupMatches" :key="item.conversationId">
+                <button type="button" class="ec-search__entity" @click="openGroup(item)">
+                  <AppIcon name="groups" :size="16" />
+                  <span class="ec-search__entity-name">{{ item.title }}</span>
+                </button>
+              </li>
+            </ul>
+          </template>
         </div>
       </section>
     </div>
@@ -436,6 +561,70 @@ onBeforeUnmount(() => {
   border-color: var(--ec-brand-600);
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
+}
+
+/* U-07：三类结果 tab 与联系人 / 群聊结果项。 */
+.ec-search__tabs {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-1);
+  padding: var(--ec-space-2) var(--ec-space-4) 0;
+}
+
+.ec-search__tab {
+  min-height: 28px;
+  padding: 0 var(--ec-space-3);
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  cursor: pointer;
+}
+
+.ec-search__tab--active {
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+  font-weight: var(--ec-font-weight-medium);
+}
+
+.ec-search__entity-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ec-search__entity {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ec-search__entity:hover {
+  background: var(--ec-surface-hover);
+}
+
+.ec-search__entity-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ec-search__entity-sub {
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
 }
 
 .ec-search__filters {

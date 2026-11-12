@@ -1,17 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { messagesApi } from '../api/messages'
-import type { Conversation, Message } from '../types/frames'
+import { computed } from 'vue'
+import type { Conversation } from '../types/frames'
 import { filterConversations, type ConversationFilter } from '../core/chatLayout'
 import { friendlyError } from '../core/errorMessages'
 import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
-import { SEARCH_DEBOUNCE_MS, SEARCH_PAGE_SIZE } from '../stores/search'
+import { useSearchStore } from '../stores/search'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
-import SearchInput from './SearchInput.vue'
-import SearchResultItem from './SearchResultItem.vue'
 
 // 会话列表（UI-02 批次1，计划 §5.2）：头部搜索框 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
 // F-11 体验调整：搜索框放在「发起聊天」左侧，可直接输入（250ms 防抖）在列表区内联展示命中消息，
@@ -46,134 +42,12 @@ const visible = computed(() =>
   filterConversations(props.conversations, props.filter, conversationsStore.unreadOf),
 )
 
-const router = useRouter()
+const search = useSearchStore()
 
-const searchKeyword = ref('')
-const searchResults = ref<Message[]>([])
-const searchLoading = ref(false)
-const searchLoadingMore = ref(false)
-const searchError = ref('')
-const searchHasMore = ref(false)
-const searchedKeyword = ref('')
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-let searchRequestSeq = 0
-
-const isSearchMode = computed(() => searchKeyword.value.trim().length > 0)
-
-const searchPlaceholder = computed(() =>
-  props.filter === 'group' ? '搜索群聊消息' : '搜索消息',
-)
-
-/** 群聊筛选下只展示群会话的命中（服务端全局搜索，这里按当前筛选本地过滤）。 */
-const visibleSearchResults = computed(() =>
-  props.filter === 'group'
-    ? searchResults.value.filter(
-        (message) => conversationsStore.getById(message.conversationId)?.type === 'group',
-      )
-    : searchResults.value,
-)
-
-const searchHint = computed(() => {
-  if (searchError.value) return searchError.value
-  if (searchLoading.value) return '搜索中…'
-  return '没有找到匹配的消息'
-})
-
-function clearSearchTimer(): void {
-  if (searchTimer !== null) {
-    clearTimeout(searchTimer)
-    searchTimer = null
-  }
+/** U-07：搜索统一走全局 SearchDialog，列表内不再发第二次请求。 */
+function openGlobalSearch(): void {
+  search.openGlobal()
 }
-
-function resetSearchResults(): void {
-  searchRequestSeq += 1
-  clearSearchTimer()
-  searchResults.value = []
-  searchHasMore.value = false
-  searchError.value = ''
-  searchLoading.value = false
-  searchLoadingMore.value = false
-  searchedKeyword.value = ''
-}
-
-async function runSearch(keyword: string, beforeSeq?: number): Promise<void> {
-  const seq = ++searchRequestSeq
-  if (beforeSeq === undefined) {
-    searchLoading.value = true
-    searchResults.value = []
-    searchHasMore.value = false
-  } else {
-    searchLoadingMore.value = true
-  }
-  searchError.value = ''
-  try {
-    const page = await messagesApi.search(keyword, {
-      beforeSeq,
-      limit: SEARCH_PAGE_SIZE,
-    })
-    if (seq !== searchRequestSeq) return
-    if (beforeSeq === undefined) {
-      searchResults.value = page.messages
-      searchedKeyword.value = keyword
-    } else {
-      searchResults.value = [...searchResults.value, ...page.messages]
-    }
-    searchHasMore.value = page.hasMore
-  } catch (error) {
-    if (seq === searchRequestSeq) {
-      searchError.value = friendlyError(error)
-      if (beforeSeq === undefined) {
-        searchResults.value = []
-        searchHasMore.value = false
-      }
-    }
-  } finally {
-    if (seq === searchRequestSeq) {
-      searchLoading.value = false
-      searchLoadingMore.value = false
-    }
-  }
-}
-
-function scheduleSearch(): void {
-  clearSearchTimer()
-  const keyword = searchKeyword.value.trim()
-  if (!keyword) {
-    resetSearchResults()
-    return
-  }
-  searchTimer = setTimeout(() => {
-    searchTimer = null
-    void runSearch(keyword)
-  }, SEARCH_DEBOUNCE_MS)
-}
-
-function clearSearch(): void {
-  searchKeyword.value = ''
-}
-
-function loadMoreSearch(): void {
-  if (searchLoading.value || searchLoadingMore.value || !searchHasMore.value) return
-  const last = searchResults.value[searchResults.value.length - 1]
-  if (!last || !Number.isFinite(last.seq)) return
-  void runSearch(searchedKeyword.value, last.seq)
-}
-
-function selectSearchResult(message: Message): void {
-  if (!Number.isFinite(message.seq)) return
-  clearSearch()
-  void router.push({
-    name: 'chat',
-    params: { conversationId: message.conversationId },
-    query: { jumpSeq: String(message.seq), jumpMessageId: message.messageId },
-  })
-}
-
-watch(searchKeyword, scheduleSearch)
-
-onBeforeUnmount(clearSearchTimer)
 
 const emptyText = computed(() => {
   if (props.filter === 'unread') return '没有未读会话'
@@ -227,13 +101,15 @@ async function onUpdateSettings(payload: {
       </div>
     </div>
     <header class="ec-conversation-list__header">
-      <SearchInput
-        v-model="searchKeyword"
-        class="ec-conversation-list__searchbox"
-        :placeholder="searchPlaceholder"
-        :aria-label="searchPlaceholder"
-        @escape="clearSearch"
-      />
+      <button
+        type="button"
+        class="ec-conversation-list__searchbox ec-conversation-list__search-trigger"
+        aria-label="搜索消息、联系人或群聊"
+        @click="openGlobalSearch"
+      >
+        <AppIcon name="search" :size="16" />
+        <span>搜索消息、联系人或群聊</span>
+      </button>
       <button
         type="button"
         class="ec-conversation-list__create"
@@ -260,57 +136,34 @@ async function onUpdateSettings(payload: {
       </button>
     </div>
 
-    <template v-if="isSearchMode">
-      <p v-if="visibleSearchResults.length === 0" class="ec-conversation-list__hint">{{ searchHint }}</p>
-      <nav v-else class="ec-conversation-list__items ec-fade" aria-label="搜索结果">
-        <SearchResultItem
-          v-for="message in visibleSearchResults"
-          :key="`${message.conversationId}-${message.messageId}`"
-          :message="message"
-          :query="searchedKeyword"
-          @select="selectSearchResult"
-        />
-        <button
-          v-if="searchHasMore"
-          type="button"
-          class="ec-conversation-list__more"
-          :disabled="searchLoadingMore"
-          @click="loadMoreSearch"
-        >
-          {{ searchLoadingMore ? '加载中…' : '加载更多' }}
-        </button>
-      </nav>
-    </template>
-    <template v-else>
-      <div
-        v-if="loading && visible.length === 0"
-        class="ec-conversation-list__loading"
-        role="status"
-        aria-label="会话加载中"
-        aria-busy="true"
-      >
-        <div v-for="index in 6" :key="index" class="ec-conversation-list__loading-row">
-          <div class="ec-skeleton ec-conversation-list__loading-avatar" />
-          <div class="ec-conversation-list__loading-lines">
-            <div class="ec-skeleton ec-conversation-list__loading-line" />
-            <div class="ec-skeleton ec-conversation-list__loading-line ec-conversation-list__loading-line--short" />
-          </div>
+    <div
+      v-if="loading && visible.length === 0"
+      class="ec-conversation-list__loading"
+      role="status"
+      aria-label="会话加载中"
+      aria-busy="true"
+    >
+      <div v-for="index in 6" :key="index" class="ec-conversation-list__loading-row">
+        <div class="ec-skeleton ec-conversation-list__loading-avatar" />
+        <div class="ec-conversation-list__loading-lines">
+          <div class="ec-skeleton ec-conversation-list__loading-line" />
+          <div class="ec-skeleton ec-conversation-list__loading-line ec-conversation-list__loading-line--short" />
         </div>
       </div>
-      <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
-      <nav v-else class="ec-conversation-list__items ec-fade">
-        <ConversationItem
-          v-for="conversation in visible"
-          :key="conversation.conversationId"
-          :conversation="conversation"
-          :self-user-id="selfUserId"
-          :active="conversation.conversationId === activeId"
-          :unread="unreadOf(conversation.conversationId)"
-          @select="emit('select', $event)"
-          @update-settings="onUpdateSettings"
-        />
-      </nav>
-    </template>
+    </div>
+    <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
+    <nav v-else class="ec-conversation-list__items ec-fade">
+      <ConversationItem
+        v-for="conversation in visible"
+        :key="conversation.conversationId"
+        :conversation="conversation"
+        :self-user-id="selfUserId"
+        :active="conversation.conversationId === activeId"
+        :unread="unreadOf(conversation.conversationId)"
+        @select="emit('select', $event)"
+        @update-settings="onUpdateSettings"
+      />
+    </nav>
   </section>
 </template>
 
@@ -377,10 +230,35 @@ async function onUpdateSettings(payload: {
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-/* 搜索框组件（SearchInput）只负责外观，这里限制它在头部占用的宽度。 */
+/* U-07：搜索触发器外观沿用输入框尺寸，点击打开全局面板。 */
 .ec-conversation-list__searchbox {
   flex: 1;
   max-width: 280px;
+}
+
+.ec-conversation-list__search-trigger {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  min-height: 36px;
+  padding: 0 var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-input);
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ec-conversation-list__search-trigger:hover {
+  border-color: var(--ec-brand-500);
+  color: var(--ec-text-secondary);
+}
+
+.ec-conversation-list__search-trigger:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .ec-conversation-list__more {
