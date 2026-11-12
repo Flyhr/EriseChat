@@ -16,6 +16,7 @@ const MANIFEST_PATH = '/api/version'
 const INSTALLER_NAME_PATTERN = /^EriseChat-Setup-[0-9]+\.[0-9]+\.[0-9]+\.exe$/i
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const MAX_REDIRECTS = 5
 
 export interface UpdateArtifact {
   version: string
@@ -68,6 +69,8 @@ interface UpdaterExecutor {
 let candidate: UpdateCandidate | null = null
 let progressSender: WebContents | null = null
 let networkGuarded = false
+/** 本次更新操作绑定的服务器 origin；清单、feed、候选与请求闸门都用它，避免中途读取设置导致基准漂移。 */
+let activeOrigin: string | null = null
 /** 最近一次被同源校验拦下的地址；用于把更新器抛出的网络错误翻译成可读原因。 */
 let originViolation: string | null = null
 
@@ -113,6 +116,20 @@ function allowedOrigin(): string {
   throw new Error('应用内更新要求 HTTPS 服务器（调试构建可用回环 HTTP）')
 }
 
+/**
+ * 在一次更新操作开始时绑定服务器 origin：清单、feed、候选与请求闸门都用这一个值，
+ * 避免操作中途读取设置导致校验基准漂移；服务器已切换时旧候选立即作废。
+ */
+function bindOriginForOperation(): string {
+  const origin = allowedOrigin()
+  activeOrigin = origin
+  originViolation = null
+  if (candidate && candidate.origin !== origin) {
+    candidate = null
+  }
+  return origin
+}
+
 /** 把 createRequest 的选项还原成规范化 origin；无法识别时返回 null（按不允许处理）。 */
 function requestOrigin(options: UpdaterRequestOptions): string | null {
   const protocol = options.protocol
@@ -132,7 +149,11 @@ function requestOrigin(options: UpdaterRequestOptions): string | null {
 }
 
 function assertSameOrigin(options: UpdaterRequestOptions): void {
-  const origin = allowedOrigin()
+  const origin = activeOrigin
+  if (!origin) {
+    originViolation = '更新操作尚未绑定服务器'
+    throw new Error('更新请求不在当前服务器范围内：未绑定服务器')
+  }
   const actual = requestOrigin(options)
   if (actual !== origin) {
     originViolation = actual ?? '无法识别的地址'
@@ -164,10 +185,31 @@ function updateFailureReason(error: unknown, fallback: string): string {
   return `${fallback}：${errorMessage(error)}`
 }
 
+/**
+ * 手动跟随重定向：每一跳都必须落在绑定 origin 内，最多 5 跳。
+ * 不能用 fetch 默认的自动跟随——跨源跳转不会经过 updater 的 createRequest 闸门。
+ */
+async function fetchSameOrigin(url: URL, origin: string): Promise<Response> {
+  let current = url
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
+    if (current.origin !== origin) throw new Error('更新地址不在当前服务器范围内')
+    const response = await fetch(current, {
+      redirect: 'manual',
+      headers: { Accept: 'application/json' },
+    })
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location')
+      if (!location) throw new Error('更新重定向缺少目标地址')
+      current = new URL(location, current)
+      continue
+    }
+    return response
+  }
+  throw new Error('更新地址重定向次数过多')
+}
+
 async function fetchManifest(origin: string): Promise<VersionManifest> {
-  const url = new URL(MANIFEST_PATH, origin)
-  if (url.origin !== origin) throw new Error('更新清单地址不在当前服务器范围内')
-  const response = await fetch(url, { headers: { Accept: 'application/json' } })
+  const response = await fetchSameOrigin(new URL(MANIFEST_PATH, origin), origin)
   if (!response.ok) throw new Error(`服务器返回 ${response.status}`)
   return (await response.json()) as VersionManifest
 }
@@ -233,7 +275,7 @@ async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
   const currentVersion = app.getVersion()
   try {
     guardUpdaterNetwork()
-    const origin = allowedOrigin()
+    const origin = bindOriginForOperation()
     const manifest = await fetchManifest(origin)
     const artifact = validateArtifact(manifest.artifacts?.desktop, origin)
     const latestVersion = artifact?.version ?? currentVersion
@@ -287,11 +329,10 @@ async function downloadUpdate(event: IpcMainInvokeEvent): Promise<UpdateIpcResul
   if (!active) return { ok: false, message: '没有可用的更新，请先检查更新' }
   if (!app.isPackaged) return { ok: false, message: '开发态不支持应用内更新' }
   try {
-    if (active.origin !== allowedOrigin()) {
-      candidate = null
+    const origin = bindOriginForOperation()
+    if (candidate !== active || active.origin !== origin) {
       return { ok: false, message: '服务器已切换，请重新检查更新' }
     }
-    originViolation = null
     progressSender = event.sender
     let files: string[]
     try {
@@ -321,8 +362,8 @@ async function installUpdate(): Promise<UpdateIpcResult> {
   const active = candidate
   if (!active?.downloadedFile) return { ok: false, message: '未找到已下载的安装包，请重新下载' }
   try {
-    if (active.origin !== allowedOrigin()) {
-      candidate = null
+    const origin = bindOriginForOperation()
+    if (candidate !== active || active.origin !== origin) {
       return { ok: false, message: '服务器已切换，请重新检查更新' }
     }
     // updater 已按 latest.yml 校验 SHA-512；安装前再按 /api/version 核对实际文件的 SHA-256。
