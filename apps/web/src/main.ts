@@ -43,6 +43,11 @@ function cleanupSession(): void {
   void clearAllData()
 }
 
+// 会话被移出/主动退出（conv.updated.removedConversationIds）时清理对应草稿：
+// 否则该会话的草稿会永久留在 localStorage，重新入群/重建单聊后又冒出来。
+// 注册放在入口装配层，drafts store 保持只依赖存储层，不反向依赖 conversations store。
+conversations.onConversationRemoved((conversationId) => drafts.removeDraft(conversationId))
+
 // 401 统一处理（M2-02/M3-00）：清登录态与缓存并回 /login；/auth/* 登录类接口自身 401 由页面提示，不在此跳转。
 setUnauthorizedHandler(() => {
   cleanupSession()

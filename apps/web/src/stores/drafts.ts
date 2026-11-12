@@ -56,6 +56,8 @@ export const useDraftsStore = defineStore('drafts', () => {
   function setDraft(conversationId: string, text: string): void {
     if (!conversationId) return
     const value = typeof text === 'string' ? text : ''
+    // 先做长度校验再清 timer：超限文本被丢弃时，不能顺带取消上一次合法输入的待写盘任务。
+    if (value.length > MAX_TEXT_LENGTH) return
     clearTimer(conversationId)
     if (value.length === 0) {
       if (drafts.value[conversationId]) {
@@ -64,7 +66,6 @@ export const useDraftsStore = defineStore('drafts', () => {
       }
       return
     }
-    if (value.length > MAX_TEXT_LENGTH) return
     const entry: DraftEntry = { text: value, updatedAt: Date.now() }
     drafts.value = { ...drafts.value, [conversationId]: entry }
     timers.set(
