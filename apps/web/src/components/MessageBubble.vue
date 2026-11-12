@@ -383,7 +383,7 @@ const timeText = computed(() =>
         </span>
         <button
           v-else-if="status === 'failed'"
-          class="message-row__retry"
+          class="message-row__retry ec-state-retry"
           type="button"
           @click="emit('retry')"
         >
@@ -645,10 +645,8 @@ const timeText = computed(() =>
   color: var(--ec-brand-600);
 }
 
+/* U-09：尺寸、圆角、hover 与焦点环统一由 .ec-state-retry 提供，这里只保留危险色语义。 */
 .message-row__retry {
-  padding: 0;
-  border: none;
-  background: none;
   color: var(--ec-danger);
   font-size: var(--ec-font-size-small);
   cursor: pointer;

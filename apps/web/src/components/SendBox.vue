@@ -440,7 +440,7 @@ function onInput(): void {
           <div class="send-box__upload-actions">
             <button
               v-if="item.status === 'pending'"
-              class="send-box__upload-action"
+              class="send-box__upload-action ec-state-retry"
               type="button"
               @click="emit('dismiss-upload', item.id)"
             >
@@ -448,7 +448,7 @@ function onInput(): void {
             </button>
             <button
               v-else-if="item.status === 'uploading'"
-              class="send-box__upload-action"
+              class="send-box__upload-action ec-state-retry"
               type="button"
               @click="emit('cancel-upload', item.id)"
             >
@@ -456,14 +456,14 @@ function onInput(): void {
             </button>
             <template v-else-if="item.status === 'failed'">
               <button
-                class="send-box__upload-action send-box__upload-action--retry"
+                class="send-box__upload-action send-box__upload-action--retry ec-state-retry"
                 type="button"
                 @click="emit('retry-upload', item.id)"
               >
                 重试
               </button>
               <button
-                class="send-box__upload-action"
+                class="send-box__upload-action ec-state-retry"
                 type="button"
                 @click="emit('dismiss-upload', item.id)"
               >
@@ -472,7 +472,7 @@ function onInput(): void {
             </template>
             <button
               v-else-if="item.status === 'cancelled'"
-              class="send-box__upload-action"
+              class="send-box__upload-action ec-state-retry"
               type="button"
               @click="emit('dismiss-upload', item.id)"
             >
@@ -1089,19 +1089,12 @@ function onInput(): void {
   justify-content: flex-end;
 }
 
+/* U-09：尺寸、圆角、hover 与焦点环统一由 .ec-state-retry 提供。 */
 .send-box__upload-action {
-  min-height: 28px;
-  padding: 0 var(--ec-space-2);
-  border: none;
-  border-radius: var(--ec-radius-sm);
-  background: transparent;
   color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  cursor: pointer;
 }
 
 .send-box__upload-action:hover {
-  background: var(--ec-surface);
   color: var(--ec-text-primary);
 }
 

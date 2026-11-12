@@ -40,7 +40,7 @@ function onClick(): void {
     <button
       v-if="clickable"
       type="button"
-      class="connection-banner__action"
+      class="connection-banner__action ec-state-retry"
       @click="onClick"
     >
       重试连接
@@ -74,19 +74,11 @@ function onClick(): void {
   color: var(--ec-text-secondary);
 }
 
+/* U-09：尺寸、圆角、hover 与焦点环统一由 .ec-state-retry 提供，这里只保留警示色语义。 */
 .connection-banner__action {
   margin-left: auto;
-  padding: 2px 10px;
-  border: 1px solid var(--ec-warning);
-  border-radius: var(--ec-radius-full);
-  background: transparent;
+  border-color: var(--ec-warning);
   color: var(--ec-warning);
-  font-size: var(--ec-font-size-secondary);
-  cursor: pointer;
-}
-
-.connection-banner__action:hover {
-  background: var(--ec-warning-strong);
 }
 
 @media (max-width: 800px) {

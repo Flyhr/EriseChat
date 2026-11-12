@@ -1746,7 +1746,7 @@ function onWindowDrop(event: DragEvent): void {
                   <div class="ec-skeleton chat-page__loading-line chat-page__loading-line--short" />
                 </div>
               </div>
-              <p v-if="slowLoading" class="chat-page__loading-hint" role="status">仍在加载消息…</p>
+              <p v-if="slowLoading" class="ec-state-text ec-state-slow" role="status">仍在加载消息…</p>
             </div>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <div v-if="locateMode" class="chat-page__locate">
@@ -2310,13 +2310,7 @@ function onWindowDrop(event: DragEvent): void {
   z-index: 20;
 }
 
-/* U-09：慢反馈提示只在超过 1 秒后出现，与骨架同容器、不撑开布局。 */
-.chat-page__loading-hint {
-  margin: 0;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  text-align: center;
-}
+/* U-09：慢反馈提示走全局 .ec-state-text / .ec-state-slow，不再单独定义。 */
 
 /* U-01：切会话/首屏的伪消息骨架，行高与真实消息行接近，避免加载完成时跳动。 */
 .chat-page__loading {

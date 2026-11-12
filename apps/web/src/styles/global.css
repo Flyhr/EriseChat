@@ -171,6 +171,40 @@ textarea,
   border-radius: var(--ec-radius-sm);
 }
 
+/* U-09：状态反馈共享样式。文案规范：一行内、只说状态与下一步操作，不写原因或实现细节；
+   容器用 role="status" / "alert"；慢反馈统一 1 秒后才出现；失败态必须给可点击的重试入口。 */
+.ec-state-text {
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  line-height: var(--ec-line-height-body);
+}
+
+.ec-state-slow {
+  text-align: center;
+}
+
+.ec-state-retry {
+  min-height: 28px;
+  padding: 0 var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-surface);
+  color: var(--ec-brand-600);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+  transition: background var(--ec-transition-fast) var(--ec-ease);
+}
+
+.ec-state-retry:hover {
+  background: var(--ec-surface-hover);
+}
+
+.ec-state-retry:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
 /* U-02 入场动效：时长与 easing 只取 --ec-* token；reduced-motion 下不引用这两个动画。 */
 @keyframes ec-enter {
   from {
