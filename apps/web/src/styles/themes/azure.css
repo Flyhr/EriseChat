@@ -50,4 +50,7 @@ html[data-ec-theme='azure'] {
   --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
   --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
   --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
+  /* 导航 hover 底与导航底 #f1f5fd 拉开到 1.117:1，文字转深蓝主色。 */
+  --ec-nav-item-hover-bg: #dbeafe;
+  --ec-nav-item-hover-text: #1d4ed8;
 }

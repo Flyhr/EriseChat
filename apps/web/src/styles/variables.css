@@ -82,6 +82,10 @@
   --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
   --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
   --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
+  /* 左侧主导航 hover：原先复用 --ec-surface-hover，与导航底只差 1.016:1 几乎不可辨；
+     改为导航专用 token，按主题分别定义，hover 时底色与文字/图标色同时变化。 */
+  --ec-nav-item-hover-bg: #dbeafe;
+  --ec-nav-item-hover-text: #1d4ed8;
   /* 设置页主题预览是静态示意图，不随当前主题变化，故只在 :root 基线声明。 */
   --ec-theme-preview-light: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
   --ec-theme-preview-dark: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);

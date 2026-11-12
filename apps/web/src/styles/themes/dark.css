@@ -87,6 +87,10 @@ html[data-ec-theme='dark'] {
   --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
   --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
 
+  /* 导航 hover 底与导航底 #0f172a 拉开到 1.543:1，文字转亮蓝主色。 */
+  --ec-nav-item-hover-bg: #24395c;
+  --ec-nav-item-hover-text: #bfdbfe;
+
   /* 设置页主题预览是静态示意图，两套主题下保持同一组颜色以便对照 */
   --ec-theme-preview-light: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);
   --ec-theme-preview-dark: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
