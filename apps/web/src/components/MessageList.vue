@@ -16,6 +16,7 @@ import {
 import { lastOwnMessageOf, readStateOf, type ReadReceiptState } from '../core/readReceipt'
 import { chatWs } from '../core/ws'
 import MessageBubble from './MessageBubble.vue'
+import LoadingDots from './LoadingDots.vue'
 
 // UI-D P2-B：断线状态只订阅一次，向下传给 pending 消息用于「消息待发送」提示。
 const offline = ref(chatWs.state !== 'authed')
@@ -483,7 +484,8 @@ onMounted(() => {
         :disabled="Boolean(loading) && renderedRange.start === 0"
         @click="onLoadMoreClick"
       >
-        {{ loading && renderedRange.start === 0 ? '加载中…' : '加载更早消息' }}
+        <LoadingDots v-if="loading && renderedRange.start === 0" />
+        <template v-else>加载更早消息</template>
       </button>
       <p v-else-if="!locateMode && messages.length > 0" class="message-list__top">没有更早的消息了</p>
       <p v-if="locateMode" class="message-list__gap">

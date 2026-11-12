@@ -15,6 +15,7 @@ import {
 import AppIcon from './AppIcon.vue'
 import EmptyState from './EmptyState.vue'
 import ImagePreview from './ImagePreview.vue'
+import LoadingDots from './LoadingDots.vue'
 
 const props = defineProps<{ conversationId: string }>()
 
@@ -248,7 +249,8 @@ onBeforeUnmount(() => {
         :disabled="loadingMore"
         @click="loadMore"
       >
-        {{ loadingMore ? '加载中…' : '加载更多' }}
+        <LoadingDots v-if="loadingMore" />
+        <template v-else>加载更多</template>
       </button>
     </template>
 

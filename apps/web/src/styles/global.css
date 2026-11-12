@@ -235,3 +235,28 @@ textarea,
     animation: ec-fade var(--ec-transition-base) var(--ec-ease) both;
   }
 }
+
+/* U-18 三点加载反馈：点径 4px、间距 3px（尺寸类无对应 token，取视觉等距值）；
+   min-height 对齐正文行盒，避免「文案 → 三点」切换时按钮高度跳动；
+   颜色跟随所在按钮文字（currentColor），不新增色值 token。
+   循环动画由 core/motion.ts 驱动，reduced-motion 下不播放并补文案。 */
+.ec-loading-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5em;
+  vertical-align: middle;
+}
+
+.ec-loading-dots__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--ec-radius-full);
+  background: currentColor;
+}
+
+.ec-loading-dots__label {
+  margin-left: var(--ec-space-1);
+  color: inherit;
+}

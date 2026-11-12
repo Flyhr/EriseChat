@@ -6,6 +6,7 @@ import { mergeLocalSearchResults } from '../core/localSearch'
 import NoticeBar from './NoticeBar.vue'
 import SearchResultItem from './SearchResultItem.vue'
 import AppIcon from './AppIcon.vue'
+import LoadingDots from './LoadingDots.vue'
 import { friendlyError } from '../core/errorMessages'
 import { showToast } from '../core/toast'
 import { useAuthStore } from '../stores/auth'
@@ -436,7 +437,8 @@ onBeforeUnmount(() => {
             :disabled="search.loadingMore"
             @click="search.loadMore()"
           >
-            {{ search.loadingMore ? '加载中…' : '加载更多' }}
+            <LoadingDots v-if="search.loadingMore" />
+            <template v-else>加载更多</template>
           </button>
           </template>
 
