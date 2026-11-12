@@ -5,6 +5,7 @@ import {
   platformArtifactOf,
   shouldOfferUpdate,
   updatePromptOf,
+  webUpdateOf,
 } from './update'
 
 function artifact(overrides: Partial<VersionArtifact> = {}): VersionArtifact {
@@ -121,11 +122,27 @@ describe('updatePromptOf', () => {
     expect(prompt.available).toBe(false)
   })
 
-  it('平台无产物时不提示', () => {
+  it('平台无产物时不提示，展示版本回退到当前版本', () => {
     const prompt = updatePromptOf(manifest({ version: '1.3.0' }), '1.1.0', 'android')
 
     expect(prompt.available).toBe(false)
     expect(prompt.url).toBe('')
-    expect(prompt.latest).toBe('1.3.0')
+    expect(prompt.latest).toBe('1.1.0')
+  })
+})
+
+describe('webUpdateOf', () => {
+  it('webVersion 更高时提示刷新', () => {
+    const prompt = webUpdateOf(manifest({ webVersion: '1.2.1' }), '1.2.0')
+
+    expect(prompt.available).toBe(true)
+    expect(prompt.latest).toBe('1.2.1')
+  })
+
+  it('缺少 webVersion 时不提示', () => {
+    const prompt = webUpdateOf(manifest({ webVersion: null }), '1.2.0')
+
+    expect(prompt.available).toBe(false)
+    expect(prompt.latest).toBe('1.2.0')
   })
 })
