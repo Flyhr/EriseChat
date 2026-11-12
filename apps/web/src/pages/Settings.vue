@@ -37,7 +37,7 @@ import { compressImageFile } from '../core/imageCompress'
 import { changePasswordFormError } from '../core/passwordRules'
 import { formatLastSeen, formatSessionTime, shortDeviceLabel } from '../core/sessionFormat'
 import { showToast } from '../core/toast'
-import { shouldOfferUpdate, platformArtifactOf, updatePromptOf } from '../core/update'
+import { platformArtifactOf, updatePromptOf, webUpdateOf } from '../core/update'
 import { APP_VERSION } from '../core/version'
 import { ensureNotificationPermission, playIncomingSound } from '../core/notify'
 import { downloadAndInstallApk, isAndroidUpdaterAvailable, subscribeApkUpdateProgress } from '../core/updateAndroid'
@@ -282,8 +282,9 @@ function clearUpdateProgressListener(): void {
 }
 
 /**
- * 检查更新（F-29-03/04）：桌面壳交给主进程按当前服务器检查并可下载安装；
- * Web 浏览器只提示刷新页面；Android 壳暂提示去下载页更新（App 内安装见 F-29-05）。
+ * 检查更新（F-29）：桌面壳交给主进程按当前服务器检查并可下载安装；
+ * 浏览器按当前部署的 Web 构建版本（webVersion）提示刷新；Android 壳按 APK 产物版本提示更新。
+ * 三端都只看自己平台的版本，服务端总版本或另一平台升版不得触发误报（2026-11-12）。
  */
 async function checkForUpdate(): Promise<void> {
   if (updateChecking.value || updateDownloading.value) return
@@ -308,13 +309,18 @@ async function checkForUpdate(): Promise<void> {
     }
 
     const manifest = await fetchVersionManifest()
-    latestVersion.value = manifest.version
     if (!isPackagedShell()) {
-      updateAvailable.value = shouldOfferUpdate(APP_VERSION, manifest.version)
-      updateMessage.value = updateAvailable.value ? '服务端已更新，刷新页面即可获取最新版' : '已是最新版本'
+      const web = webUpdateOf(manifest, APP_VERSION)
+      latestVersion.value = web.latest
+      updateAvailable.value = web.available
+      updateMessage.value = web.available
+        ? '服务端已部署新的 Web 版本，刷新页面即可获取最新版'
+        : '已是最新版本'
       return
     }
+
     const prompt = updatePromptOf(manifest, APP_VERSION, 'android')
+    latestVersion.value = prompt.latest
     updateAvailable.value = prompt.available
     const artifact = platformArtifactOf(manifest, 'android')
     if (prompt.available && artifact && isAndroidUpdaterAvailable()) {

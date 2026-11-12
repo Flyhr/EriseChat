@@ -63,7 +63,7 @@ export function platformArtifactOf(
 /**
  * 生成指定平台的更新提示：
  * - 平台产物存在、sha256 非空且版本更高 → available=true；
- * - 否则 available=false（latest 回退到清单版本，url/sha256 为空）。
+ * - 否则 available=false（latest 回退到当前版本，不用清单总版本误导「已是最新」）。
  */
 export function updatePromptOf(
   manifest: VersionManifest | null | undefined,
@@ -71,7 +71,7 @@ export function updatePromptOf(
   platform: UpdatePlatform,
 ): UpdatePrompt {
   const artifact = platformArtifactOf(manifest, platform)
-  const latest = artifact?.version ?? manifest?.version ?? currentVersion
+  const latest = artifact?.version ?? currentVersion
   const available =
     artifact !== null &&
     artifact.sha256.trim().length > 0 &&
@@ -82,4 +82,19 @@ export function updatePromptOf(
     url: artifact?.url ?? '',
     sha256: artifact?.sha256 ?? '',
   }
+}
+
+/**
+ * 浏览器端更新提示：按当前部署的 Web 构建版本（webVersion）判断。
+ * 缺少 webVersion（旧服务端或未部署 web-version.json）时不提示，避免把服务端或安装包版本当成 Web 版本。
+ */
+export function webUpdateOf(
+  manifest: VersionManifest | null | undefined,
+  currentVersion: string,
+): { available: boolean; latest: string } {
+  const latest = manifest?.webVersion?.trim() ?? ''
+  if (latest.length === 0) {
+    return { available: false, latest: currentVersion }
+  }
+  return { available: shouldOfferUpdate(currentVersion, latest), latest }
 }
