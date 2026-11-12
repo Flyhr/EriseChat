@@ -184,6 +184,7 @@ public sealed class ReleaseArtifactService
             var root = document.RootElement;
             var version = ReadString(root, "version");
             if (!IsVersion(version) ||
+                !Version.TryParse(version, out var releaseVersion) ||
                 !string.Equals(version, webVersion, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(version, desktop.Version, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(version, android.Version, StringComparison.OrdinalIgnoreCase))
@@ -191,10 +192,13 @@ public sealed class ReleaseArtifactService
                 return ReleaseMetadata.Empty;
             }
 
-            // 门槛必须合法且不高于发行版本，否则按未设置处理。
+            // 门槛必须同时满足三段格式与可解析；解析失败（如 9999999999.0.0）或高于发行版本一律按未设置处理。
+            // 这里直接比较解析结果，不依赖「解析失败返回 0」的兜底，避免非法值漏过上限校验。
             var minVersion = ReadString(root, "minVersion");
             if (minVersion is not null &&
-                (!IsVersion(minVersion) || CompareVersions(minVersion, version!) > 0))
+                (!IsVersion(minVersion) ||
+                 !Version.TryParse(minVersion, out var parsedMinVersion) ||
+                 parsedMinVersion > releaseVersion))
             {
                 minVersion = null;
             }
@@ -265,9 +269,6 @@ public sealed class ReleaseArtifactService
 
     private static bool IsVersion(string? value) =>
         !string.IsNullOrWhiteSpace(value) && VersionPattern.IsMatch(value);
-
-    private static int CompareVersions(string left, string right) =>
-        Version.TryParse(left, out var a) && Version.TryParse(right, out var b) ? a.CompareTo(b) : 0;
 
     private async Task<string> ComputeSha256Async(FileInfo file, CancellationToken cancellationToken)
     {
