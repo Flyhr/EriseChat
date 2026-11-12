@@ -214,7 +214,7 @@ async function fetchManifest(origin: string): Promise<VersionManifest> {
   return (await response.json()) as VersionManifest
 }
 
-/** 校验 /api/version 的桌面产物：文件名、摘要格式、同源地址与下载路由。 */
+/** 校验 /api/version 的桌面产物：文件名、摘要格式、同源地址，并要求 URL 与文件名一一对应。 */
 function validateArtifact(raw: unknown, origin: string): UpdateArtifact | null {
   if (!raw || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
@@ -233,29 +233,28 @@ function validateArtifact(raw: unknown, origin: string): UpdateArtifact | null {
     return null
   }
   if (resolved.origin !== origin) return null
-  if (!resolved.pathname.startsWith(`${FEED_PATH}/`)) return null
-  return { version, fileName, url: resolved.pathname, sha256 }
+  // 入口就把 URL 与文件名绑定，避免「清单 URL 一个文件、fileName 另一个文件」的错位。
+  if (resolved.pathname !== `${FEED_PATH}/${fileName}`) return null
+  return { version, fileName, url: resolved.toString(), sha256 }
 }
 
-/** 双清单一致性：版本相同，且 latest.yml 中每个文件都解析到同源的同一安装包。 */
+/** 双清单一致性：版本相同、只有一个 exe、带 SHA-512，且规范化后的安装包 URL 完全相同。 */
 function validateUpdateInfo(info: UpdateInfo | undefined, artifact: UpdateArtifact, feedUrl: string): string | null {
   if (!info) return '更新清单不可用'
   if (info.version !== artifact.version) return '更新清单版本与服务器不一致'
   const files = info.files ?? []
-  if (files.length === 0) return '更新清单缺少安装包'
+  if (files.length !== 1) return '更新清单必须只包含一个安装包'
+  const file = files[0]
+  if (!file.sha512 || file.sha512.trim().length === 0) return '更新清单缺少 SHA-512'
   const feed = new URL(`${feedUrl}/`)
-  for (const file of files) {
-    let resolved: URL
-    try {
-      resolved = new URL(file.url, feed)
-    } catch {
-      return '更新清单中的安装包地址无效'
-    }
-    if (resolved.origin !== feed.origin) return '更新清单中的安装包地址不在当前服务器范围内'
-    if (resolved.pathname !== `${FEED_PATH}/${artifact.fileName}`) {
-      return '更新清单中的安装包与服务器产物不一致'
-    }
+  let resolved: URL
+  try {
+    resolved = new URL(file.url, feed)
+  } catch {
+    return '更新清单中的安装包地址无效'
   }
+  if (resolved.origin !== feed.origin) return '更新清单中的安装包地址不在当前服务器范围内'
+  if (resolved.toString() !== artifact.url) return '两份清单的安装包地址不一致'
   return null
 }
 
@@ -396,6 +395,8 @@ function onUpdaterError(error: Error): void {
 export function registerUpdateIpcHandlers(): void {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
+  // 6.8.12 默认允许 NSIS Web 安装器（installer + 外置包）；本项目只发布单个 exe，关闭该路径。
+  autoUpdater.disableWebInstaller = true
   autoUpdater.on('download-progress', onDownloadProgress)
   autoUpdater.on('error', onUpdaterError)
   ipcMain.handle('update:check', () => checkForUpdate())
