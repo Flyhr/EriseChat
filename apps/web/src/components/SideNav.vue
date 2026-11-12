@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import { type AppIconName } from '../core/icons'
 import Avatar from './Avatar.vue'
 import AccountCard from './AccountCard.vue'
-import { chatWs, type WsState } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
@@ -13,7 +12,8 @@ import { useFriendsStore } from '../stores/friends'
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
 // 群聊入口（UI-02）：/chat?group=all 进入会话列表的「群聊」筛选；高亮时群聊优先于消息。
-// UI-D P2：补回参考图丢失的结构——品牌副信息、工作空间分组、独立设置区、连接状态、账号双行卡片。
+// 顶部账号入口（头像 + 昵称，点击开账号信息浮窗）、工作空间分组、独立设置区；
+// 原「EriseChat」品牌区、底部账号卡与「服务器已连接」状态行已按用户要求移除（连接状态由 App.vue 断线横幅承担）。
 interface NavItem {
   key: string
   label: string
@@ -90,18 +90,6 @@ function toggleAccount(): void {
 function closeAccount(): void {
   accountOpen.value = false
 }
-
-// 连接状态：只订阅 WS 状态变化，不改动连接逻辑（App.vue 仍是唯一连接横幅来源）。
-const connectionState = ref<WsState>(chatWs.state)
-let unsubscribeState: (() => void) | null = null
-onMounted(() => {
-  unsubscribeState = chatWs.on('statechange', (state) => {
-    connectionState.value = state
-  })
-})
-onBeforeUnmount(() => unsubscribeState?.())
-const connected = computed(() => connectionState.value === 'authed')
-const connectionLabel = computed(() => (connected.value ? '服务器已连接' : '服务器未连接'))
 </script>
 
 <template>
@@ -120,7 +108,7 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
       <Avatar
         :display-name="displayName"
         :avatar-file-id="auth.user?.avatarFileId"
-        :size="28"
+        :size="40"
       />
       <span class="ec-sidenav__account-name">{{ displayName }}</span>
     </button>
@@ -159,11 +147,6 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
         <AppIcon :name="settingsItem.icon" />
         <span class="ec-sidenav__label">{{ settingsItem.label }}</span>
       </RouterLink>
-
-      <p class="ec-sidenav__connection" :class="{ 'ec-sidenav__connection--offline': !connected }">
-        <span class="ec-sidenav__connection-dot" aria-hidden="true" />
-        <span class="ec-sidenav__connection-label">{{ connectionLabel }}</span>
-      </p>
     </div>
 
     <AccountCard
@@ -195,32 +178,9 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
   margin-top: auto;
 }
 
-.ec-sidenav__connection {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin: 0;
-  padding: 0 var(--ec-space-2);
-  color: var(--ec-text-secondary);
-  font-size: 11px;
-}
-
-.ec-sidenav__connection-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-online);
-}
-
-.ec-sidenav__connection--offline .ec-sidenav__connection-dot {
-  background: var(--ec-disabled);
-}
-
-/* 紧凑图标栏（801~1199）：隐藏新增的文字细节，只保留图标与状态点。 */
+/* 紧凑图标栏（801~1199）：隐藏文字细节，只保留图标。 */
 @media (max-width: 1199px) {
-  .ec-sidenav__group,
-  .ec-sidenav__connection-label {
+  .ec-sidenav__group {
     display: none;
   }
 }
@@ -242,7 +202,7 @@ const connectionLabel = computed(() => (connected.value ? '服务器已连接' :
   gap: var(--ec-space-2);
   align-items: center;
   width: 100%;
-  height: 40px;
+  height: 48px;
   padding: 0 var(--ec-space-2);
   margin-bottom: var(--ec-space-2);
   border: none;
