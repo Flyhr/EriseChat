@@ -98,10 +98,14 @@ server/Chat.Server.Tests/
 /docs/android-notification-proposal.md
 /docs/android-background-notifications-plan.md
 /docs/ui-upgrade-plan.md
+# UI 优化计划（2026-11-12 提案稿，计划类文档，本地保留不入库）
+/docs/ui-optimization-plan.md
 /docs/ui/ui-00-review.md
 /docs/ui/*/
 /docs/ui/*.png
 /docs/EriseChat_UI_*/
+# 已废弃 UI 资产归档（2026-11-12）：整目录本地保留，不入库
+/docs/deprecated/
 # AI 实施指令与功能差距评估（AGENTS §4：AI 指令、审查报告本地保留，不入库）
 /docs/ai-doc-alignment-instructions.md
 /docs/ai-batch-a-instructions.md

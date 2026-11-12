@@ -22,7 +22,8 @@
 | `docs/web.md` | Web 端（`apps/web`）开发运行、构建、生产部署（dist → wwwroot）、验收与排障 | 运行/构建/部署 Web 时 |
 | `docs/desktop.md` | Windows 桌面端（`apps/desktop`）安装、托盘/通知/设置行为、开发联调、NSIS 打包 | 打包或排查桌面端时 |
 | `docs/usage.md` | 安装与使用说明（M6 交付给最终用户） | 内测发版时 |
-| `docs/ui/` | UI 改造参考图与改造前后基线截图（**本地资产不入库**；仅 `README.md` 入库） | UI 收口后对照参考与展示 |
+| `docs/ui/README.md` | **现行 UI 更新文档**（变更批次、当前基线、约束索引、优化路线与待办验收），入库 | 每次较大 UI 改动后同步 |
+| `docs/deprecated/` | 已废弃 UI 资产归档（旧截图、参考包；2026-11-12 标记废弃，整体不入库） | 仅历史追溯，不得作为依据 |
 
 > **入库范围（2026-10-26 起）：** 说明类文档入库；计划、审查/验收报告、任务清单、截图与参考图等过程文件只保留本地（`AGENTS.md` §2.11/§4）。
 
@@ -211,7 +212,7 @@ EriseChat/
 │   │       ├── pages/
 │   │       │   ├── Login.vue               # 登录/注册（含服务器地址配置）
 │   │       │   ├── Chat.vue                # 会话列表 + 聊天
-│   │       │   ├── Contacts.vue            # 通讯录 / 建群
+│   │       │   ├── Contacts.vue            # 联系人 / 建群
 │   │       │   ├── Settings.vue            # 我的 / 设置
 │   │       │   ├── Admin.vue               # 管理页（admin 角色可见）
 │   │       │   └── Download.vue            # 下载页（PWA 场景；安装包走服务端 /download）
@@ -528,7 +529,7 @@ sudo bash infra/docker/deploy.sh && infra/backup.sh   # 服务器 Docker 部署 
 | M0 | 3~4 天 | 骨架、协议与 DDL 固化、健康检查、最小可运行构建 | `server/*` 三工程、`protocol/protocol.md`、`protocol/schema.sql`、`apps/web` 骨架、`.editorconfig` |
 | M1 | 第 1~1.5 周 | 服务端核心：邮箱账号、JWT、WS、`message.send/ack`、`sync`、迁移、单测 | `server/Chat.Server/{Api,Realtime,Modules,Data}`、`Chat.Server.Tests` |
 | M2 | 第 2 周 | Web 登录注册 + 会话列表 + 单聊（发送队列、补拉） | `apps/web/src/{core,api,stores,pages}` |
-| M3 | 第 3 周 | 群聊、图片/文件、已读、通讯录与管理页 | `apps/web/src/{pages,components}`、`server/.../Files` |
+| M3 | 第 3 周 | 群聊、图片/文件、已读、联系人与管理页 | `apps/web/src/{pages,components}`、`server/.../Files` |
 | M4 | 第 4 周 | Windows 安装包 + 云服务器部署 + 下载页 | `apps/desktop/`、`server/.../wwwroot`、`infra/`、`docs/deploy.md` |
 | M5 | 第 5 周 | Android APK（Capacitor + 自签名） | `apps/mobile/`、`infra/keys/`（gitignore） |
 | M6 | 第 6~7 周 | 100 连接稳定性、备份恢复演练、10~20 人内测 | `docs/test/`（不入库）、`docs/usage.md`、发版检查清单 |
