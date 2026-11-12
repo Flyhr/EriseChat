@@ -66,9 +66,13 @@ interface UpdaterExecutor {
   createRequest: (options: UpdaterRequestOptions, callback: (response: unknown) => void) => unknown
 }
 
+type UpdateOperation = 'idle' | 'check' | 'download' | 'install'
+
 let candidate: UpdateCandidate | null = null
 let progressSender: WebContents | null = null
 let networkGuarded = false
+/** 主进程更新操作锁：check / download / install 串行，避免校验与安装之间被其他 IPC 换掉候选。 */
+let operation: UpdateOperation = 'idle'
 /** 本次更新操作绑定的服务器 origin；清单、feed、候选与请求闸门都用它，避免中途读取设置导致基准漂移。 */
 let activeOrigin: string | null = null
 /** 最近一次被同源校验拦下的地址；用于把更新器抛出的网络错误翻译成可读原因。 */
@@ -269,6 +273,8 @@ function sha256OfFile(filePath: string): Promise<string> {
 }
 
 async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
+  if (operation !== 'idle') return { ok: false, message: '更新操作进行中，请稍候' }
+  operation = 'check'
   candidate = null
   originViolation = null
   const currentVersion = app.getVersion()
@@ -320,6 +326,8 @@ async function checkForUpdate(): Promise<UpdateCheckIpcResult> {
     return { ok: true, result: { available: true, currentVersion, latestVersion, canInstall: true, manualUrl } }
   } catch (error) {
     return { ok: false, message: `检查更新失败：${errorMessage(error)}` }
+  } finally {
+    operation = 'idle'
   }
 }
 
@@ -327,6 +335,8 @@ async function downloadUpdate(event: IpcMainInvokeEvent): Promise<UpdateIpcResul
   const active = candidate
   if (!active) return { ok: false, message: '没有可用的更新，请先检查更新' }
   if (!app.isPackaged) return { ok: false, message: '开发态不支持应用内更新' }
+  if (operation !== 'idle') return { ok: false, message: '更新操作进行中，请稍候' }
+  operation = 'download'
   try {
     const origin = bindOriginForOperation()
     if (candidate !== active || active.origin !== origin) {
@@ -348,18 +358,22 @@ async function downloadUpdate(event: IpcMainInvokeEvent): Promise<UpdateIpcResul
     active.downloadedFile = downloadedFile
     return { ok: true }
   } catch (error) {
-    progressSender = null
     if (originViolation) {
       candidate = null
       return { ok: false, message: `更新地址不在当前服务器范围内：${originViolation}` }
     }
     return { ok: false, message: `下载失败：${errorMessage(error)}` }
+  } finally {
+    progressSender = null
+    operation = 'idle'
   }
 }
 
 async function installUpdate(): Promise<UpdateIpcResult> {
   const active = candidate
   if (!active?.downloadedFile) return { ok: false, message: '未找到已下载的安装包，请重新下载' }
+  if (operation !== 'idle') return { ok: false, message: '更新操作进行中，请稍候' }
+  operation = 'install'
   try {
     const origin = bindOriginForOperation()
     if (candidate !== active || active.origin !== origin) {
@@ -367,6 +381,10 @@ async function installUpdate(): Promise<UpdateIpcResult> {
     }
     // updater 已按 latest.yml 校验 SHA-512；安装前再按 /api/version 核对实际文件的 SHA-256。
     const actual = await sha256OfFile(active.downloadedFile)
+    // 操作锁保证 await 期间不会换候选；这里再确认一次，校验和安装必须针对同一候选。
+    if (candidate !== active) {
+      return { ok: false, message: '更新状态已变化，请重新下载' }
+    }
     if (actual !== active.sha256) {
       return { ok: false, message: '安装包校验失败（SHA-256 不一致），请重新下载' }
     }
@@ -374,6 +392,8 @@ async function installUpdate(): Promise<UpdateIpcResult> {
     return { ok: true }
   } catch (error) {
     return { ok: false, message: `安装失败：${errorMessage(error)}` }
+  } finally {
+    operation = 'idle'
   }
 }
 
