@@ -38,6 +38,7 @@ describe('parseStoredSettings', () => {
       androidBackgroundNotificationsEnabled: false,
       messageFontSize: 'medium',
       listDensity: 'comfortable',
+      theme: 'azure',
     })
   })
 
@@ -58,6 +59,7 @@ describe('parseStoredSettings', () => {
       androidBackgroundNotificationsEnabled: true,
       messageFontSize: 'medium',
       listDensity: 'comfortable',
+      theme: 'azure',
     })
   })
 })
@@ -82,6 +84,7 @@ describe('useSettingsStore 持久化', () => {
       androidBackgroundNotificationsEnabled: false,
       messageFontSize: 'medium',
       listDensity: 'comfortable',
+      theme: 'azure',
     })
 
     // 模拟刷新页面：新的 pinia 实例重新创建 store，应从 localStorage 恢复。
