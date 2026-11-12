@@ -25,7 +25,6 @@ import { chatWs, type WsState } from '../core/ws'
 import { clearAllData } from '../core/db'
 import {
   getServerUrl,
-  isPackagedShell,
   resetServerUrl,
   resolveApiBase,
   resolveServerOrigin,
@@ -33,6 +32,7 @@ import {
   setServerUrl,
 } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
+import { isNativeShell } from '../core/externalLink'
 import { compressImageFile } from '../core/imageCompress'
 import { changePasswordFormError } from '../core/passwordRules'
 import { formatLastSeen, formatSessionTime, shortDeviceLabel } from '../core/sessionFormat'
@@ -309,7 +309,9 @@ async function checkForUpdate(): Promise<void> {
     }
 
     const manifest = await fetchVersionManifest()
-    if (!isPackagedShell()) {
+    // 按 Capacitor 原生桥判断 Android，而不是主机名：生产 Web 经 localhost 打开时也是 localhost，
+    // 用 isPackagedShell() 会误判成 Android，跳过 webVersion 甚至提示下载 APK。
+    if (!isNativeShell()) {
       const web = webUpdateOf(manifest, APP_VERSION)
       latestVersion.value = web.latest
       updateAvailable.value = web.available
@@ -1195,7 +1197,7 @@ async function saveProfile(): Promise<void> {
           </SettingsGroup>
 
           <SettingsGroup title="关于">
-            <SettingsRow label="版本" :hint="isDesktopShell() ? 'Windows 桌面客户端' : isPackagedShell() ? 'Android 客户端' : 'Web 客户端'">
+            <SettingsRow label="版本" :hint="isDesktopShell() ? 'Windows 桌面客户端' : isNativeShell() ? 'Android 客户端' : 'Web 客户端'">
               <span class="settings-value">{{ APP_VERSION }}</span>
             </SettingsRow>
             <SettingsRow label="检查更新" :hint="latestVersion ? `最新版本 v${latestVersion}` : '从当前服务器获取最新版本'">
@@ -1219,7 +1221,7 @@ async function saveProfile(): Promise<void> {
               </button>
             </SettingsRow>
             <SettingsRow
-              v-if="!isDesktopShell() && isPackagedShell() && updateAvailable && updateArtifact"
+              v-if="!isDesktopShell() && isNativeShell() && updateAvailable && updateArtifact"
               label="安装更新"
               :hint="updateDownloading ? `下载中 ${updateProgress}%` : '下载完成后将打开系统安装器'"
             >
