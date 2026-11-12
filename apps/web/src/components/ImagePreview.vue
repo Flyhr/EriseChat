@@ -267,7 +267,8 @@ onBeforeUnmount(() => {
   max-height: 100%;
   object-fit: contain;
   transform-origin: center;
-  transition: transform var(--ec-transition-fast) var(--ec-ease);
+  /* 缩放属于页面内位移：用标准曲线 + 慢档，避免与入场共用强缓出曲线（AGENTS §14.9）。 */
+  transition: transform var(--ec-transition-slow) var(--ec-ease-in-out);
   user-select: none;
   touch-action: pan-y;
 }

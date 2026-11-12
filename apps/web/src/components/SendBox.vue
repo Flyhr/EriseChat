@@ -892,7 +892,7 @@ function onInput(): void {
   cursor: pointer;
   transition:
     background var(--ec-transition-fast) var(--ec-ease),
-    transform var(--ec-transition-fast) var(--ec-ease);
+    transform var(--ec-transition-fast) var(--ec-ease-in-out);
 }
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
