@@ -307,7 +307,7 @@ function formatTime(timestamp: number): string {
   display: flex;
   align-items: stretch;
   width: 100%;
-  min-height: 72px;
+  min-height: var(--ec-row-height);
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
@@ -496,7 +496,7 @@ function formatTime(timestamp: number): string {
 /* 801~1199：紧凑行高 64（Electron 最小 960×640 仍可用）。 */
 @media (max-width: 1199px) {
   .conversation-item {
-    min-height: 64px;
+    min-height: min(64px, var(--ec-row-height));
   }
 }
 

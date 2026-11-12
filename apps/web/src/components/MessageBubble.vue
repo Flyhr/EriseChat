@@ -203,6 +203,14 @@ function openActions(position: { x: number; y: number }): void {
   emit('open-actions', messageId, position)
 }
 
+/** U-10：hover 露出的「⋯」入口，复用右键菜单的定位与父级事件链。 */
+function onMoreClick(event: MouseEvent): void {
+  if (props.selectable || isSystem.value || !repliableMessageId()) return
+  const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  const rect = target?.getBoundingClientRect()
+  openActions(rect ? { x: rect.left + rect.width / 2, y: rect.bottom } : { x: 0, y: 0 })
+}
+
 /** 桌面：右键气泡打开操作菜单（system 消息不提供）。 */
 function onContextMenu(event: MouseEvent): void {
   if (props.selectable) return
@@ -383,6 +391,16 @@ const timeText = computed(() =>
         </button>
       </div>
     </div>
+    <button
+      v-if="!selectable && !recalled"
+      class="message-row__more"
+      type="button"
+      aria-label="消息操作"
+      title="消息操作"
+      @click.stop="onMoreClick"
+    >
+      <AppIcon name="more" :size="16" />
+    </button>
   </div>
 </template>
 
@@ -725,4 +743,49 @@ const timeText = computed(() =>
       var(--ec-radius-bubble-tail-mobile) var(--ec-radius-bubble-mobile);
   }
 }
+/* U-10：桌面 hover / 键盘 focus 露出轻量操作入口；常驻占位，只切换透明度，
+   不产生布局位移，也不引入鼠标左键长按（仍由 contextmenu 触发）。 */
+.message-row__more {
+  flex: none;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  align-self: center;
+  margin-inline: var(--ec-space-1);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  box-shadow: var(--ec-shadow-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ec-transition-fast) var(--ec-ease);
+}
+
+.message-row__more:hover {
+  color: var(--ec-brand-600);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .message-row:hover .message-row__more,
+  .message-row:focus-within .message-row__more {
+    opacity: 1;
+  }
+}
+
+.message-row__more:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--ec-focus-ring);
+  outline-offset: 2px;
+}
+
+@media (hover: none) {
+  .message-row__more {
+    width: 32px;
+    height: 32px;
+    opacity: 1;
+  }
+}
+
 </style>

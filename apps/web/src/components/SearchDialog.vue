@@ -101,7 +101,16 @@ const hasKeyword = computed(() => Boolean(search.query.trim()))
 
 /** F-19：会话内命中数提示（区分搜索中/离线/服务端无结果等状态）。 */
 const countsText = computed(() => {
-  if (search.isGlobal || !hasKeyword.value || search.localTotal === 0) return ''
+  if (!hasKeyword.value) return ''
+  // 全局搜索：补齐原先缺失的结果计数（会话内模式仍走下面的本地命中口径）。
+  if (search.isGlobal) {
+    if (search.loading && search.results.length === 0) return '正在搜索…'
+    if (search.results.length > 0) {
+      return `共 ${displayList.value.length} 条${search.hasMore ? '（可继续加载更多）' : ''}`
+    }
+    return ''
+  }
+  if (search.localTotal === 0) return ''
   if (search.offlineFallback) return `本地 ${search.localTotal} 条（网络不可用，仅显示本地已加载）`
   if (search.loading && search.results.length === 0) {
     return `本地 ${search.localTotal} 条，正在搜索更早历史…`

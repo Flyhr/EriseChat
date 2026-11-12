@@ -147,6 +147,7 @@
   --ec-nav-width-compact: 72px; /* 801~1199 收为图标栏 64~72 */
   --ec-list-width: 300px; /* 会话列表 280~320（≥1440 提到 320） */
   --ec-header-height: 64px; /* 顶栏 64~72 */
+  --ec-row-height: 72px; /* 会话行高基准，U-08 紧凑密度覆写为 56px */
   --ec-drawer-width: 288px; /* 右侧面板 280~300（≥1440 提到 300） */
 
   /* Android 15+ 强制 edge-to-edge 后，WebView 会绘制到状态栏下方；
@@ -220,4 +221,23 @@
     --ec-size-mobile-input-max: 200px;
     --ec-size-mobile-send: 40px;
   }
+}
+
+/* U-08：设置页写入 html[data-ec-font] / html[data-ec-density]，只覆写派生 token，
+   组件不感知具体取值；新增主题时在这些规则里补对应色板即可。 */
+html[data-ec-font='small'] {
+  --ec-font-size-body: 12px;
+  --ec-font-size-secondary: 11px;
+  --ec-font-size-small: 11px;
+}
+
+html[data-ec-font='large'] {
+  --ec-font-size-body: 16px;
+  --ec-font-size-secondary: 14px;
+  --ec-font-size-small: 13px;
+}
+
+html[data-ec-density='compact'] {
+  --ec-row-height: 56px;
+  --ec-row-min-height-mobile: 56px;
 }

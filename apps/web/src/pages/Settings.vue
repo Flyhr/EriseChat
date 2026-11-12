@@ -59,7 +59,7 @@ import { useSettingsStore } from '../stores/settings'
 // 设置中心（SET-01 重构）：按「个人资料 / 账号与安全 / 通知与提醒 / 外观 / 连接与关于」分节。
 // 桌面为左侧分类导航 + 右侧内容面板；移动端为分组列表 → 进入分节详情（带返回），
 // 与 Slack / Telegram / 微信 / iOS 设置的分组列表形态一致。只展示真实可用的能力：
-// 未上线的深色主题、消息密度等一律 ComingSoonHint 灰显，不提供假开关、不发假请求。
+// 消息字号与会话密度已做成真设置；未上线的深色主题仍灰显，不提供假开关、不发假请求。
 const router = useRouter()
 const auth = useAuthStore()
 const conversations = useConversationsStore()
@@ -67,6 +67,17 @@ const messages = useMessagesStore()
 const settings = useSettingsStore()
 const friends = useFriendsStore()
 const drafts = useDraftsStore()
+
+// U-08：外观设置的可选值；as const 让 value 收窄为 store 的联合类型。
+const fontSizeOptions = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '标准' },
+  { value: 'large', label: '大' },
+] as const
+const densityOptions = [
+  { value: 'comfortable', label: '舒适' },
+  { value: 'compact', label: '紧凑' },
+] as const
 
 type SectionId = 'profile' | 'account' | 'notifications' | 'appearance' | 'connection'
 
@@ -1088,14 +1099,38 @@ async function saveProfile(): Promise<void> {
                 <h3 class="settings-appearance__name">消息文字大小</h3>
                 <p class="settings-appearance__desc">聊天正文与会话摘要</p>
               </div>
-              <span class="settings-appearance__value">14px</span>
+              <div class="settings-appearance__options" role="group" aria-label="消息文字大小">
+                <button
+                  v-for="option in fontSizeOptions"
+                  :key="option.value"
+                  type="button"
+                  class="settings-appearance__option"
+                  :class="{ 'settings-appearance__option--active': settings.messageFontSize === option.value }"
+                  :aria-pressed="settings.messageFontSize === option.value"
+                  @click="settings.setMessageFontSize(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
             </div>
             <div class="settings-appearance__card">
               <div class="settings-appearance__info">
                 <h3 class="settings-appearance__name">会话列表密度</h3>
-                <p class="settings-appearance__desc">会话行高 72px</p>
+                <p class="settings-appearance__desc">会话行高与留白</p>
               </div>
-              <span class="settings-appearance__value">舒适</span>
+              <div class="settings-appearance__options" role="group" aria-label="会话列表密度">
+                <button
+                  v-for="option in densityOptions"
+                  :key="option.value"
+                  type="button"
+                  class="settings-appearance__option"
+                  :class="{ 'settings-appearance__option--active': settings.listDensity === option.value }"
+                  :aria-pressed="settings.listDensity === option.value"
+                  @click="settings.setListDensity(option.value)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
             </div>
           </section>
         </div>
@@ -1801,6 +1836,37 @@ async function saveProfile(): Promise<void> {
   border-radius: var(--ec-radius-panel);
   background: var(--ec-surface);
   box-shadow: var(--ec-shadow-sm);
+  flex-wrap: wrap;
+}
+
+/* U-08：外观设置按钮组（原先是只读数值徽标）。 */
+.settings-appearance__options {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-1);
+  padding: 3px;
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface-hover);
+}
+
+.settings-appearance__option {
+  min-height: 28px;
+  padding: 0 var(--ec-space-2);
+  border: none;
+  border-radius: var(--ec-radius-full);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+  transition:
+    background var(--ec-transition-fast) var(--ec-ease),
+    color var(--ec-transition-fast) var(--ec-ease);
+}
+
+.settings-appearance__option--active {
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
 }
 
 .settings-appearance__info {

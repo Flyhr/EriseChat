@@ -27,6 +27,7 @@ import { useFavoritesStore } from './stores/favorites'
 import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useSettingsStore } from './stores/settings'
+import { useSearchStore } from './stores/search'
 import { useVisualViewport } from './core/useVisualViewport'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
 import { ecThemeOverrides } from './core/theme'
@@ -43,6 +44,7 @@ const favorites = useFavoritesStore()
 const friends = useFriendsStore()
 const presence = usePresenceStore()
 const settings = useSettingsStore()
+const search = useSearchStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
 const { keyboardOpen } = useVisualViewport()
 const wsState = ref<WsState>(chatWs.state)
@@ -170,6 +172,7 @@ onMounted(() => {
   void consumeAndroidPendingClick()
   void syncAndroidBackgroundNotifications()
   document.addEventListener('visibilitychange', onVisibilityChange)
+  document.addEventListener('keydown', onGlobalKeydown)
 })
 
 // Android 后台消息提醒：账号、令牌或服务器地址变化时同步原生前台服务状态。
@@ -220,12 +223,76 @@ watch(
   { immediate: true },
 )
 
+// U-08：外观设置写入根节点属性，由 variables.css 的属性选择器覆盖字号与行高 token；
+// 深色主题仍按 §14.2 冻结，不在此处提供可点击入口。
+watch(
+  () => [settings.messageFontSize, settings.listDensity] as const,
+  ([font, density]) => {
+    document.documentElement.dataset.ecFont = font
+    document.documentElement.dataset.ecDensity = density
+  },
+  { immediate: true },
+)
+
 onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  document.removeEventListener('keydown', onGlobalKeydown)
   unsubscribe?.()
   unsubscribeNotificationClick?.()
   unsubscribeBackgroundClick?.()
 })
+
+/** U-06：桌面端全局快捷键。输入态与已有浮层一律让行，避免抢 Esc 与 @ 面板/预览的方向键。 */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+
+function hasOpenOverlay(): boolean {
+  return Boolean(
+    document.querySelector(
+      '.ec-search-mask, .n-modal, .message-action-menu, .member-card, .ec-emoji-panel',
+    ),
+  )
+}
+
+function onGlobalKeydown(event: KeyboardEvent): void {
+  if (!auth.isLoggedIn || isBlankLayout.value || event.defaultPrevented || event.isComposing) return
+  const mod = event.ctrlKey || event.metaKey
+  const key = event.key.toLowerCase()
+
+  // Ctrl/Cmd+K：全局搜索面板（原先 openGlobal 已实现但无调用点）。
+  if (mod && key === 'k') {
+    event.preventDefault()
+    if (search.isOpen) search.close()
+    else search.openGlobal()
+    return
+  }
+  // Ctrl/Cmd+N：跳到联系人页发起聊天。
+  if (mod && key === 'n') {
+    event.preventDefault()
+    void router.push('/contacts')
+    return
+  }
+  // Alt+↑/↓：按会话列表顺序切换会话；避开输入态、浮层与预览的方向键。
+  if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+  if (isTypingTarget(event.target) || hasOpenOverlay()) return
+  const list = conversations.sorted
+  if (list.length === 0) return
+  event.preventDefault()
+  const current =
+    route.name === 'chat' && typeof route.params.conversationId === 'string'
+      ? route.params.conversationId
+      : null
+  const index = current ? list.findIndex((item) => item.conversationId === current) : -1
+  const next =
+    event.key === 'ArrowDown'
+      ? (index + 1) % list.length
+      : index <= 0
+        ? list.length - 1
+        : index - 1
+  void router.push({ name: 'chat', params: { conversationId: list[next].conversationId } })
+}
 
 function reconnect(): void {
   chatWs.connect()

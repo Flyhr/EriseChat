@@ -219,6 +219,27 @@ const activeLoadingHistory = computed(() =>
 )
 const activeLoaded = computed(() => (activeId.value ? messages.isLoaded(activeId.value) : true))
 
+// U-09：首屏加载超过 1 秒才补一行文字，避免快速加载时提示闪烁；骨架本身立即显示。
+const slowLoading = ref(false)
+let slowLoadingTimer: number | null = null
+watch(
+  activeLoaded,
+  (loaded) => {
+    if (slowLoadingTimer !== null) {
+      window.clearTimeout(slowLoadingTimer)
+      slowLoadingTimer = null
+    }
+    slowLoading.value = false
+    if (!loaded) {
+      slowLoadingTimer = window.setTimeout(() => {
+        slowLoading.value = true
+        slowLoadingTimer = null
+      }, 1000)
+    }
+  },
+  { immediate: true },
+)
+
 // F-37：定位窗口与正常时间线分离。置顶/引用/搜索跳转只展示目标附近的上下文窗口，
 // 不合并进会话缓存、不推进 lastSeq / 同步水位 / 历史分页起点；跳转后提供「回到最新」。
 const locateWindow = ref<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean } | null>(null)
@@ -984,6 +1005,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (slowLoadingTimer !== null) window.clearTimeout(slowLoadingTimer)
   // 离开聊天页（去设置/退出登录/切换账号或服务器）：中止上传并丢弃队列，
   // 晚到的压缩/上传结果因找不到队列项而不会再发送；仅聊天页内切换会话不触发卸载。
   cancelAllUploads()
@@ -1724,6 +1746,7 @@ function onWindowDrop(event: DragEvent): void {
                   <div class="ec-skeleton chat-page__loading-line chat-page__loading-line--short" />
                 </div>
               </div>
+              <p v-if="slowLoading" class="chat-page__loading-hint" role="status">仍在加载消息…</p>
             </div>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <div v-if="locateMode" class="chat-page__locate">
@@ -2285,6 +2308,14 @@ function onWindowDrop(event: DragEvent): void {
   bottom: calc(100% + var(--ec-space-2));
   left: var(--ec-space-4);
   z-index: 20;
+}
+
+/* U-09：慢反馈提示只在超过 1 秒后出现，与骨架同容器、不撑开布局。 */
+.chat-page__loading-hint {
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: center;
 }
 
 /* U-01：切会话/首屏的伪消息骨架，行高与真实消息行接近，避免加载完成时跳动。 */

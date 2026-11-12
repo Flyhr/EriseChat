@@ -167,7 +167,7 @@ function selectSearchResult(message: Message): void {
   void router.push({
     name: 'chat',
     params: { conversationId: message.conversationId },
-    query: { jumpSeq: String(message.seq) },
+    query: { jumpSeq: String(message.seq), jumpMessageId: message.messageId },
   })
 }
 
