@@ -274,6 +274,8 @@ const updateMessage = ref('')
 const updateArtifact = ref<VersionArtifact | null>(null)
 /** 桌面端：双清单一致、可走应用内下载安装（P2 起由主进程判定）。 */
 const desktopCanInstall = ref(false)
+/** 桌面端：安装包已下载，等待用户确认重启安装。 */
+const desktopDownloaded = ref(false)
 /** 桌面端：应用内更新不可用时的同源 HTTPS 下载页。 */
 const desktopManualUrl = ref('')
 const updateDownloading = ref(false)
@@ -296,6 +298,7 @@ async function checkForUpdate(): Promise<void> {
   updateMessage.value = ''
   updateArtifact.value = null
   desktopCanInstall.value = false
+  desktopDownloaded.value = false
   desktopManualUrl.value = ''
   try {
     if (isDesktopShell()) {
@@ -348,9 +351,9 @@ async function checkForUpdate(): Promise<void> {
   }
 }
 
-/** 下载并安装桌面端更新（P2）：主进程持有候选 → updater 下载并校验 SHA-512 → 安装前核对 SHA-256 → 静默重启。 */
-async function downloadAndInstallUpdate(): Promise<void> {
-  if (!desktopCanInstall.value || updateDownloading.value) return
+/** 桌面端：下载更新（P2）。下载完成后不自动安装，等用户确认「重启并安装」。 */
+async function startDesktopDownload(): Promise<void> {
+  if (!desktopCanInstall.value || desktopDownloaded.value || updateDownloading.value) return
   updateDownloading.value = true
   updateProgress.value = 0
   updateMessage.value = '正在下载更新…'
@@ -364,14 +367,27 @@ async function downloadAndInstallUpdate(): Promise<void> {
       updateMessage.value = downloaded.message ?? '下载更新失败，请稍后重试'
       return
     }
-    updateMessage.value = '下载完成，正在安装…'
-    const installed = await installDesktopUpdate()
-    if (!installed.ok) {
-      updateMessage.value = installed.message ?? '安装更新失败，请手动下载安装包'
-    }
+    desktopDownloaded.value = true
+    updateMessage.value = '下载完成，点击「重启并安装」完成更新'
   } finally {
     updateDownloading.value = false
     clearUpdateProgressListener()
+  }
+}
+
+/** 桌面端：主进程校验 SHA-256 后静默安装并重启（P2）。 */
+async function confirmDesktopInstall(): Promise<void> {
+  if (!desktopDownloaded.value || updateDownloading.value) return
+  updateDownloading.value = true
+  updateMessage.value = '正在安装，应用将重启…'
+  try {
+    const installed = await installDesktopUpdate()
+    if (!installed.ok) {
+      desktopDownloaded.value = false
+      updateMessage.value = installed.message ?? '安装更新失败，请重新下载'
+    }
+  } finally {
+    updateDownloading.value = false
   }
 }
 
@@ -1217,15 +1233,23 @@ async function saveProfile(): Promise<void> {
             <SettingsRow
               v-if="isDesktopShell() && updateAvailable && desktopCanInstall"
               label="安装更新"
-              :hint="updateDownloading ? `下载中 ${updateProgress}%` : '下载完成后将自动安装并重启'"
+              :hint="desktopDownloaded ? '下载完成，重启后安装新版本' : '下载完成后需确认安装'"
             >
               <button
                 type="button"
                 class="settings-btn settings-btn--primary"
                 :disabled="updateDownloading"
-                @click="downloadAndInstallUpdate"
+                @click="desktopDownloaded ? confirmDesktopInstall() : startDesktopDownload()"
               >
-                {{ updateDownloading ? `下载中 ${updateProgress}%` : '下载并安装' }}
+                {{
+                  updateDownloading
+                    ? desktopDownloaded
+                      ? '安装中…'
+                      : `下载中 ${updateProgress}%`
+                    : desktopDownloaded
+                      ? '重启并安装'
+                      : '下载更新'
+                }}
               </button>
             </SettingsRow>
             <SettingsRow
