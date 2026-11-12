@@ -39,11 +39,11 @@ const desktopApi = {
       ipcRenderer.removeListener('notification:click', handler)
     }
   },
-  /** F-29：检查桌面端更新（主进程请求当前服务器 /api/version 并比较版本）。 */
+  /** F-29 / P2：检查桌面端更新（主进程核对双清单并形成候选，渲染层只拿结果）。 */
   checkUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:check'),
-  /** F-29：下载桌面安装包（主进程校验 sha256，进度通过 onUpdateProgress 推送）。 */
-  downloadUpdate: (artifact: unknown): Promise<unknown> => ipcRenderer.invoke('update:download', artifact),
-  /** F-29：安装已下载的安装包（静默安装后退出应用）。 */
+  /** P2：下载主进程持有的更新候选（不传 URL/摘要/路径，进度通过 onUpdateProgress 推送）。 */
+  downloadUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:download'),
+  /** P2：校验 SHA-256 后交给 updater 静默安装并重启。 */
   installUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:install'),
   /** F-29：订阅下载进度，返回取消订阅函数。 */
   onUpdateProgress: (
