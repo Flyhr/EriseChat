@@ -379,7 +379,7 @@ const timeText = computed(() =>
         <span v-if="selfMentioned" class="message-row__mention-badge">提到你</span>
         <span v-if="edited" class="message-row__edited">已编辑</span>
         <span v-if="status === 'sending'" class="message-row__pending">
-          {{ offline ? '消息待发送 · 网络恢复后自动重试' : '发送中…' }}
+          {{ offline ? '等待网络，恢复后自动发送' : '发送中…' }}
         </span>
         <button
           v-else-if="status === 'failed'"
