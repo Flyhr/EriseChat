@@ -348,11 +348,16 @@ app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options)
     });
 });
 
-// SPA 兜底（M6 部署准备）：前端用 history 路由，刷新 /favorites 等深层路径时返回 index.html；
-// /api 与 /ws 的未知路径仍返回 404，避免把接口错误伪装成页面。
+// SPA 兜底（M6 部署准备）：前端用 history 路由，刷新 /favorites、/chat/<id> 等深层路径时返回 index.html；
+// /api、/ws 与静态资源路径的未知请求仍返回 404，避免把接口错误伪装成页面、或让浏览器把
+// index.html 当脚本加载（深层路径配相对资源时的白屏症状）。
 app.MapFallback(async context =>
 {
-    if (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/ws"))
+    var requestPath = context.Request.Path.Value ?? string.Empty;
+    if (context.Request.Path.StartsWithSegments("/api")
+        || context.Request.Path.StartsWithSegments("/ws")
+        || context.Request.Path.StartsWithSegments("/assets")
+        || Path.HasExtension(requestPath))
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         return;

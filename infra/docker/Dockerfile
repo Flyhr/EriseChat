@@ -11,19 +11,19 @@
 ARG DOTNET_REGISTRY=mcr.microsoft.com
 ARG NODE_IMAGE=node:24-alpine
 
-# 1) Web 前端构建（Vite 产物输出到 apps/web/dist）
+# 1) Web 前端构建：服务端同域托管必须用 Web 产物（base '/'，输出到 apps/web/dist/web）
 FROM ${NODE_IMAGE} AS web
 WORKDIR /src/apps/web
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY apps/web/ ./
-RUN npm run build
+RUN npm run build:web
 
 # 2) 服务端发布：前端产物并入 wwwroot，随程序集一起发布
 FROM ${DOTNET_REGISTRY}/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY server/ ./server/
-COPY --from=web /src/apps/web/dist ./server/Chat.Server/wwwroot/
+COPY --from=web /src/apps/web/dist/web ./server/Chat.Server/wwwroot/
 RUN dotnet publish server/Chat.Server/Chat.Server.csproj -c Release -o /out \
       -r linux-x64 --self-contained false \
       -p:UseAppHost=false -p:DebugType=None -p:DebugSymbols=false \

@@ -6,7 +6,9 @@
   "description": "EriseChat Web 客户端核心（Vue 3 + TypeScript + Vite + Pinia）",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "npm run build:web",
+    "build:web": "vue-tsc --noEmit && vite build",
+    "build:file": "vue-tsc --noEmit && vite build --mode file",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "test:unit": "vitest run"

@@ -9,7 +9,8 @@ import type { CapacitorConfig } from '@capacitor/cli'
 const config: CapacitorConfig = {
   appId: 'com.erisechat.mobile',
   appName: 'EriseChat',
-  webDir: '../web/dist',
+  // 壳产物（npm run build:file）：base './'，随 APK 打包；Web 产物 base '/' 留给服务端同域托管。
+  webDir: '../web/dist/file',
   server: {
     androidScheme: 'http',
   },

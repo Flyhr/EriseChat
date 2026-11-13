@@ -8,8 +8,9 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "tsc -p electron/tsconfig.json",
+    "build:web": "cd ../web && npm run build:file",
     "typecheck": "tsc -p electron/tsconfig.json --noEmit",
-    "dist": "npm run build && electron-builder --win nsis --publish never"
+    "dist": "npm run build:web && npm run build && electron-builder --win nsis --publish never"
   },
   "engines": {
     "node": ">=20"

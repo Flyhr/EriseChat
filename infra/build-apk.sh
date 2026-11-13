@@ -24,9 +24,9 @@ if [ ! -f "${LOCAL_PROPERTIES}" ]; then
   exit 1
 fi
 
-echo "== [1/4] 构建 Web 前端 =="
+echo "== [1/4] 构建 Web 前端（壳产物 base './'，输出到 dist/file） =="
 cd "${ROOT}/apps/web"
-npm run build
+npm run build:file
 
 echo "== [2/4] 同步到 Capacitor Android 工程 =="
 cd "${ROOT}/apps/mobile"

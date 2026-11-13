@@ -27,12 +27,12 @@ if [ "${ERISECHAT_SKIP_WEB:-0}" = "1" ]; then
   echo "[publish] 跳过 Web 构建，沿用现有 wwwroot"
 else
   command -v npm >/dev/null 2>&1 || { echo "未找到 npm（如需跳过前端构建，设置 ERISECHAT_SKIP_WEB=1 并确认 wwwroot 已就绪）" >&2; exit 1; }
-  echo "[publish] 构建 Web 前端（apps/web）"
-  (cd "$WEB_APP" && npm run build)
-  echo "[publish] 复制 apps/web/dist → server/Chat.Server/wwwroot"
+  echo "[publish] 构建 Web 前端（apps/web，base '/' 产物）"
+  (cd "$WEB_APP" && npm run build:web)
+  echo "[publish] 复制 apps/web/dist/web → server/Chat.Server/wwwroot"
   rm -rf "$WEBROOT"
   mkdir -p "$WEBROOT"
-  cp -a "$WEB_APP/dist/." "$WEBROOT/"
+  cp -a "$WEB_APP/dist/web/." "$WEBROOT/"
 fi
 
 echo "[publish] dotnet publish（linux-x64，self-contained，版本 $VERSION）"
