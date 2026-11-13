@@ -48,8 +48,8 @@
 - 实现：原生前台服务（`ChatSocketService`，`foregroundServiceType=dataSync`）使用当前登录令牌连接 `ws`，收到 `message.new` 时发系统通知；应用在前台时由页面内提醒负责，不重复通知；免打扰会话不通知；自己发送的消息不通知。
 - 连接占用服务端「每账号最多 3 条连接」中的一条；同时开启前台服务与 Web 页面时共占用 2 条，其余设备仍有 1 条可用。
 - 点击通知会打开 EriseChat 并进入对应会话：冷热启动统一由原生缓存点击，Web 只消费一次，待登录与路由就绪后跳转。通知携带来源账号与服务器，来源不完整、账号或服务器已切换时直接丢弃；未登录时保留缓存，登录成功后再打开对应会话。
-- 地址必须绝对且可用：打包壳内页面 origin 是壳自身（Electron `file://`、Android `http://localhost`），未配置服务器时 `resolveAbsoluteApiBase()` 只会得到 `http://localhost/api`，原生服务仍能启动。因此启动边界（`startBackgroundNotifications` → `hasUsableServer`）在打包壳内要求已保存服务器地址，否则不启动并在设置页提示先配置。正常启动时 Web 侧把 `apiBase` 补全成 `http(s)://<host>/api` 再交给插件（`wsUrl` 本就是绝对地址），原生侧再用 OkHttp `HttpUrl` 解析一次，无主机名等非法地址按缺失处理。
-- 会话状态依赖一次会话列表拉取：拉取失败时标题与免打扰状态保持未知，未知会话的新消息只保留最新一条待复核；若之后仍未收到该会话状态，这条消息不会弹出通知（连接与后续消息不受影响）。
+- 地址必须绝对且可用：打包壳内页面 origin 是壳自身（Electron `file://`、Android `http://localhost`），未配置时 `resolveAbsoluteApiBase()` 只会得到 `http://localhost/api`，原生服务仍能启动。因此启动边界（`startBackgroundNotifications` → `hasUsableServer`）要求 API 与 WS 都指向壳以外的远端——已保存服务器地址，或构建期配置了绝对 `VITE_API_BASE` / `VITE_WS_URL`；两者都没有时不启动，设置页提示先配置。正常启动时 Web 侧把 `apiBase` 补全成 `http(s)://<host>/api` 再交给插件（`wsUrl` 本就是绝对地址），原生侧再用 OkHttp `HttpUrl` 解析一次，无主机名等非法地址按缺失处理。
+- 会话状态依赖一次会话列表拉取：拉取失败时标题与免打扰状态保持未知。状态未知的会话，其每条新消息都只暂存并覆盖上一条候选；WebSocket 连接本身与其他已知会话不受影响，但该会话在状态到达前不会弹出后台提醒，需等下一次状态同步（重连后重新拉取成功，或收到该会话的 `conv.updated`）才恢复。
 
 #### 3.1.1 平台限制
 
