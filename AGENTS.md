@@ -259,7 +259,7 @@ sudo bash infra/backup.sh                       # 服务器每日备份（cron �
 
 ### 14.9 加载反馈与动效
 
-本章把 `docs/ui-optimization-plan.md` §12.4 的动效规范固化为硬规则，批次 4 实施时必须遵守。
+本章为加载反馈与动效的现行规则。批次 4 的实施记录见 `docs/ui/README.md` §5，待验收项见 §6。
 
 - **曲线与时长**：入场用 `--ec-ease` + `--ec-transition-base`（160ms）；退出用 `--ec-ease-in` + `--ec-transition-fast`（120ms）；页面内位移 / 展开收起用 `--ec-ease-in-out` + `--ec-transition-slow`（200ms）；旋转 / 进度 / 扫光用 `linear`。stagger 用 `--ec-motion-stagger`（60ms），总时长 ≤ `--ec-motion-stagger-max`（200ms），且只允许用于首屏少量模块。
 - **动画属性**：只对 `transform` / `opacity` 做动画，禁止动画 `width` / `height` / `top` / `margin` 等触发布局重排的属性。
