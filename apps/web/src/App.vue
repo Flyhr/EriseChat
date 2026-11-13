@@ -12,7 +12,7 @@ import {
   setDesktopUnreadTotal,
   subscribeNotificationClick,
 } from './core/desktop'
-import { resolveApiBase, resolveApiOrigin, resolveWsUrl } from './core/config'
+import { isSameServerOrigin, resolveAbsoluteApiBase, resolveWsUrl } from './core/config'
 import {
   checkBackgroundNotificationsAvailability,
   consumePendingBackgroundClick,
@@ -73,21 +73,16 @@ function openConversationFromNotification(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
 }
 
-/** 归属校验：通知来源与当前实际 API 地址统一经 resolveApiOrigin 解析成绝对 origin 后再比较。 */
-function sameServerOrigin(serverUrl: string): boolean {
-  const source = resolveApiOrigin(serverUrl)
-  return source.length > 0 && source === resolveApiOrigin()
-}
-
 /**
  * 通知点击：来源账号与服务器必须完整且仍属当前登录，否则丢弃（升级前缺少来源的旧通知直接失效）。
+ * 来源必须是绝对 HTTP(S) 地址（见 isSameServerOrigin）；相对路径只在本机配置里有效。
  * 原生侧冷/热启动统一走缓存，消费一次后清除。
  */
 function handleBackgroundClick(click: PendingBackgroundClick): void {
   if (!auth.isLoggedIn) return
   if (!click.userId || !click.serverUrl) return
   if (click.userId !== auth.user?.userId) return
-  if (!sameServerOrigin(click.serverUrl)) return
+  if (!isSameServerOrigin(click.serverUrl)) return
   openConversationFromNotification(click.conversationId)
 }
 
@@ -104,15 +99,18 @@ async function consumeDesktopPendingClick(): Promise<void> {
   const click = await consumeDesktopNotificationClick()
   if (!click) return
   if (click.userId !== auth.user?.userId) return
-  if (!sameServerOrigin(click.serverUrl)) return
+  if (!isSameServerOrigin(click.serverUrl)) return
   openConversationFromNotification(click.conversationId)
 }
 
-/** Android 后台消息提醒：登录态与服务器地址就绪后启动原生前台服务，否则停止。 */
+/**
+ * Android 后台消息提醒：登录态与服务器地址就绪后启动原生前台服务，否则停止。
+ * apiBase 必须是绝对地址：原生侧用 OkHttp 直接请求 `/conversations`，相对 `/api` 无法解析。
+ */
 function backgroundNotifyConfig(): BackgroundNotifyConfig | null {
   if (!auth.isLoggedIn || !auth.accessToken || !auth.user) return null
   return {
-    apiBase: resolveApiBase(),
+    apiBase: resolveAbsoluteApiBase(),
     wsUrl: resolveWsUrl(),
     token: auth.accessToken,
     deviceId: auth.deviceId,
@@ -198,7 +196,7 @@ watch(
     [
       auth.user?.userId ?? '',
       auth.accessToken ?? '',
-      auth.isLoggedIn ? resolveApiBase() : '',
+      auth.isLoggedIn ? resolveAbsoluteApiBase() : '',
     ].join('|'),
   () => {
     void syncAndroidBackgroundNotifications()

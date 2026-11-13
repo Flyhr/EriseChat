@@ -116,19 +116,46 @@ export function resolveApiBase(): string {
 }
 
 /**
- * 实际 REST API 的绝对 origin：跨进程传递与通知归属比较统一走这个入口。
+ * 实际 REST API 的绝对 origin：跨进程传递统一走这个入口。
  * resolveApiBase() 可能是相对路径（同源部署 / Vite 代理的 `/api`）或绝对地址，
  * 单参数 `new URL(value)` 无法解析相对路径；以当前页面为基准解析后只取 origin。
- * 传入 apiBase 可解析通知来源记录的地址；空值或非法值返回空串。
+ * 只解析本机配置：外部来源（通知载荷等）必须经 isSameServerOrigin() 校验，不接受相对路径。
+ * 空值或非法值返回空串。
  */
-export function resolveApiOrigin(apiBase: string = resolveApiBase()): string {
-  const value = (apiBase ?? '').trim()
+export function resolveApiOrigin(): string {
+  const value = (resolveApiBase() ?? '').trim()
   if (!value || typeof window === 'undefined') return ''
   try {
     return new URL(value, window.location.href).origin
   } catch {
     return ''
   }
+}
+
+/**
+ * 绝对 REST 基础路径：把 resolveApiBase() 可能的相对 `/api` 按当前页面补全成绝对地址。
+ * 跨进程消费者（Android 原生 OkHttp 请求、桌面主进程）没有页面基准，无法解析相对路径，
+ * 交给它们的地址必须走这个入口。
+ */
+export function resolveAbsoluteApiBase(): string {
+  const base = (resolveApiBase() ?? '').trim()
+  if (!base || typeof window === 'undefined') return base
+  try {
+    // 绝对地址原样保留（仅去尾部斜杠），相对路径按当前页面补全。
+    return new URL(base, window.location.href).toString().replace(/\/$/, '')
+  } catch {
+    return base
+  }
+}
+
+/**
+ * 通知归属校验：来源必须是绝对 HTTP(S) 地址，归一成本机 API 的绝对 origin 后比较。
+ * 不能用 `new URL(value, location.href)` 解析来源：`garbage`、`/unrelated` 这类相对值会被
+ * 解析成当前页面 origin，从而把任意字符串误判为同源；只有本机配置允许相对路径。
+ */
+export function isSameServerOrigin(source: string | null | undefined): boolean {
+  const origin = normalizeServerUrl(source)
+  return origin !== null && origin === resolveApiOrigin()
 }
 
 /** WebSocket 地址：配置了服务器地址时为 `ws(s)://<host>/ws`，否则退回默认推导。 */
@@ -171,6 +198,15 @@ export function isPackagedShell(dev: boolean = Boolean(env.DEV)): boolean {
   if (typeof window === 'undefined') return false
   if (window.location.protocol === 'file:') return true
   return !dev && window.location.hostname === 'localhost'
+}
+
+/**
+ * 当前是否有可用的服务器地址：打包壳内页面 origin 是壳自身（Electron `file://`、Android `http://localhost`），
+ * 未配置服务器时 resolveAbsoluteApiBase() 会得到壳地址，交给原生/主进程的请求只会打到自己。
+ * 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要配置，始终返回 true。
+ */
+export function hasUsableServer(packaged: boolean = isPackagedShell()): boolean {
+  return !packaged || getServerUrl().length > 0
 }
 
 export interface ServerProbeResult {

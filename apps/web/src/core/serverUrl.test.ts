@@ -3,11 +3,15 @@ import { createMemoryStorage } from '../test/fixtures'
 import {
   config,
   getServerUrl,
+  hasUsableServer,
   isPackagedShell,
+  isSameServerOrigin,
   normalizeServerUrl,
   probeServerHealth,
   resetServerUrl,
+  resolveAbsoluteApiBase,
   resolveApiBase,
+  resolveApiOrigin,
   resolveWsUrl,
   SERVER_URL_STORAGE_KEY,
   setServerUrl,
@@ -112,6 +116,95 @@ describe('resolveApiBase / resolveWsUrl', () => {
     expect(getServerUrl()).toBe('https://desktop.example.com')
     expect(resolveApiBase()).toBe('https://desktop.example.com/api')
     expect(resolveWsUrl()).toBe('wss://desktop.example.com/ws')
+  })
+})
+
+describe('resolveApiOrigin / resolveAbsoluteApiBase', () => {
+  function stubPage(href: string): void {
+    vi.stubGlobal('window', { location: { href } } as unknown as Window)
+  }
+
+  it('无 window 时返回空串与原值', () => {
+    expect(resolveApiOrigin()).toBe('')
+    expect(resolveAbsoluteApiBase()).toBe(config.apiBase)
+  })
+
+  it('本机配置为相对 /api 时按当前页面解析 origin 与绝对地址', () => {
+    stubPage('http://127.0.0.1:5173/chat/abc')
+    expect(resolveApiBase()).toBe('/api')
+    expect(resolveApiOrigin()).toBe('http://127.0.0.1:5173')
+    expect(resolveAbsoluteApiBase()).toBe('http://127.0.0.1:5173/api')
+  })
+
+  it('已配置远端服务器时取该地址的 origin，绝对地址原样保留', () => {
+    stubPage('http://localhost/')
+    setServerUrl('https://chat.example.com')
+    expect(resolveApiOrigin()).toBe('https://chat.example.com')
+    expect(resolveAbsoluteApiBase()).toBe('https://chat.example.com/api')
+  })
+
+  it('打包壳未配置服务器时绝对地址会指向壳自身（Android 页面 origin 为 http://localhost）', () => {
+    stubPage('http://localhost/')
+    expect(resolveAbsoluteApiBase()).toBe('http://localhost/api')
+  })
+})
+
+describe('hasUsableServer', () => {
+  it('非打包壳（同源部署 / Vite 开发）不需要配置服务器', () => {
+    expect(hasUsableServer(false)).toBe(true)
+  })
+
+  it('打包壳未配置服务器时不可用', () => {
+    expect(hasUsableServer(true)).toBe(false)
+  })
+
+  it('打包壳保存服务器地址后可用', () => {
+    setServerUrl('https://chat.example.com')
+    expect(hasUsableServer(true)).toBe(true)
+  })
+
+  it('桌面壳注入的地址同样算已配置', () => {
+    vi.stubGlobal('window', {
+      erisechatDesktop: { serverUrl: 'https://desktop.example.com' },
+    } as unknown as Window)
+    expect(hasUsableServer(true)).toBe(true)
+  })
+})
+
+describe('isSameServerOrigin', () => {
+  function stubPage(href: string): void {
+    vi.stubGlobal('window', { location: { href } } as unknown as Window)
+  }
+
+  it('相对路径与垃圾值一律不通过（通知来源必须是绝对地址）', () => {
+    stubPage('http://127.0.0.1:5173/chat/abc')
+    expect(isSameServerOrigin('/api')).toBe(false)
+    expect(isSameServerOrigin('/unrelated')).toBe(false)
+    expect(isSameServerOrigin('garbage')).toBe(false)
+    expect(isSameServerOrigin('//chat.example.com')).toBe(false)
+    expect(isSameServerOrigin('')).toBe(false)
+    expect(isSameServerOrigin(undefined)).toBe(false)
+  })
+
+  it('同源绝对地址通过，路径与查询串归一后比较', () => {
+    stubPage('http://127.0.0.1:5173/chat/abc')
+    expect(isSameServerOrigin('http://127.0.0.1:5173')).toBe(true)
+    expect(isSameServerOrigin('http://127.0.0.1:5173/api')).toBe(true)
+    expect(isSameServerOrigin('  http://127.0.0.1:5173/chat/1?x=1  ')).toBe(true)
+  })
+
+  it('其他 origin 不通过', () => {
+    stubPage('http://127.0.0.1:5173/chat/abc')
+    expect(isSameServerOrigin('https://chat.example.com')).toBe(false)
+    expect(isSameServerOrigin('http://127.0.0.1:6580')).toBe(false)
+  })
+
+  it('配置远端服务器后按配置的 origin 比较', () => {
+    stubPage('http://localhost/')
+    setServerUrl('https://chat.example.com')
+    expect(isSameServerOrigin('https://chat.example.com')).toBe(true)
+    expect(isSameServerOrigin('https://chat.example.com/api/')).toBe(true)
+    expect(isSameServerOrigin('http://localhost')).toBe(false)
   })
 })
 

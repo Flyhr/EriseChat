@@ -2,8 +2,11 @@
 // 应用退到后台后由原生前台服务保持一条 WebSocket 连接，收到 message.new 时发系统通知。
 // 约束：不新增 npm 依赖（不 import @capacitor/core），非 Android 壳内静默降级为「不可用」。
 
+import { hasUsableServer } from './config'
+
 /** 启动原生前台服务所需的连接参数；token 只经由插件传入原生侧，不写日志。 */
 export interface BackgroundNotifyConfig {
+  /** 绝对 REST 基础路径：原生侧用 OkHttp 直接请求，无法解析相对 `/api`（见 resolveAbsoluteApiBase）。 */
   apiBase: string
   wsUrl: string
   token: string
@@ -17,7 +20,7 @@ export interface BackgroundNotifyStartResult {
   started: boolean
   /** false 表示通知权限被拒绝（此时服务未启动）。 */
   permission?: boolean
-  /** 系统通知开关/渠道被关闭等未启动原因。 */
+  /** 未启动原因：notifications_disabled / channel_disabled / server_unconfigured 等。 */
   reason?: string
 }
 
@@ -104,6 +107,9 @@ export async function startBackgroundNotifications(
 ): Promise<BackgroundNotifyStartResult> {
   const plugin = getBackgroundNotifyPlugin()
   if (!plugin) return { started: false }
+  // 启动边界：打包壳未配置服务器时 apiBase 会指向壳自身（如 http://localhost/api），
+  // 原生服务照样能启动并返回 started=true，设置页会误报已开启，所以在这里先拒绝。
+  if (!hasUsableServer()) return { started: false, reason: 'server_unconfigured' }
   try {
     const result = await plugin.start(config)
     return { started: Boolean(result?.started), permission: result?.permission, reason: result?.reason }

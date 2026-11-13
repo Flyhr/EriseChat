@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -446,6 +447,9 @@ public class ChatSocketService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // API 基地址只用于标题/免打扰拉取与通知点击来源：用 OkHttp 解析一次，无主机名等非法值按缺失处理，
+        // 避免把 "https://" 这类前缀合法但不可用的地址带进请求与通知 Intent。
+        HttpUrl parsedApiBase = nextApiBase == null ? null : HttpUrl.parse(nextApiBase);
         boolean sameSession = nextWsUrl.equals(wsUrl)
             && nextToken.equals(token)
             && nextDeviceId.equals(deviceId)
@@ -476,7 +480,7 @@ public class ChatSocketService extends Service {
         token = nextToken;
         deviceId = nextDeviceId;
         userId = nextUserId;
-        apiBase = nextApiBase;
+        apiBase = parsedApiBase == null ? null : trimTrailingSlash(parsedApiBase.toString());
         terminalStopped = false;
         stopped = false;
         running = true;
@@ -568,6 +572,7 @@ public class ChatSocketService extends Service {
                 intent.putExtra("erisechat_click_user_id", userId);
             }
             if (apiBase != null) {
+                // 已在启动入口解析为合法 HttpUrl：这里回传的是规范化后的绝对地址，WebView 按 origin 校验归属。
                 intent.putExtra("erisechat_click_server", apiBase);
             }
         }
@@ -835,6 +840,7 @@ public class ChatSocketService extends Service {
         }
         if (!hasConversationState(conversationId)) {
             // 该会话标题/免打扰未知时不能按「允许提醒」处理：每会话只保留最新候选，状态就绪后复核。
+            // 若始终没有该会话的状态（会话列表拉取失败），这条候选不会补发通知。
             pendingCandidates.put(conversationId, message);
             return;
         }
@@ -1045,13 +1051,17 @@ public class ChatSocketService extends Service {
         return text.length() > MAX_PREVIEW_LENGTH ? text.substring(0, MAX_PREVIEW_LENGTH) + "…" : text;
     }
 
-    /** 拉取会话列表：用于通知标题、免打扰状态与成员昵称（失败静默，不阻塞消息提醒）。 */
+    /**
+     * 拉取会话列表：用于通知标题、免打扰状态与成员昵称（失败静默，不阻塞消息提醒）。
+     * 拿不到状态时该会话的新消息只暂存最新一条（见 handleIncomingMessage），若之后仍无状态到达则不会弹通知。
+     */
     private void fetchConversations() {
         final String base = apiBase;
         final String bearer = token;
         final int connectGeneration = generation;
         final Map<String, Long> versionsAtRequest = new HashMap<>(conversationVersions);
         if (base == null || bearer == null) {
+            // apiBase 已在启动入口用 HttpUrl 解析，非法地址到这里已是 null：不发起请求。
             return;
         }
         Request request;

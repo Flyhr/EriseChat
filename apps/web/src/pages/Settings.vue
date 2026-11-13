@@ -26,6 +26,7 @@ import { clearAllData } from '../core/db'
 import {
   getServerUrl,
   resetServerUrl,
+  resolveAbsoluteApiBase,
   resolveApiBase,
   resolveServerOrigin,
   resolveWsUrl,
@@ -48,7 +49,7 @@ import {
   stopBackgroundNotifications,
   subscribeBackgroundStateChange,
 } from '../core/backgroundNotifications'
-import type { BackgroundNotifyStatus } from '../core/backgroundNotifications'
+import type { BackgroundNotifyStartResult, BackgroundNotifyStatus } from '../core/backgroundNotifications'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 import { useDraftsStore } from '../stores/drafts'
@@ -598,9 +599,24 @@ async function toggleDesktopNotifications(): Promise<void> {
   }
 }
 
+/** 开启失败的提示：按权限、系统通知状态与启动前置条件映射，不写成功状态。 */
+function backgroundStartFailureMessage(result: BackgroundNotifyStartResult): string {
+  if (result.permission === false) return '通知权限未开启'
+  switch (result.reason) {
+    case 'notifications_disabled':
+      return '系统通知已关闭，请在系统设置中开启'
+    case 'channel_disabled':
+      return '消息通知渠道已关闭，请在系统设置中开启'
+    case 'server_unconfigured':
+      return '请先配置服务器地址后再开启'
+    default:
+      return '后台消息提醒开启失败'
+  }
+}
+
 /**
  * 切换 Android 后台消息提醒：开启时先请求通知权限，再启动原生前台服务；
- * 授权失败保持关闭并提示，不写成功状态。
+ * 授权失败或未配置服务器时保持关闭并提示，不写成功状态。
  */
 async function toggleAndroidBackgroundNotifications(): Promise<void> {
   if (backgroundBusy.value) return
@@ -624,7 +640,8 @@ async function toggleAndroidBackgroundNotifications(): Promise<void> {
   backgroundBusy.value = true
   try {
     const result = await startBackgroundNotifications({
-      apiBase: resolveApiBase(),
+      // 原生侧用 OkHttp 直接请求，必须是绝对地址（相对 /api 无法解析）。
+      apiBase: resolveAbsoluteApiBase(),
       wsUrl: resolveWsUrl(),
       token: auth.accessToken,
       deviceId: auth.deviceId,
@@ -633,15 +650,7 @@ async function toggleAndroidBackgroundNotifications(): Promise<void> {
       userInitiated: true,
     })
     if (!result.started) {
-      const message =
-        result.permission === false
-          ? '通知权限未开启'
-          : result.reason === 'notifications_disabled'
-            ? '系统通知已关闭，请在系统设置中开启'
-            : result.reason === 'channel_disabled'
-              ? '消息通知渠道已关闭，请在系统设置中开启'
-              : '后台消息提醒开启失败'
-      showToast(message, 'error')
+      showToast(backgroundStartFailureMessage(result), 'error')
       return
     }
     settings.setAndroidBackgroundNotificationsEnabled(true)
