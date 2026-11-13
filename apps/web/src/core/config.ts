@@ -127,17 +127,6 @@ function originOf(value: string): string {
 }
 
 /**
- * 端点标识：把 `ws(s)://` 归一成 `http(s)://` 后取 origin，便于与页面 origin 比较。
- * 页面 origin 没有 ws 协议，`ws://localhost/ws` 指向的其实就是壳自身，直接比字符串会漏判。
- */
-function endpointKeyOf(value: string): string {
-  const origin = originOf(value)
-  if (origin.startsWith('ws://')) return `http://${origin.slice('ws://'.length)}`
-  if (origin.startsWith('wss://')) return `https://${origin.slice('wss://'.length)}`
-  return origin
-}
-
-/**
  * 实际 REST API 的绝对 origin：跨进程传递统一走这个入口。
  * resolveApiBase() 可能是相对路径（同源部署 / Vite 代理的 `/api`）或绝对地址，
  * 单参数 `new URL(value)` 无法解析相对路径；以当前页面为基准解析后只取 origin。
@@ -216,37 +205,29 @@ export function isPackagedShell(dev: boolean = Boolean(env.DEV)): boolean {
   return !dev && window.location.hostname === 'localhost'
 }
 
-/** 绝对地址且协议在允许集合内：单参数 `new URL` 解析，相对路径与协议相对地址（`//host`）都会失败。 */
-function isAbsoluteUrlWithProtocol(value: string, protocols: readonly string[]): boolean {
-  const trimmed = (value ?? '').trim()
-  if (!trimmed) return false
-  try {
-    const parsed = new URL(trimmed)
-    return protocols.includes(parsed.protocol) && parsed.hostname.length > 0
-  } catch {
-    return false
-  }
-}
-
-/**
- * 实际交给原生服务的端点是否可用（打包壳内调用）。
- * - API 必须是绝对 http(s) 地址，WS 必须是绝对 ws(s) 地址：原生侧没有页面基准，
- *   相对路径、协议相对地址（`//host/ws`）与其他协议都无法被 OkHttp 使用；
- * - 两者都不能指向壳自身（Electron `file://`、Android `http://localhost`），否则连接只会打到自己；
- * - 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要这些约束，始终返回 true。
- * 传参必须是实际交给插件的值：校验方按调用方补全后的地址判断会放行插件无法使用的端点。
- */
-export function hasUsableServer(
+/** 解析原生服务所需的绝对地址。校验和传给插件的地址使用同一份解析结果。 */
+export function normalizeBackgroundEndpoints(
   apiBase: string,
   wsUrl: string,
   packaged: boolean = isPackagedShell(),
-): boolean {
-  if (!packaged) return true
-  if (!isAbsoluteUrlWithProtocol(apiBase, ['http:', 'https:'])) return false
-  if (!isAbsoluteUrlWithProtocol(wsUrl, ['ws:', 'wss:'])) return false
-  if (typeof window === 'undefined') return false
-  const shellOrigin = window.location.origin
-  return endpointKeyOf(apiBase) !== shellOrigin && endpointKeyOf(wsUrl) !== shellOrigin
+): { apiBase: string; wsUrl: string } | null {
+  let api: URL
+  let ws: URL
+  try {
+    api = new URL(apiBase)
+    ws = new URL(wsUrl)
+  } catch {
+    return null
+  }
+  if (api.protocol !== 'http:' && api.protocol !== 'https:') return null
+  if (ws.protocol !== 'ws:' && ws.protocol !== 'wss:') return null
+  if (packaged) {
+    if (typeof window === 'undefined') return null
+    const shellOrigin = window.location.origin
+    // ws(s) 和 http(s) 对应同一服务地址，按同一口径与壳自身比较。
+    if (api.origin === shellOrigin || ws.origin.replace(/^ws/, 'http') === shellOrigin) return null
+  }
+  return { apiBase: api.href, wsUrl: ws.href }
 }
 
 export interface ServerProbeResult {

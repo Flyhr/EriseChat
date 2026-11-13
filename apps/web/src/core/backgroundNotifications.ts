@@ -2,7 +2,7 @@
 // 应用退到后台后由原生前台服务保持一条 WebSocket 连接，收到 message.new 时发系统通知。
 // 约束：不新增 npm 依赖（不 import @capacitor/core），非 Android 壳内静默降级为「不可用」。
 
-import { hasUsableServer } from './config'
+import { normalizeBackgroundEndpoints } from './config'
 
 /** 启动原生前台服务所需的连接参数；token 只经由插件传入原生侧，不写日志。 */
 export interface BackgroundNotifyConfig {
@@ -107,14 +107,12 @@ export async function startBackgroundNotifications(
 ): Promise<BackgroundNotifyStartResult> {
   const plugin = getBackgroundNotifyPlugin()
   if (!plugin) return { started: false }
-  // 启动边界：校验实际交给插件的端点（API 绝对 http(s)、WS 绝对 ws(s)，且都不指向壳自身）。
-  // 打包壳内默认的 /api 与 ws 会解析回壳地址，原生服务照样能启动并返回 started=true，设置页会误报已开启；
-  // 构建期配置了远端地址或已保存服务器地址时不受影响（见 hasUsableServer）。
-  if (!hasUsableServer(config.apiBase, config.wsUrl)) {
+  const endpoints = normalizeBackgroundEndpoints(config.apiBase, config.wsUrl)
+  if (!endpoints) {
     return { started: false, reason: 'server_unconfigured' }
   }
   try {
-    const result = await plugin.start(config)
+    const result = await plugin.start({ ...config, ...endpoints })
     return { started: Boolean(result?.started), permission: result?.permission, reason: result?.reason }
   } catch {
     return { started: false }

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryStorage } from '../test/fixtures'
+import { startBackgroundNotifications } from './backgroundNotifications'
 import {
   config,
   getServerUrl,
-  hasUsableServer,
   isPackagedShell,
   isSameServerOrigin,
+  normalizeBackgroundEndpoints,
   normalizeServerUrl,
   probeServerHealth,
   resetServerUrl,
@@ -149,7 +150,7 @@ describe('resolveApiOrigin / resolveAbsoluteApiBase', () => {
   })
 })
 
-describe('hasUsableServer', () => {
+describe('normalizeBackgroundEndpoints', () => {
   /** 打包壳页面：Android `androidScheme: 'http'` 下 origin 为 http://localhost。 */
   function stubShell(): void {
     vi.stubGlobal('window', {
@@ -175,19 +176,22 @@ describe('hasUsableServer', () => {
     return [resolveAbsoluteApiBase(), resolveWsUrl()]
   }
 
-  it('非打包壳（同源部署 / Vite 开发）不需要配置服务器', () => {
-    expect(hasUsableServer('/api', '/ws', false)).toBe(true)
+  it('开发态原生插件同样要求绝对地址', () => {
+    expect(normalizeBackgroundEndpoints('/api', '/ws', false)).toBeNull()
   })
 
   it('打包壳未配置服务器时不可用：默认 /api 与按页面推导的 ws 都指回壳自身', () => {
     stubShell()
-    expect(hasUsableServer(...endpoints(), true)).toBe(false)
+    expect(normalizeBackgroundEndpoints(...endpoints(), true)).toBeNull()
   })
 
   it('打包壳保存服务器地址后可用', () => {
     stubShell()
     setServerUrl('https://chat.example.com')
-    expect(hasUsableServer(...endpoints(), true)).toBe(true)
+    expect(normalizeBackgroundEndpoints(...endpoints(), true)).toEqual({
+      apiBase: 'https://chat.example.com/api',
+      wsUrl: 'wss://chat.example.com/ws',
+    })
   })
 
   it('桌面壳注入的地址同样算已配置', () => {
@@ -195,32 +199,60 @@ describe('hasUsableServer', () => {
       location: { href: 'http://localhost/', origin: 'http://localhost' },
       erisechatDesktop: { serverUrl: 'https://desktop.example.com' },
     } as unknown as Window)
-    expect(hasUsableServer(...endpoints(), true)).toBe(true)
+    expect(normalizeBackgroundEndpoints(...endpoints(), true)).toEqual({
+      apiBase: 'https://desktop.example.com/api',
+      wsUrl: 'wss://desktop.example.com/ws',
+    })
   })
 
   it('构建期配置了远端 API 与 WS 时可用（未保存服务器地址）', () => {
     stubShell()
     withBuildTimeEndpoints('https://chat.example.com/api', 'wss://chat.example.com/ws', () => {
       expect(getServerUrl()).toBe('')
-      expect(hasUsableServer(...endpoints(), true)).toBe(true)
+      expect(normalizeBackgroundEndpoints(...endpoints(), true)).toEqual({
+        apiBase: 'https://chat.example.com/api',
+        wsUrl: 'wss://chat.example.com/ws',
+      })
     })
   })
 
   it('拒绝原生无法使用的端点：非 http(s) API、非 ws(s) WS、协议相对 WS', () => {
     stubShell()
-    expect(hasUsableServer('file:///api', 'wss://chat.example.com/ws', true)).toBe(false)
+    expect(normalizeBackgroundEndpoints('file:///api', 'wss://chat.example.com/ws', true)).toBeNull()
     withBuildTimeEndpoints('https://chat.example.com/api', 'ftp://chat.example.com/ws', () => {
-      expect(hasUsableServer(...endpoints(), true)).toBe(false)
+      expect(normalizeBackgroundEndpoints(...endpoints(), true)).toBeNull()
     })
     withBuildTimeEndpoints('https://chat.example.com/api', '//chat.example.com/ws', () => {
-      expect(hasUsableServer(...endpoints(), true)).toBe(false)
+      expect(normalizeBackgroundEndpoints(...endpoints(), true)).toBeNull()
     })
   })
 
   it('只有 API 指向远端、WS 仍在壳内时不可用', () => {
     stubShell()
     withBuildTimeEndpoints('https://chat.example.com/api', 'ws://localhost/ws', () => {
-      expect(hasUsableServer(...endpoints(), true)).toBe(false)
+      expect(normalizeBackgroundEndpoints(...endpoints(), true)).toBeNull()
+    })
+  })
+
+  it('插件收到规范化后的端点和完整的连接参数', async () => {
+    const start = vi.fn().mockResolvedValue({ started: true })
+    vi.stubGlobal('window', {
+      location: new URL('http://localhost/'),
+      Capacitor: { Plugins: { BackgroundNotify: { start } } },
+    })
+    const options = {
+      apiBase: 'https://CHAT.EXAMPLE.COM:443/api',
+      wsUrl: 'wss://chat.exa\tmple.com:443/ws',
+      token: 'test-token',
+      deviceId: 'device',
+      userId: 'user',
+      userInitiated: true,
+    }
+    expect(await startBackgroundNotifications(options)).toMatchObject({ started: true })
+    expect(start).toHaveBeenCalledExactlyOnceWith({
+      ...options,
+      apiBase: 'https://chat.example.com/api',
+      wsUrl: 'wss://chat.example.com/ws',
     })
   })
 })
