@@ -115,6 +115,28 @@ export function resolveApiBase(): string {
   return server ? `${server}/api` : config.apiBase
 }
 
+/** 地址解析后的 origin：相对路径按当前页面补全；空值、非法值或非浏览器环境返回空串。 */
+function originOf(value: string): string {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed || typeof window === 'undefined') return ''
+  try {
+    return new URL(trimmed, window.location.href).origin
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 端点标识：把 `ws(s)://` 归一成 `http(s)://` 后取 origin，便于与页面 origin 比较。
+ * 页面 origin 没有 ws 协议，`ws://localhost/ws` 指向的其实就是壳自身，直接比字符串会漏判。
+ */
+function endpointKeyOf(value: string): string {
+  const origin = originOf(value)
+  if (origin.startsWith('ws://')) return `http://${origin.slice('ws://'.length)}`
+  if (origin.startsWith('wss://')) return `https://${origin.slice('wss://'.length)}`
+  return origin
+}
+
 /**
  * 实际 REST API 的绝对 origin：跨进程传递统一走这个入口。
  * resolveApiBase() 可能是相对路径（同源部署 / Vite 代理的 `/api`）或绝对地址，
@@ -123,13 +145,7 @@ export function resolveApiBase(): string {
  * 空值或非法值返回空串。
  */
 export function resolveApiOrigin(): string {
-  const value = (resolveApiBase() ?? '').trim()
-  if (!value || typeof window === 'undefined') return ''
-  try {
-    return new URL(value, window.location.href).origin
-  } catch {
-    return ''
-  }
+  return originOf(resolveApiBase())
 }
 
 /**
@@ -201,12 +217,20 @@ export function isPackagedShell(dev: boolean = Boolean(env.DEV)): boolean {
 }
 
 /**
- * 当前是否有可用的服务器地址：打包壳内页面 origin 是壳自身（Electron `file://`、Android `http://localhost`），
- * 未配置服务器时 resolveAbsoluteApiBase() 会得到壳地址，交给原生/主进程的请求只会打到自己。
- * 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要配置，始终返回 true。
+ * 是否有可用的服务器地址（打包壳内不能指向壳自身）。
+ * 打包壳的页面 origin 是壳自身（Electron `file://`、Android `http://localhost`）：
+ * - 默认 `/api` 与按页面推导的 `ws://` 都会解析回壳地址，原生/主进程请求必然打到自己；
+ * - 构建期配置了绝对 `VITE_API_BASE` / `VITE_WS_URL` 时，即使没保存服务器地址也可用；
+ * - API 与 WS 都必须指向远端（ws 按 http 口径与页面 origin 比较）；
+ * - 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要配置，始终返回 true。
  */
 export function hasUsableServer(packaged: boolean = isPackagedShell()): boolean {
-  return !packaged || getServerUrl().length > 0
+  if (!packaged) return true
+  if (typeof window === 'undefined') return false
+  const shellOrigin = window.location.origin
+  const apiKey = endpointKeyOf(resolveApiBase())
+  const wsKey = endpointKeyOf(resolveWsUrl())
+  return apiKey.length > 0 && apiKey !== shellOrigin && wsKey.length > 0 && wsKey !== shellOrigin
 }
 
 export interface ServerProbeResult {

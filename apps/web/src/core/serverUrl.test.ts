@@ -150,24 +150,63 @@ describe('resolveApiOrigin / resolveAbsoluteApiBase', () => {
 })
 
 describe('hasUsableServer', () => {
+  /** 打包壳页面：Android `androidScheme: 'http'` 下 origin 为 http://localhost。 */
+  function stubShell(): void {
+    vi.stubGlobal('window', {
+      location: { href: 'http://localhost/', origin: 'http://localhost' },
+    } as unknown as Window)
+  }
+
+  /** 临时改写构建期默认值，模拟 VITE_API_BASE / VITE_WS_URL 指向远端。 */
+  function withBuildTimeEndpoints(apiBase: string, wsUrl: string, run: () => void): void {
+    const original = { apiBase: config.apiBase, wsUrl: config.wsUrl }
+    config.apiBase = apiBase
+    config.wsUrl = wsUrl
+    try {
+      run()
+    } finally {
+      config.apiBase = original.apiBase
+      config.wsUrl = original.wsUrl
+    }
+  }
+
   it('非打包壳（同源部署 / Vite 开发）不需要配置服务器', () => {
     expect(hasUsableServer(false)).toBe(true)
   })
 
-  it('打包壳未配置服务器时不可用', () => {
+  it('打包壳未配置服务器时不可用：默认 /api 与按页面推导的 ws 都指回壳自身', () => {
+    stubShell()
+    expect(resolveApiOrigin()).toBe('http://localhost')
     expect(hasUsableServer(true)).toBe(false)
   })
 
   it('打包壳保存服务器地址后可用', () => {
+    stubShell()
     setServerUrl('https://chat.example.com')
     expect(hasUsableServer(true)).toBe(true)
   })
 
   it('桌面壳注入的地址同样算已配置', () => {
     vi.stubGlobal('window', {
+      location: { href: 'http://localhost/', origin: 'http://localhost' },
       erisechatDesktop: { serverUrl: 'https://desktop.example.com' },
     } as unknown as Window)
     expect(hasUsableServer(true)).toBe(true)
+  })
+
+  it('构建期配置了远端 API 与 WS 时可用（未保存服务器地址）', () => {
+    stubShell()
+    withBuildTimeEndpoints('https://chat.example.com/api', 'wss://chat.example.com/ws', () => {
+      expect(getServerUrl()).toBe('')
+      expect(hasUsableServer(true)).toBe(true)
+    })
+  })
+
+  it('只有 API 指向远端、WS 仍在壳内时不可用', () => {
+    stubShell()
+    withBuildTimeEndpoints('https://chat.example.com/api', 'ws://localhost/ws', () => {
+      expect(hasUsableServer(true)).toBe(false)
+    })
   })
 })
 

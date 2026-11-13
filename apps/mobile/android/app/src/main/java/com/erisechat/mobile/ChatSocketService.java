@@ -839,8 +839,8 @@ public class ChatSocketService extends Service {
             return;
         }
         if (!hasConversationState(conversationId)) {
-            // 该会话标题/免打扰未知时不能按「允许提醒」处理：每会话只保留最新候选，状态就绪后复核。
-            // 若始终没有该会话的状态（会话列表拉取失败），这条候选不会补发通知。
+            // 该会话标题/免打扰未知时不能按「允许提醒」处理：每会话只保留最新候选（后续消息覆盖上一条），
+            // 状态到达后复核；若始终没有状态（会话列表拉取失败且未重连），该会话期间不会弹通知。
             pendingCandidates.put(conversationId, message);
             return;
         }

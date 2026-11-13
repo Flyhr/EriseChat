@@ -107,8 +107,8 @@ export async function startBackgroundNotifications(
 ): Promise<BackgroundNotifyStartResult> {
   const plugin = getBackgroundNotifyPlugin()
   if (!plugin) return { started: false }
-  // 启动边界：打包壳未配置服务器时 apiBase 会指向壳自身（如 http://localhost/api），
-  // 原生服务照样能启动并返回 started=true，设置页会误报已开启，所以在这里先拒绝。
+  // 启动边界：打包壳内默认的 /api 与 ws 会解析回壳自身（如 http://localhost/api），原生服务照样能启动并返回
+  // started=true，设置页会误报已开启；构建期配置了远端地址或已保存服务器地址时不受影响（见 hasUsableServer）。
   if (!hasUsableServer()) return { started: false, reason: 'server_unconfigured' }
   try {
     const result = await plugin.start(config)
