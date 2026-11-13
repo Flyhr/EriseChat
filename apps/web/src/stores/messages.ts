@@ -18,7 +18,7 @@ import type {
 import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
 import { messagesApi, type MessageContextPage } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
-import { MAX_TEXT_LENGTH, config, resolveApiBase } from '../core/config'
+import { MAX_TEXT_LENGTH, config, resolveApiOrigin } from '../core/config'
 import {
   deletePending,
   deleteRecord,
@@ -960,12 +960,14 @@ export const useMessagesStore = defineStore('messages', () => {
     if (notifier) {
       // F-01：带上会话 ID 与来源账号/服务器，点击后由渲染层校验归属再跳转；
       // 旧账号或旧服务器的目标会被丢弃，不会把渲染层带到错误的会话。
+      // 必须传绝对 origin：开发态 / 同源部署的 resolveApiBase() 是相对 /api，
+      // 主进程用单参数 new URL 解析会失败并丢弃整个点击目标。
       void notifier.notify({
         title,
         body,
         conversationId: message.conversationId,
         userId: selfUserId,
-        serverUrl: resolveApiBase(),
+        serverUrl: resolveApiOrigin(),
       })
     } else {
       showWebNotification(title, body, message.conversationId)

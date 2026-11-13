@@ -12,7 +12,7 @@ import {
   setDesktopUnreadTotal,
   subscribeNotificationClick,
 } from './core/desktop'
-import { resolveApiBase, resolveWsUrl } from './core/config'
+import { resolveApiBase, resolveApiOrigin, resolveWsUrl } from './core/config'
 import {
   checkBackgroundNotificationsAvailability,
   consumePendingBackgroundClick,
@@ -73,12 +73,10 @@ function openConversationFromNotification(conversationId: string): void {
   void router.push({ name: 'chat', params: { conversationId } })
 }
 
+/** 归属校验：通知来源与当前实际 API 地址统一经 resolveApiOrigin 解析成绝对 origin 后再比较。 */
 function sameServerOrigin(serverUrl: string): boolean {
-  try {
-    return new URL(serverUrl).origin === new URL(resolveApiBase()).origin
-  } catch {
-    return false
-  }
+  const source = resolveApiOrigin(serverUrl)
+  return source.length > 0 && source === resolveApiOrigin()
 }
 
 /**

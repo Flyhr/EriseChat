@@ -115,6 +115,22 @@ export function resolveApiBase(): string {
   return server ? `${server}/api` : config.apiBase
 }
 
+/**
+ * 实际 REST API 的绝对 origin：跨进程传递与通知归属比较统一走这个入口。
+ * resolveApiBase() 可能是相对路径（同源部署 / Vite 代理的 `/api`）或绝对地址，
+ * 单参数 `new URL(value)` 无法解析相对路径；以当前页面为基准解析后只取 origin。
+ * 传入 apiBase 可解析通知来源记录的地址；空值或非法值返回空串。
+ */
+export function resolveApiOrigin(apiBase: string = resolveApiBase()): string {
+  const value = (apiBase ?? '').trim()
+  if (!value || typeof window === 'undefined') return ''
+  try {
+    return new URL(value, window.location.href).origin
+  } catch {
+    return ''
+  }
+}
+
 /** WebSocket 地址：配置了服务器地址时为 `ws(s)://<host>/ws`，否则退回默认推导。 */
 export function resolveWsUrl(): string {
   const server = readStoredServerUrl() ?? readInjectedServerUrl()
