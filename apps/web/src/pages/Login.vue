@@ -16,7 +16,6 @@ import {
 import { syncServerUrlToDesktop } from '../core/desktop'
 import { friendlyError } from '../core/errorMessages'
 import { validateNewPassword } from '../core/passwordRules'
-import { clearSavedLogin, loadSavedLogin, saveSavedLogin } from '../core/savedCredentials'
 import { showToast } from '../core/toast'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -89,8 +88,6 @@ async function onServerPresetChange(): Promise<void> {
 const passwordVisible = ref(false)
 /** F-13：找回密码的新密码显示/隐藏。 */
 const resetPasswordVisible = ref(false)
-/** F-30：记住密码（仅本机 localStorage；取消勾选立即清除）。 */
-const rememberPassword = ref(false)
 
 const mode = ref<Mode>('code')
 const email = ref('')
@@ -184,21 +181,6 @@ function stopCooldown(): void {
 
 onBeforeUnmount(stopCooldown)
 
-/** F-30：进入密码登录时回填本机保存的账号密码；其它模式不覆盖用户输入。 */
-function applySavedLogin(): void {
-  const saved = loadSavedLogin()
-  rememberPassword.value = saved !== null
-  if (saved) {
-    email.value = saved.email
-    password.value = saved.password
-  }
-}
-
-/** F-30：取消勾选「记住密码」时立即删除本机保存值。 */
-function onRememberPasswordChange(): void {
-  if (!rememberPassword.value) clearSavedLogin()
-}
-
 function switchMode(next: Mode): void {
   mode.value = next
   errorMessage.value = ''
@@ -207,7 +189,6 @@ function switchMode(next: Mode): void {
     newPassword.value = ''
     confirmPassword.value = ''
   }
-  if (next === 'password') applySavedLogin()
 }
 
 async function sendCode(): Promise<void> {
@@ -319,12 +300,6 @@ async function submit(): Promise<void> {
         password: password.value,
         deviceId: auth.deviceId,
       })
-      // F-30：仅在密码登录成功后保存/清除「记住密码」；失败时不覆盖已保存值。
-      if (rememberPassword.value) {
-        saveSavedLogin({ email: target, password: password.value })
-      } else {
-        clearSavedLogin()
-      }
     }
     applySession(response)
     await router.push('/chat')
@@ -523,15 +498,6 @@ function applySession(response: LoginResponse): void {
                 {{ passwordVisible ? '隐藏' : '显示' }}
               </button>
             </div>
-            <label v-if="mode === 'password'" class="login-form__remember">
-              <input
-                v-model="rememberPassword"
-                type="checkbox"
-                @change="onRememberPasswordChange"
-              />
-              <span>记住密码</span>
-              <span class="login-form__remember-hint">仅保存在本机</span>
-            </label>
             <button
               v-if="mode === 'password'"
               class="login-form__forgot"
@@ -987,30 +953,6 @@ function applySession(response: LoginResponse): void {
 }
 
 /* F-30：记住密码——本机保存账号密码，取消勾选即清除。 */
-.login-form__remember {
-  display: flex;
-  align-items: center;
-  gap: var(--ec-space-2);
-  min-height: 32px;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  cursor: pointer;
-}
-
-.login-form__remember input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  accent-color: var(--ec-brand-600);
-  cursor: pointer;
-}
-
-.login-form__remember-hint {
-  color: var(--ec-text-tertiary);
-}
-
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 @media (hover: hover) and (pointer: fine) {
   .login-form__back:hover,
