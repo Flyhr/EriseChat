@@ -7,7 +7,11 @@ import MobileTabBar from './components/MobileTabBar.vue'
 import SearchDialog from './components/SearchDialog.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
-import { setDesktopUnreadTotal, subscribeNotificationClick } from './core/desktop'
+import {
+  consumeDesktopNotificationClick,
+  setDesktopUnreadTotal,
+  subscribeNotificationClick,
+} from './core/desktop'
 import { resolveApiBase, resolveWsUrl } from './core/config'
 import {
   checkBackgroundNotificationsAvailability,
@@ -96,6 +100,16 @@ async function consumeAndroidPendingClick(): Promise<void> {
   if (click) handleBackgroundClick(click)
 }
 
+/** 桌面壳：启动、登录或点击信号后各消费一次；未登录时不清空，等登录后按当前账号与服务器校验。 */
+async function consumeDesktopPendingClick(): Promise<void> {
+  if (!auth.isLoggedIn) return
+  const click = await consumeDesktopNotificationClick()
+  if (!click) return
+  if (click.userId !== auth.user?.userId) return
+  if (!sameServerOrigin(click.serverUrl)) return
+  openConversationFromNotification(click.conversationId)
+}
+
 /** Android 后台消息提醒：登录态与服务器地址就绪后启动原生前台服务，否则停止。 */
 function backgroundNotifyConfig(): BackgroundNotifyConfig | null {
   if (!auth.isLoggedIn || !auth.accessToken || !auth.user) return null
@@ -162,8 +176,13 @@ onMounted(() => {
       void friends.loadAll().catch(() => undefined)
     }
   })
-  // F-01：桌面壳走 preload 回传，Web 版走浏览器通知点击自定义事件。
-  unsubscribeNotificationClick = subscribeNotificationClick(openConversationFromNotification)
+  // F-01：桌面壳走 preload 回传（新壳消费一次并校验归属，旧壳退回直接跳转），
+  // Web 版走浏览器通知点击自定义事件；启动时也主动消费一次冷启动缓存。
+  unsubscribeNotificationClick = subscribeNotificationClick(
+    openConversationFromNotification,
+    () => { void consumeDesktopPendingClick() },
+  )
+  void consumeDesktopPendingClick()
   // Android：原生前台服务通知点击回传（WebView 内无浏览器 Notification API）。
   // 冷热启动统一走消费入口：事件只通知去消费，避免热启动点击后 pending 残留再次导航。
   unsubscribeBackgroundClick = subscribeBackgroundNotificationClick(() => {
@@ -192,7 +211,10 @@ watch(
 watch(
   () => auth.isLoggedIn,
   (loggedIn) => {
-    if (loggedIn) void consumeAndroidPendingClick()
+    if (loggedIn) {
+      void consumeAndroidPendingClick()
+      void consumeDesktopPendingClick()
+    }
   },
   { immediate: true },
 )

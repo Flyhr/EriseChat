@@ -33,11 +33,13 @@ export function shouldShowDesktopNotification(state: IncomingNotifyState): boole
 
 /** 桌面壳（apps/desktop preload）暴露的通知接口；Web 版不存在。 */
 export interface DesktopNotifier {
-  /** conversationId 仅供系统通知点击后打开对应会话（F-01），主进程会再校验 UUID 形态。 */
+  /** 点击后打开对应会话；userId / serverUrl 用于丢弃旧账号或旧服务器的目标，主进程会校验形态。 */
   notify: (payload: {
     title?: string
     body?: string
     conversationId?: string
+    userId?: string
+    serverUrl?: string
   }) => Promise<boolean> | void
 }
 

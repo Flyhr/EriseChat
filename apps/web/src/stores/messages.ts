@@ -18,7 +18,7 @@ import type {
 import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
 import { messagesApi, type MessageContextPage } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
-import { MAX_TEXT_LENGTH, config } from '../core/config'
+import { MAX_TEXT_LENGTH, config, resolveApiBase } from '../core/config'
 import {
   deletePending,
   deleteRecord,
@@ -935,8 +935,15 @@ export const useMessagesStore = defineStore('messages', () => {
     const body = previewOf(message)
     const notifier = getDesktopNotifier()
     if (notifier) {
-      // F-01：带上会话 ID，点击系统通知时由 App.vue 跳转到对应会话。
-      void notifier.notify({ title, body, conversationId: message.conversationId })
+      // F-01：带上会话 ID 与来源账号/服务器，点击后由渲染层校验归属再跳转；
+      // 旧账号或旧服务器的目标会被丢弃，不会把渲染层带到错误的会话。
+      void notifier.notify({
+        title,
+        body,
+        conversationId: message.conversationId,
+        userId: selfUserId,
+        serverUrl: resolveApiBase(),
+      })
     } else {
       showWebNotification(title, body, message.conversationId)
     }

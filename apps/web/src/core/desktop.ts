@@ -7,11 +7,20 @@ import type { DesktopUpdateCheckResult, UpdateProgress } from './update'
 /** 通知点击回调（主进程 → 渲染进程），参数为会话 ID（已由主进程校验过格式）。 */
 export type NotificationClickCallback = (conversationId: string) => void
 
+/** 桌面壳缓存的通知点击目标：带来源账号与服务器，供渲染层校验归属后跳转。 */
+export interface DesktopNotificationClick {
+  conversationId: string
+  userId: string
+  serverUrl: string
+}
+
 interface DesktopBridge {
   /** 把全局未读数同步到托盘/任务栏（F-02）。 */
   setUnreadTotal?: (count: number) => void
   /** 订阅系统通知点击事件（F-01），返回取消订阅函数。 */
   onNotificationClick?: (callback: NotificationClickCallback) => () => void
+  /** 消费一次主进程缓存的点击目标（新壳）；旧壳没有该能力时退回直接跳转。 */
+  consumeNotificationClick?: () => Promise<unknown>
   /** 保存服务器地址到壳 settings.json（M4-02；登录页首启配置时与 localStorage 保持一致）。 */
   setServerUrl?: (url: string) => Promise<{ ok: boolean; serverUrl: string }>
   /** 检查更新（F-29 / P2）：主进程核对双清单并形成候选，返回是否可应用内安装。 */
@@ -71,19 +80,52 @@ export async function syncServerUrlToDesktop(url: string): Promise<boolean> {
 }
 
 /**
+ * 读取并清空桌面壳缓存的点击目标；形态在渲染层再校验一次，不把任意对象交给路由。
+ * 无桌面壳、旧壳或读取失败时返回 null。
+ */
+export async function consumeDesktopNotificationClick(): Promise<DesktopNotificationClick | null> {
+  const bridge = getBridge()
+  if (typeof bridge?.consumeNotificationClick !== 'function') return null
+  try {
+    const raw: unknown = await bridge.consumeNotificationClick()
+    if (typeof raw !== 'object' || raw === null) return null
+    const value = raw as Record<string, unknown>
+    if (!isConversationIdLike(value.conversationId)) return null
+    if (typeof value.userId !== 'string' || value.userId.length === 0 || value.userId.length > 128) return null
+    if (typeof value.serverUrl !== 'string' || value.serverUrl.length === 0) return null
+    return {
+      conversationId: value.conversationId,
+      userId: value.userId,
+      serverUrl: value.serverUrl,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 订阅「点击系统通知 → 打开对应会话」：
- * - 桌面壳：主进程通过 IPC `notification:click` 回调；
+ * - 新桌面壳：IPC 只作为「有点击」信号，目标由 consume 通道取一次并做账号/服务器校验；
+ * - 旧桌面壳（无 consume 能力）：退回 IPC 直接带会话 ID 跳转，保持可用；
  * - Web 版：core/notify.ts 的 showWebNotification 在点击时派发同名自定义事件。
  * 回调参数统一做 UUID 形态校验。
  */
-export function subscribeNotificationClick(callback: NotificationClickCallback): () => void {
+export function subscribeNotificationClick(
+  callback: NotificationClickCallback,
+  onDesktopSignal?: () => void,
+): () => void {
   const disposers: Array<() => void> = []
 
   const bridge = getBridge()
   if (typeof bridge?.onNotificationClick === 'function') {
     try {
+      const useConsume = typeof bridge.consumeNotificationClick === 'function' && onDesktopSignal !== undefined
       const dispose = bridge.onNotificationClick((conversationId) => {
-        if (isConversationIdLike(conversationId)) callback(conversationId)
+        if (useConsume) {
+          onDesktopSignal?.()
+        } else if (isConversationIdLike(conversationId)) {
+          callback(conversationId)
+        }
       })
       if (typeof dispose === 'function') disposers.push(dispose)
     } catch {

@@ -16,12 +16,16 @@ const desktopApi = {
   /** 保存服务器地址（返回是否保存成功与规范化后的地址）。 */
   setServerUrl: (url: string): Promise<{ ok: boolean; serverUrl: string }> =>
     ipcRenderer.invoke('settings:set-server-url', url),
-  /** 系统通知（窗口不可见时由 Web 调用；conversationId 用于点击后打开对应会话，主进程会校验）。 */
+  /** 系统通知（窗口不可见时由 Web 调用；主进程校验会话 ID 与来源账号/服务器后缓存跳转目标）。 */
   notify: (payload: {
     title?: string
     body?: string
     conversationId?: string
+    userId?: string
+    serverUrl?: string
   }): Promise<boolean> => ipcRenderer.invoke('window:notify', payload),
+  /** 消费一次通知点击目标（主进程缓存；无目标或已消费返回 null）。 */
+  consumeNotificationClick: (): Promise<unknown> => ipcRenderer.invoke('notification:consume-click'),
   /** 同步全局未读数到桌面壳（托盘提示 + 任务栏标题/角标）。 */
   setUnreadTotal: (count: number): void => {
     if (typeof count !== 'number' || !Number.isFinite(count)) return

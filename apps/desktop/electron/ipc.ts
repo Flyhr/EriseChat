@@ -90,7 +90,59 @@ function focusMainWindow(): void {
   window.focus()
 }
 
+/** 通知点击目标：主进程校验形态后缓存，渲染层消费一次即清除（F-01）。 */
+export interface NotificationClickTarget {
+  conversationId: string
+  /** 产生通知时登录的账号 id；渲染层据此丢弃旧账号目标。 */
+  userId: string
+  /** 产生通知时的服务器 origin；渲染层据此丢弃旧服务器目标。 */
+  serverUrl: string
+}
+
+// 缓存在主进程，渲染层重载或未登录期间不丢；同时落盘以覆盖应用重启后的冷启动消费。
+let pendingNotificationClick: NotificationClickTarget | null = null
+
+function pendingClickPath(): string {
+  return path.join(app.getPath('userData'), 'pending-notification-click.json')
+}
+
+function isUserIdLike(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 128
+}
+
+function readPendingClick(): NotificationClickTarget | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(pendingClickPath(), 'utf8')) as Partial<NotificationClickTarget>
+    const conversationId = parsed.conversationId
+    const userId = parsed.userId
+    if (typeof conversationId !== 'string' || !isConversationIdLike(conversationId)) return null
+    if (!isUserIdLike(userId)) return null
+    const serverUrl = normalizeServerUrl(parsed.serverUrl)
+    if (!serverUrl) return null
+    return { conversationId, userId, serverUrl }
+  } catch {
+    return null
+  }
+}
+
+function writePendingClick(target: NotificationClickTarget | null): void {
+  pendingNotificationClick = target
+  try {
+    if (target === null) {
+      fs.rmSync(pendingClickPath(), { force: true })
+      return
+    }
+    fs.mkdirSync(path.dirname(pendingClickPath()), { recursive: true })
+    fs.writeFileSync(pendingClickPath(), JSON.stringify(target), 'utf8')
+  } catch (error) {
+    console.warn('[desktop] 保存通知点击目标失败', error)
+  }
+}
+
 export function registerIpcHandlers(): void {
+  // 冷启动：读回上次未消费的点击目标，等渲染层登录后消费一次。
+  pendingNotificationClick = readPendingClick()
+
   ipcMain.handle('app:get-info', () => ({
     name: app.getName(),
     version: app.getVersion(),
@@ -109,9 +161,16 @@ export function registerIpcHandlers(): void {
     return { ok: true, serverUrl: next.serverUrl }
   })
 
-  // 新消息系统通知（M4-02）：仅应用运行期间有效；点击通知聚焦主窗口并打开对应会话（F-01）。
-  // 会话 ID 在此做白名单校验（服务端统一小写 UUID），不接受任意字符串透传给渲染进程。
-  ipcMain.handle('window:notify', (_event, payload: { title?: string; body?: string; conversationId?: string }) => {
+  // 新消息系统通知（M4-02）：点击后聚焦主窗口并打开对应会话（F-01）。
+  // 会话 ID、来源账号与服务器都在此校验形态；缺失来源的通知不携带跳转目标，
+  // 避免旧账号/旧服务器的目标或任意路由参数透传给渲染进程。
+  ipcMain.handle('window:notify', (_event, payload: {
+    title?: string
+    body?: string
+    conversationId?: string
+    userId?: string
+    serverUrl?: string
+  }) => {
     if (!Notification.isSupported()) return false
     const title = typeof payload?.title === 'string' && payload.title ? payload.title : 'EriseChat'
     const body = typeof payload?.body === 'string' ? payload.body : ''
@@ -120,18 +179,31 @@ export function registerIpcHandlers(): void {
       typeof payload?.conversationId === 'string' && isConversationIdLike(payload.conversationId)
         ? payload.conversationId
         : null
+    const userId = isUserIdLike(payload?.userId) ? payload.userId : null
+    const serverUrl = normalizeServerUrl(payload?.serverUrl)
+    const target: NotificationClickTarget | null =
+      conversationId && userId && serverUrl ? { conversationId, userId, serverUrl } : null
+
     const notification = new Notification({ title, body })
     notification.on('click', () => {
       focusMainWindow()
-      if (conversationId) {
-        const window = BrowserWindow.getAllWindows()[0]
-        if (window && !window.isDestroyed()) {
-          window.webContents.send('notification:click', conversationId)
-        }
+      if (!target) return
+      // 先缓存（含落盘）再通知渲染层，保证重载/重启期间点击不丢、且只消费一次。
+      writePendingClick(target)
+      const window = BrowserWindow.getAllWindows()[0]
+      if (window && !window.isDestroyed()) {
+        window.webContents.send('notification:click', conversationId)
       }
     })
     notification.show()
     return true
+  })
+
+  // 渲染层在启动、登录或收到点击信号后各调用一次；取走即清空，避免重复跳转与旧目标残留。
+  ipcMain.handle('notification:consume-click', () => {
+    const target = pendingNotificationClick
+    if (target) writePendingClick(null)
+    return target
   })
 
   // 全局未读数（F-02）：渲染进程上报后由主进程决定托盘/任务栏展示方式（见 registerUnreadIndicator）。
