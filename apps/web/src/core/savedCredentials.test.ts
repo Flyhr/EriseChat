@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeStorage, createMemoryStorage } from '../test/fixtures'
-import {
-  SAVED_LOGIN_KEY,
-  clearSavedLogin,
-  loadSavedLogin,
-  saveSavedLogin,
-} from './savedCredentials'
+import { SAVED_LOGIN_KEY, clearLegacySavedLogin } from './savedCredentials'
+
+/** 1.2.0 命名迁移前的历史键。 */
+const LEGACY_SAVED_LOGIN_KEY = 'eisechat.savedLogin'
 
 let storage: Storage
 
@@ -18,65 +16,60 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('savedCredentials', () => {
-  it('保存后可往返读取，且邮箱去首尾空格', () => {
-    saveSavedLogin({ email: '  alice@example.com  ', password: 'Secret123' })
+describe('clearLegacySavedLogin', () => {
+  it('清除新旧两个历史键', () => {
+    storage.setItem(SAVED_LOGIN_KEY, 'stale')
+    storage.setItem(LEGACY_SAVED_LOGIN_KEY, 'stale')
 
-    expect(loadSavedLogin()).toEqual({ email: 'alice@example.com', password: 'Secret123' })
+    clearLegacySavedLogin()
+
+    expect(storage.getItem(SAVED_LOGIN_KEY)).toBeNull()
+    expect(storage.getItem(LEGACY_SAVED_LOGIN_KEY)).toBeNull()
   })
 
-  it('只写入 email/password 两个字段', () => {
-    saveSavedLogin({ email: 'bob@example.com', password: 'Passw0rd!' })
-
-    const raw = storage.getItem(SAVED_LOGIN_KEY)
-    expect(raw).not.toBeNull()
-    expect(Object.keys(JSON.parse(raw as string))).toEqual(['email', 'password'])
-  })
-
-  it('无记录时返回 null', () => {
-    expect(loadSavedLogin()).toBeNull()
-  })
-
-  it('损坏 JSON 时返回 null 且不抛错', () => {
+  it('不读取、不解析、不写回旧值，只按键名删除', () => {
+    // 故意放损坏内容：清理过程若读取或解析旧值就会暴露。
     storage.setItem(SAVED_LOGIN_KEY, '{not-json')
+    storage.setItem(LEGACY_SAVED_LOGIN_KEY, '{not-json')
+    const readSpy = vi.spyOn(storage, 'getItem')
+    const writeSpy = vi.spyOn(storage, 'setItem')
+    const removeSpy = vi.spyOn(storage, 'removeItem')
 
-    expect(() => loadSavedLogin()).not.toThrow()
-    expect(loadSavedLogin()).toBeNull()
-  })
+    expect(() => clearLegacySavedLogin()).not.toThrow()
 
-  it('缺少字段时返回 null', () => {
-    storage.setItem(SAVED_LOGIN_KEY, JSON.stringify({ email: 'carol@example.com' }))
-    expect(loadSavedLogin()).toBeNull()
-
-    storage.setItem(SAVED_LOGIN_KEY, JSON.stringify({ email: 'carol@example.com', password: 123 }))
-    expect(loadSavedLogin()).toBeNull()
-  })
-
-  it('空密码或空邮箱不写入、也读不出', () => {
-    saveSavedLogin({ email: 'dave@example.com', password: '' })
+    expect(readSpy).not.toHaveBeenCalled()
+    expect(writeSpy).not.toHaveBeenCalled()
+    expect(removeSpy).toHaveBeenCalledTimes(2)
+    expect(removeSpy).toHaveBeenCalledWith(SAVED_LOGIN_KEY)
+    expect(removeSpy).toHaveBeenCalledWith(LEGACY_SAVED_LOGIN_KEY)
     expect(storage.getItem(SAVED_LOGIN_KEY)).toBeNull()
-
-    saveSavedLogin({ email: '   ', password: 'Passw0rd!' })
-    expect(storage.getItem(SAVED_LOGIN_KEY)).toBeNull()
-
-    storage.setItem(SAVED_LOGIN_KEY, JSON.stringify({ email: '', password: 'Passw0rd!' }))
-    expect(loadSavedLogin()).toBeNull()
+    expect(storage.getItem(LEGACY_SAVED_LOGIN_KEY)).toBeNull()
   })
 
-  it('清除后读取为 null', () => {
-    saveSavedLogin({ email: 'erin@example.com', password: 'Passw0rd!' })
-    expect(loadSavedLogin()).not.toBeNull()
-
-    clearSavedLogin()
-    expect(loadSavedLogin()).toBeNull()
+  it('无旧记录时幂等且不抛错', () => {
+    expect(() => clearLegacySavedLogin()).not.toThrow()
+    expect(() => clearLegacySavedLogin()).not.toThrow()
   })
 
-  it('localStorage 不可用（读/写抛错）时静默降级', () => {
-    const broken = createFakeStorage({}, { failRead: true, failWrite: true })
+  it('存储读写不可用时仍能清理且不抛错', () => {
+    const broken = createFakeStorage(
+      { [SAVED_LOGIN_KEY]: 'stale', [LEGACY_SAVED_LOGIN_KEY]: 'stale' },
+      { failRead: true, failWrite: true },
+    )
     vi.stubGlobal('localStorage', broken)
 
-    expect(() => saveSavedLogin({ email: 'frank@example.com', password: 'Passw0rd!' })).not.toThrow()
-    expect(loadSavedLogin()).toBeNull()
-    expect(() => clearSavedLogin()).not.toThrow()
+    expect(() => clearLegacySavedLogin()).not.toThrow()
+    expect(broken.data.has(SAVED_LOGIN_KEY)).toBe(false)
+    expect(broken.data.has(LEGACY_SAVED_LOGIN_KEY)).toBe(false)
+  })
+
+  it('存储访问本身抛错时静默降级', () => {
+    vi.stubGlobal('localStorage', {
+      get removeItem(): unknown {
+        throw new Error('storage unavailable')
+      },
+    })
+
+    expect(() => clearLegacySavedLogin()).not.toThrow()
   })
 })
