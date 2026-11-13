@@ -123,7 +123,7 @@ cd /d D:\Code\EriseChat
 - 首次构建需下载 Gradle/AGP 依赖（数分钟到十几分钟，缓存于 `~/.gradle`）；之后增量打包约 **1~2 分钟**。
 - 成功标志：`BUILD SUCCESSFUL in ...`，随后打印 `APK: .../data/downloads/EriseChat-1.2.0.apk`、文件大小与 SHA256。
 - 脚本默认 `JAVA_HOME=D:/softWare/jdk21`（可用环境变量覆盖），SDK 路径读 `apps/mobile/android/local.properties`。
-- 改完 `apps/web` 后**必须重新打包**（`cap sync` 只是把 `apps/web/dist` 拷进 Android 工程，APK 内是打包时的 Web 产物）。
+- 改完 `apps/web` 后**必须重新打包**（`cap sync` 只是把 `apps/web/dist/file` 壳产物拷进 Android 工程，APK 内是打包时的 Web 资源）。`infra/build-apk.sh` 会先执行 `npm run build:file`；手动 `npx cap sync android` 前也要先构建壳产物，不能误用 `dist/web`。
 
 版本号规则与三端（服务端 `/api/health`、Windows 安装包、APK）保持一致；发版时同时修改
 `apps/desktop/package.json`、`apps/web/package.json`、`apps/mobile/android/app/build.gradle`（`versionCode` 按

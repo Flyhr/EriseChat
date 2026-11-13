@@ -209,9 +209,9 @@ sudo SKIP_BUILD=1 bash /opt/erisechat/src/infra/docker/deploy.sh              # 
 ### 3.3 验证
 
 ```bash
-# 1) 健康检查
-curl -s http://127.0.0.1:6580/api/health
-# {"status":"ok","serverTime":...,"version":"1.1.0","protocolVersion":1,"db":"ok"}
+# 1) 健康检查（数据库探活失败返回 503，curl -f 会直接判定失败）
+curl -fsS http://127.0.0.1:6580/api/health
+# {"status":"ok","serverTime":...,"version":"1.2.0","protocolVersion":1,"db":"ok"}
 
 # 2) 版本/构建核对：新代码应返回 200；404 说明仍是旧镜像（2026-11-02 之前的构建）
 curl -s http://127.0.0.1:6580/api/version
@@ -227,6 +227,7 @@ sudo docker logs --tail=30 erisechat-server
 ```
 
 > 若 `docker inspect` 的创建时间远早于本次部署，说明用了 `SKIP_BUILD=1` 或源码未替换（回到 §3.1.4 / §3.2）；`/api/version` 返回 404 是“旧镜像”的明确信号。
+> `/api/health` 会执行 SQLite `SELECT 1`：数据库可用返回 200、`db: ok`；探活失败返回 **503**、`status: degraded` / `db: error`，诊断字段保持不变。`docker-compose.yml` 的 healthcheck、`infra/docker/deploy.sh`、`infra/restore.sh` 都用 `curl -f` 判定，因此数据库故障不会再被当作健康实例上线或恢复成功。
 > 2026-10-29 首次一键部署实测通过：`docker compose ps` 中 `erisechat-server` 为 `healthy`，`/api/health` 返回 `{"status":"ok","version":"1.1.0","protocolVersion":1,"db":"ok"}`。
 
 ### 3.4 配置 HTTPS：Tailscale Serve（内测推荐，无需域名）
@@ -351,6 +352,8 @@ EOF
 ```
 
 备份内容是 SQLite 一致性快照（`VACUUM INTO`）+ `files/`、`downloads/`，默认保留最近 30 份。
+
+**失败必须可见**：缺少 `sqlite3`、`VACUUM INTO` 失败或快照为空时脚本以非 0 退出，不再降级为直接复制运行中的 `chat.db`（那会产生不一致、可能无法恢复的备份，因此宿主必须装 `sqlite3`，见 §2）；附件归档不再用 `2>/dev/null` 的三级回退吞掉磁盘满 / 权限 / 坏文件等真实 `tar` 错误。快照与附件全部成功后，先写同目录临时归档再原子 `mv` 成最终文件，中途失败只留下临时文件（由 trap 清理），不会留下半截的正式备份。`ERISECHAT_REMOTE` 同步与保留策略仍按原逻辑执行。
 
 ### 6.2 恢复演练（停服窗口执行；建议先在测试机演练）
 
@@ -517,13 +520,13 @@ SQLite 已启用 WAL；备份用 `VACUUM INTO`。确认没有第二个进程直�
 
 ## 11. 上线检查清单
 
-- [ ] `docker compose ps` 显示 `healthy`；`/api/health` 返回 `version` 与 `db: ok`。
+- [ ] `docker compose ps` 显示 `healthy`；`/api/health` 返回 200、`version` 与 `db: ok`；隔离实例上模拟数据库不可用时应返回 503，且 healthcheck 转为 `unhealthy`（批次 A 静态改动，隔离实例验证待执行）。
 - [ ] `ss -ltnp` 确认 6580 仅绑定 `127.0.0.1`。
 - [ ] `/opt/erisechat/.env` 权限 600、无软链接；JWT 密钥为随机值；SMTP 密码只在 .env。
 - [ ] HTTPS 入口可用（Tailscale Serve 或 Caddy），Web 端可完成注册/登录/收发消息。
 - [ ] SMTP 已配置并实测收到验证码（§5）。
 - [ ] 管理员账号已提权（§3.5）。
-- [ ] 备份已跑通一次并在 `/var/backups/erisechat` 生成产物；恢复演练已完成（§6.2）。
+- [ ] 备份已跑通一次并在 `/var/backups/erisechat` 生成产物；恢复演练已完成（§6.2）。另需抽查：缺 `sqlite3` 时脚本非 0 退出、不留半成品归档；归档内 `chat.db` 通过 `integrity_check`，附件与权限可恢复（批次 A 静态改动，隔离实例演练待执行）。
 - [ ] `/download` 页可下载 1.1.0 安装包；覆盖安装不影响服务端数据。
 - [ ] 日志无 token/密码/验证码明文；`docker logs` 无异常堆栈。
 

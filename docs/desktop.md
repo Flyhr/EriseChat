@@ -95,8 +95,8 @@ npm run build        # tsc 编译 electron/ → dist-electron/
 npm run dist         # electron-builder --win nsis → apps/desktop/dist/EriseChat-Setup-1.2.0.exe
 ```
 
-- 打包配置 `apps/desktop/electron-builder.yml`：`appId`、产品名、NSIS 每用户安装（`oneClick: false`、`perMachine: false`、可改目录、桌面/开始菜单快捷方式）、`artifactName` 固定为 `EriseChat-Setup-${version}.${ext}`、`extraResources` 把 `apps/web/dist` 复制为安装包内 `resources/web-dist/`、`build/icon.ico` 作为 exe 图标与托盘图标。
-- **顺序不能反**：先构建 `apps/web`，再打包；否则安装包里是旧界面（或 `../web/dist` 不存在导致打包失败/白屏）。
+- 打包配置 `apps/desktop/electron-builder.yml`：`appId`、产品名、NSIS 每用户安装（`oneClick: false`、`perMachine: false`、可改目录、桌面/开始菜单快捷方式）、`artifactName` 固定为 `EriseChat-Setup-${version}.${ext}`、`extraResources` 把 **`apps/web/dist/file`**（壳产物，基路径 `./`）复制为安装包内 `resources/web-dist/`、`build/icon.ico` 作为 exe 图标与托盘图标。不能改用 `dist/web`：那是给服务端同域托管用的绝对基路径产物，`file://` 下会白屏。
+- **壳产物先构建**：`npm run dist` 已串好 `build:web`（在 `apps/web` 里执行 `npm run build:file`）→ 主进程编译 → `electron-builder`，避免安装包里是旧界面。手动分步时须先跑 `npm --prefix ../web run build:file`。
 - 首次打包会下载 Electron 运行时与 NSIS 工具链（约 100MB+，网络慢需数分钟）；国内网络可设置镜像再重试：
   - `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`
   - `ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/`

@@ -88,7 +88,9 @@ curl http://127.0.0.1:6580/api/health    # 健康检查：status / serverTime / 
 # Web 前端（开发期 /api、/ws 代理到 127.0.0.1:6580）
 cd apps/web && npm install
 npm run dev     # http://127.0.0.1:5173
-npm run build   # 产物 apps/web/dist（不入库；生产部署见 docs/web.md）
+npm run build        # Web 产物 apps/web/dist/web（不入库；服务端同域托管）
+npm run build:file   # 壳产物 apps/web/dist/file（Electron / Android，相对资源）
+# 生产部署见 docs/web.md
 
 # Windows 壳（开发态需先启动上面的 Web dev server；安装包 M4 已产出，安装/打包见 docs/desktop.md）
 cd apps/desktop && npm install && npm run dev   # Electron 加载 http://127.0.0.1:5173

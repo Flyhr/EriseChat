@@ -2,18 +2,19 @@
 
 > 本文是 Web 客户端（Vue 3 核心，`apps/web`）的开发运行、构建、部署与验收说明。
 > 协议见 `protocol/protocol.md`；服务端部署见 `docs/deploy.md`；Windows 壳见 `docs/desktop.md`；Android 见 `docs/mobile.md`；项目介绍以 `README.md` 为准。
-> 最近更新：2026-11-11（文档与实现对齐：用例数口径、F-26 历史标注、多端口径与 1.2.0 现状）。
+> 最近更新：2026-11-13（文档与实现对齐：Web / 壳双产物、深链接刷新、健康探针与备份行为）。
 
 ## 1. 是什么、在哪里
 
 | 形态 | 入口 / 产物 | 说明 |
 |---|---|---|
 | 开发服务器 | `http://127.0.0.1:5173` | `npm run dev`，带 `/api`、`/ws` 到本机服务端 6580 的代理 |
-| 生产构建 | `apps/web/dist/`（不入库） | `npm run build`，相对基路径 `./`，可直接被服务端同域托管 |
-| 生产访问 | `https://<域名>/` | 构建产物复制到 `server/Chat.Server/wwwroot/` 后由服务端静态托管 |
+| Web 生产构建 | `apps/web/dist/web/`（不入库） | `npm run build`（= `build:web`），绝对基路径 `/`，供服务端同域托管与深链接刷新 |
+| 壳构建 | `apps/web/dist/file/`（不入库） | `npm run build:file`，相对基路径 `./`，供 Electron `file://` 与 Android WebView 加载 |
+| 生产访问 | `https://<域名>/` | `dist/web` 复制到 `server/Chat.Server/wwwroot/` 后由服务端静态托管 |
 | 安装包下载页 | `GET /download` | 服务端页面（exe/apk 放 `data/downloads/`） |
 
-- 一套代码多端复用：Web（浏览器）、Windows（Electron 加载同一构建产物）、Android（Capacitor 打包同一产物）。
+- 一套源码多端复用，但按目标产出两套资源：Web（浏览器 / 服务端）用 `dist/web`，Windows（Electron `file://`）与 Android（Capacitor）用 `dist/file`，互不覆盖。
 - 系统要求：Node.js **20+**（本机 v24.18.0；Vite 8 建议 22 LTS 以上）、现代浏览器（Chrome/Edge 近两年版本）。
 - 首次进入 `apps/web` 需 `npm install`（只装开发依赖，无原生编译）。
 
@@ -85,34 +86,36 @@ curl --noproxy '*' http://127.0.0.1:6580/api/health
 ```bash
 cd apps/web
 npm run typecheck   # vue-tsc --noEmit（仅类型检查）
-npm run build       # vue-tsc --noEmit && vite build → apps/web/dist/
-npm run preview     # 本地预览 dist（127.0.0.1，非开发代理）
+npm run build       # = build:web：vue-tsc --noEmit && vite build → apps/web/dist/web/（base '/'）
+npm run build:file  # 同上 + --mode file → apps/web/dist/file/（base './'，桌面/Android 壳用）
+npm run preview     # 本地预览 dist/web（127.0.0.1，非开发代理）
 npm run test:unit   # vitest run（测试文件 42 个：apps/web/src/**/*.test.ts，已现场清点；用例数与耗时以实际输出为准，本轮未运行；含 F-19 本地搜索、F-24 群主转让、F-25 @提及、F-26 转发/收藏等纯函数用例；F-22 多端在线服务端用例见 xUnit）
 ```
 
 构建要点：
 
-- `base: './'`（相对基路径）：既支持服务端同域部署，也支持 Electron 用 `file://` 加载本地 `index.html`，避免白屏。
-- 产物：`dist/` 约 230KB（`index-*.js` ≈70KB、CSS ≈14KB、懒加载聊天页 ≈28KB，图片/字体无外部依赖）。
+- **两套产物的基路径按目标区分**：Web 用 `base: '/'`，深层路由 `/chat/<id>` 刷新时 `/assets/*` 才会从站点根解析；壳用 `base: './'`，Electron `file://` 与 Android WebView 才能找到相对资源。早期统一用 `'./'` 会让生产环境深链接刷新白屏（HTML 被当脚本加载）。
+- 目录分离：`dist/web` 由 `infra/docker/Dockerfile`、`infra/publish-linux.sh` 消费；`dist/file` 由 `apps/desktop/electron-builder.yml`、`apps/mobile/capacitor.config.ts`、`infra/build-apk.sh` 消费。桌面 `npm run dist` 会先执行 `build:web`（壳构建），避免打进旧界面。
+- 服务端已有 SPA 兜底（`Program.cs` 的 `MapFallback`）：页面路径回退 `index.html`；`/api`、`/ws` 与静态资源路径的未知请求仍返回 404。
 - 静态资源文件名带内容 hash，升级后浏览器自动取新版本；异常时 `Ctrl+F5` 强刷。
-- `npm run build` 会先跑类型检查，类型错误直接失败——提交前请保证通过。
+- `npm run build` 会先跑类型检查，类型错误直接失败——提交前请保证通过；体积阈值见 `AGENTS.md` §14.6。
 
 ## 5. 部署到服务端（生产）
 
 1. 构建 Web：
 
    ```bash
-   cd apps/web && npm run build
+   cd apps/web && npm run build:web
    ```
 
-2. 把构建产物复制到服务端静态目录（该目录由构建生成、已 gitignore，不手改）：
+2. 把 **Web 产物**复制到服务端静态目录（该目录由构建生成、已 gitignore，不手改）：
 
    ```bash
    # Git Bash（仓库根）
-   cp -r apps/web/dist/. server/Chat.Server/wwwroot/
+   cp -r apps/web/dist/web/. server/Chat.Server/wwwroot/
 
    # 或 Windows cmd
-   robocopy apps\web\dist server\Chat.Server\wwwroot /E
+   robocopy apps\web\dist\web server\Chat.Server\wwwroot /E
    ```
 
 3. 发布后端并安装（详见 `docs/deploy.md` §3）：
@@ -126,8 +129,8 @@ npm run test:unit   # vitest run（测试文件 42 个：apps/web/src/**/*.test.
 
 注意事项：
 
-- `infra/publish-linux.sh` **目前不会自动构建/复制前端**：必须先做第 1、2 步；`wwwroot/` 为空时服务端只提供 `/api`、`/ws`、`/download`，访问 `/` 会 404。
-- **SPA 路由限制**：Web 使用 history 路由，但服务端当前没有 SPA fallback（未配置 `MapFallbackToFile`），部署后直接刷新 `/chat/:id` 之类深链接会 404；从根路径进入、页面内跳转正常。后续可在服务端加 fallback（改服务端前先按 AGENTS §2.7 更新协议/计划文档）。
+- `infra/publish-linux.sh` 默认会先执行 `npm run build:web` 再把 `dist/web` 复制到 `wwwroot/`；只有设 `ERISECHAT_SKIP_WEB=1` 才沿用现有 `wwwroot`（此时要求 `index.html` 已存在）。上面第 1、2 步是手工本地部署的路径。`wwwroot/` 为空时服务端只提供 `/api`、`/ws`、`/download`，访问 `/` 会 404。
+- **SPA 深链接**：Web 使用 history 路由，服务端 `Program.cs` 的 `MapFallback` 会把页面路径回退到 `index.html`，`GET /chat/<id>` 直接打开与刷新均可用；`/api`、`/ws` 与静态资源路径的未知请求保留 404。前提是部署的是 `dist/web`（绝对基路径），用 `dist/file` 会因相对资源解析失败而白屏。
 - 服务端只监听 `127.0.0.1:6580`，公网入口由 Caddy 反代并提供 HTTPS（`docs/deploy.md` §1/§3.3）；6580 不对公网开放。
 - 下载页安装包来自服务器 `data/downloads/`（`App:DownloadDirectory`），页面自动取最新的 `EriseChat-Setup-*.exe` / `EriseChat-*.apk`。
 
@@ -194,6 +197,10 @@ npm run test:unit   # vitest run（测试文件 42 个：apps/web/src/**/*.test.
 | 43 | 左上角账号入口 | 左侧导航顶部不再显示「EriseChat」品牌字与邮箱，改为当前登录用户的 40px 头像 + 昵称（超长省略，悬停显示全名）；点击弹出账号信息浮窗（48px 头像、昵称、邮箱），点击浮层外任意位置、按 Esc 或点关闭按钮收起，收起后焦点回到头像；导航底部的旧账号卡（头像 + 昵称 + 「账号与设置」）与「服务器已连接」状态行均已移除，底部只保留「设置」入口（连接状态只由顶部断线横幅提示）；801~1199 紧凑图标栏下只显示头像、昵称隐藏；登录页与设置页页脚的 EriseChat 品牌名保持不变 |
 | 44 | 深浅色主题 | 「设置 → 外观 → 主题模式」提供浅色 / 深色两个可点击、可键盘聚焦的主题卡，选中态显示勾选图标；切换后立即生效、无需刷新，刷新或重启后保持（存本机 localStorage），不做系统主题自动跟随；深色下正文对比度 ≥4.5:1、组件边界 ≥3:1，媒体卡、日期胶囊、半透明顶栏、图片预览遮罩与断线横幅层次可辨；Naive UI 弹窗 / 开关 / 输入框 / 消息提示随主题切换；切换不影响草稿、连接状态与已读游标 |
 | 45 | 左侧主导航 hover | 鼠标精确指针悬停导航项（消息 / 联系人 / 群聊 / 收藏 / 设置）与左上角账号入口时底色明显变化，文字与图标同时转主色；浅色下 hover 底与导航底对比 ≥1.1:1、深色下 ≥1.5:1，hover 文字与 hover 底 ≥4.5:1；不产生位移或布局抖动；选中项仍以左侧品牌竖条 + 主色文字 + 加粗识别，hover 不改变其选中样式 |
+| 46 | Web 深链接与双产物（批次 A：静态通过，浏览器验收待授权） | `npm run build` 产物 `dist/web/index.html` 用 `/assets/*`，`npm run build:file` 产物 `dist/file/index.html` 用 `./assets/*`，两套并存互不覆盖；生产 Web 直接打开与刷新 `/chat/<id>` 均正常渲染、资源请求状态 200 且 MIME 正确；未登录直达登录后回原会话，无权限会话不泄露内容；未知 `/api`、`/ws` 与 `/assets/*` 请求保留 404；Electron `file://` 启动与 Android 壳资源加载正常（后两项需设备） |
+| 47 | 客户端明文记密清理（批次 A：静态通过，合成数据验证待执行） | 升级后首次启动删除 `erisechat.savedLogin` 与历史 `eisechat.savedLogin`，不读取、不打印、不重写旧值；登录页无「记住密码」开关、不回填密码、不在成功后写入明文，但保留 `autocomplete="current-password"` 供浏览器密码管理器使用；浏览器存储不可用时登录流程仍可用；撤销指定设备后该设备 REST 返回 401、WebSocket 被踢且无法重连 |
+| 48 | 弱网发送与失败反馈（批次 A：静态通过，双端验证待执行） | 离线或认证未完成时点发送：本地气泡立即出现并显示「等待网络，恢复后自动发送」，不消耗 2s/5s/10s 重试预算；恢复并认证后按原 `clientMsgId` 补发，ACK 或补拉对账后无重复、无空洞、`seq` 连续，已读游标不误推进；服务端明确拒绝标「可重发」且不再自动补发；账号/服务器切换不串队列；短暂重连 2 秒后才显示「正在重新连接」，明确断开立即显示；上传失败与发送失败分别给出可点的逐项重试 |
+| 49 | 通知点击直达（批次 A：静态通过，真机验收待执行） | 桌面通知点击后聚焦窗口并打开对应会话；目标带来源账号与服务器，旧账号 / 旧服务器 / 形态非法的目标被丢弃；启动、登录与点击信号后各消费一次，重复点击不重复跳转，未登录时目标保留到登录后按当前账号校验；应用重启后仍能消费一次；Android 锁屏 / 省电 / 冷启动与 Windows 托盘点击按 `docs/mobile.md` §5.7.1 与真机清单验收 |
 
 ## 8. 故障排查
 

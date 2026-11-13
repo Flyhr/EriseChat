@@ -352,7 +352,7 @@ Chat.Server/
 2. `protocol/`：先把 `protocol.md`、`schema.sql` 从计划 §4 固化下来（**文档先行**）。
 3. `server/`：`dotnet new sln` + `Chat.Protocol`、`Chat.Server`、`Chat.Server.Tests` 三个工程并互相引用；`Program.cs` 跑通 `/api/health`。
 4. `apps/web/`：Vite + Vue 3 + TS + Pinia 骨架，`core/ws.ts`、`core/sync.ts` 先写接口与状态机骨架。
-5. `apps/desktop/`、`apps/mobile/`：能加载 `apps/web/dist` 即可（M4/M5 再打磨）。
+5. `apps/desktop/`、`apps/mobile/`：加载 `apps/web/dist/file` 壳产物即可（M4/M5 再打磨）；服务端同域托管用 `apps/web/dist/web`。
 6. `infra/`、`docs/deploy.md` 等按里程碑逐步补，不提前铺；测试脚本随手放 `docs/test/`（不入库），不新建 `tests/`。
 
 ---
@@ -494,7 +494,8 @@ sudo bash infra/docker/deploy.sh && infra/backup.sh   # 服务器 Docker 部署 
 
 | 产物 | 来源 | 去向 |
 |---|---|---|
-| `apps/web/dist/` | `npm run build` | ① 复制到 `server/Chat.Server/wwwroot/`；② 桌面壳加载；③ `npx cap sync` 进 APK |
+| `apps/web/dist/web/` | `npm run build`（= `build:web`，`base '/'`） | 复制到 `server/Chat.Server/wwwroot/`，供服务端同域托管与深链接刷新（Dockerfile / publish-linux.sh） |
+| `apps/web/dist/file/` | `npm run build:file`（`base './'`） | ① 桌面壳 `extraResources` → `resources/web-dist/`；② `npx cap sync` 进 APK（build-apk.sh） |
 | `chat-server-x.y.z.zip` | `dotnet publish -c Release` + `wwwroot` | 服务器 `/opt/erisechat-server/` |
 | `EriseChat-Setup-x.y.z.exe` | `electron-builder`（NSIS） | 下载页 / 内部分发，不入库 |
 | `EriseChat-x.y.z.apk` | `gradlew assembleRelease` + 自签名 | 下载页 / 侧载，不入库 |
