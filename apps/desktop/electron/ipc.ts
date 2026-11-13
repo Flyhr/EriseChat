@@ -99,50 +99,16 @@ export interface NotificationClickTarget {
   serverUrl: string
 }
 
-// 缓存在主进程，渲染层重载或未登录期间不丢；同时落盘以覆盖应用重启后的冷启动消费。
+// 只缓存在主进程内存：通知由本进程创建，点击也只会在本进程运行期间发生。
+// 窗口重载（渲染层重新挂载）与未登录等待都不会丢失缓存；取走即清空，保证只消费一次。
+// 进程退出后 Windows 残留 toast 不会再唤起本进程，落盘没有可消费的时机，故不做同步读写。
 let pendingNotificationClick: NotificationClickTarget | null = null
-
-function pendingClickPath(): string {
-  return path.join(app.getPath('userData'), 'pending-notification-click.json')
-}
 
 function isUserIdLike(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 128
 }
 
-function readPendingClick(): NotificationClickTarget | null {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(pendingClickPath(), 'utf8')) as Partial<NotificationClickTarget>
-    const conversationId = parsed.conversationId
-    const userId = parsed.userId
-    if (typeof conversationId !== 'string' || !isConversationIdLike(conversationId)) return null
-    if (!isUserIdLike(userId)) return null
-    const serverUrl = normalizeServerUrl(parsed.serverUrl)
-    if (!serverUrl) return null
-    return { conversationId, userId, serverUrl }
-  } catch {
-    return null
-  }
-}
-
-function writePendingClick(target: NotificationClickTarget | null): void {
-  pendingNotificationClick = target
-  try {
-    if (target === null) {
-      fs.rmSync(pendingClickPath(), { force: true })
-      return
-    }
-    fs.mkdirSync(path.dirname(pendingClickPath()), { recursive: true })
-    fs.writeFileSync(pendingClickPath(), JSON.stringify(target), 'utf8')
-  } catch (error) {
-    console.warn('[desktop] 保存通知点击目标失败', error)
-  }
-}
-
 export function registerIpcHandlers(): void {
-  // 冷启动：读回上次未消费的点击目标，等渲染层登录后消费一次。
-  pendingNotificationClick = readPendingClick()
-
   ipcMain.handle('app:get-info', () => ({
     name: app.getName(),
     version: app.getVersion(),
@@ -188,11 +154,12 @@ export function registerIpcHandlers(): void {
     notification.on('click', () => {
       focusMainWindow()
       if (!target) return
-      // 先缓存（含落盘）再通知渲染层，保证重载/重启期间点击不丢、且只消费一次。
-      writePendingClick(target)
+      pendingNotificationClick = target
       const window = BrowserWindow.getAllWindows()[0]
       if (window && !window.isDestroyed()) {
-        window.webContents.send('notification:click', conversationId)
+        // 事件只发信号：preload 需要非空字符串才触发订阅。跳转目标一律由
+        // notification:consume-click 返回，渲染层不从事件参数里取会话 ID。
+        window.webContents.send('notification:click', 'pending')
       }
     })
     notification.show()
@@ -202,7 +169,7 @@ export function registerIpcHandlers(): void {
   // 渲染层在启动、登录或收到点击信号后各调用一次；取走即清空，避免重复跳转与旧目标残留。
   ipcMain.handle('notification:consume-click', () => {
     const target = pendingNotificationClick
-    if (target) writePendingClick(null)
+    pendingNotificationClick = null
     return target
   })
 
