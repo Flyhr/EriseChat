@@ -694,6 +694,13 @@ export const useMessagesStore = defineStore('messages', () => {
   /** 发送一帧 message.send（带 reqId；幂等键 clientMsgId 由服务端去重）。 */
   function transmit(pending: PendingMessage): void {
     if (pending.status !== 'sending') return
+    // 弱网 / 认证未完成：挂起等待网络，不消耗 2s/5s/10s 重试预算。
+    // 保持 sending 与原 clientMsgId，由 subscribeRealtime 的 statechange('authed')
+    // → resumePending() 原键补发，再由 ack 或补拉对账；未认证的 socket 上发帧也会丢。
+    if (chatWs.state !== 'authed') {
+      clearTimers(pending.clientMsgId)
+      return
+    }
     const frame: MessageSendFrame = {
       type: 'message.send',
       reqId: reqIdOf(pending.clientMsgId),
@@ -708,9 +715,9 @@ export const useMessagesStore = defineStore('messages', () => {
       scheduleAckTimeout(pending)
       return
     }
-    // 未连接：不启动 8 秒 ack 计时，直接进入 2s/5s/10s 重试序列，避免几十秒后才标失败（M3-00 N8）。
-    console.warn('[messages] WebSocket 未连接，消息进入重试序列')
-    scheduleRetry(pending)
+    // 状态仍显示 authed 但 socket 已关闭的极短窗口：同样挂起，等 onclose→重连→authed
+    // 重新触发 resumePending，不在这里把离线问题算进重试次数。
+    clearTimers(pending.clientMsgId)
   }
 
   function handleAckTimeout(conversationId: string, clientMsgId: string): void {
