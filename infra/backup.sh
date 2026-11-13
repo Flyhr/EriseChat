@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # EriseChat 每日备份脚本（建议 root/cron 执行；默认每天 02:00）。
 #
-# 内容：SQLite 在线备份（VACUUM INTO，一致性快照）+ files/downloads 打包 → 单个 tar.gz；
+# 内容：SQLite 在线备份（VACUUM INTO，一致性快照）+ files/（必需）、downloads/（可选）打包 → 单个 tar.gz；
 # 保留最近 30 份；可选 rsync/scp 同步到异机；失败以非 0 退出并写日志（日志在备份目录）。
+# 全脚本 umask 077：日志、快照、临时归档与最终备份均仅当前用户可读写。
 #
 # 用法（可放 /etc/cron.d/erisechat-backup）：
 #   0 2 * * * root ERISECHAT_REMOTE=user@backup-host:/srv/erisechat-backup bash /opt/erisechat-server/infra/backup.sh
 set -euo pipefail
+
+# 备份含聊天记录与附件：日志、SQLite 快照、临时归档一律从创建时起仅当前用户可读写。
+# 必须在 mkdir / exec 打开日志之前设置，否则日志与备份目录会以默认权限落地。
+umask 077
 
 DATA_DIR="${ERISECHAT_DATA_DIR:-/var/lib/erisechat}"
 BACKUP_DIR="${ERISECHAT_BACKUP_DIR:-/var/backups/erisechat}"
@@ -23,6 +28,11 @@ trap 'echo "[backup] $(date -Is) 失败（行号 $LINENO）"; exit 1' ERR
 
 echo "== [backup] $(date -Is) 开始 =="
 [ -f "$DATA_DIR/chat.db" ] || { echo "[backup] 未找到 $DATA_DIR/chat.db"; exit 1; }
+# files/ 是消息附件的必需目录；缺失说明数据目录不完整，绝不能生成「少了附件却报成功」的备份。
+[ -d "$DATA_DIR/files" ] || {
+  echo "[backup] 缺少附件目录 $DATA_DIR/files，拒绝生成不完整的备份"
+  exit 1
+}
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -37,19 +47,13 @@ sqlite3 "$DATA_DIR/chat.db" "VACUUM INTO '$tmp_dir/chat.db';"
 [ -s "$tmp_dir/chat.db" ] || { echo "[backup] 数据库快照为空，拒绝发布备份"; exit 1; }
 chmod 600 "$tmp_dir/chat.db"
 
-# 2) 附件归档：只纳入实际存在的目录；都不存在时生成空归档。
-#    不再用 2>/dev/null 的三级回退吞掉真实错误（磁盘满、权限、坏文件）。
-archive_targets=()
-for dir in files downloads; do
-  if [ -d "$DATA_DIR/$dir" ]; then
-    archive_targets+=("$dir")
-  fi
-done
-if [ "${#archive_targets[@]}" -gt 0 ]; then
-  tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" "${archive_targets[@]}"
-else
-  tar -czf "$tmp_dir/files.tar.gz" --files-from /dev/null
+# 2) 附件归档：files/ 必需（上方已校验），downloads/ 可选。
+#    不再生成空附件归档，也不再用 2>/dev/null 的回退吞掉真实 tar 错误（磁盘满、权限、坏文件）。
+archive_targets=(files)
+if [ -d "$DATA_DIR/downloads" ]; then
+  archive_targets+=(downloads)
 fi
+tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" "${archive_targets[@]}"
 
 # 3) 先写同目录临时归档，快照与附件都成功后原子 mv 发布最终文件；
 #    中途失败只留下临时文件并由 EXIT trap 清理，不会出现半截的正式备份。
