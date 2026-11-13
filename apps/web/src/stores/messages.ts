@@ -702,8 +702,12 @@ export const useMessagesStore = defineStore('messages', () => {
     ackTimers.set(pending.clientMsgId, timer)
   }
 
-  /** 发送一帧 message.send（带 reqId；幂等键 clientMsgId 由服务端去重）。 */
-  function transmit(pending: PendingMessage): void {
+  /**
+   * 发送一帧 message.send（带 reqId；幂等键 clientMsgId 由服务端去重）。
+   * countRetry=true 表示这是定时重试：仅在 WS 成功受理该帧后才计入 retries 并写回缓存，
+   * 未受理（未认证 / send 失败）不扣次数，刷新后也不会重置已消耗的预算。
+   */
+  function transmit(pending: PendingMessage, countRetry = false): void {
     if (pending.status !== 'sending') return
     // 弱网 / 认证未完成：挂起等待网络，不消耗 2s/5s/10s 重试预算。
     // 保持 sending 与原 clientMsgId，由 subscribeRealtime 的 statechange('authed')
@@ -723,6 +727,11 @@ export const useMessagesStore = defineStore('messages', () => {
       ...(pending.replyTo ? { replyTo: pending.replyTo } : {}),
     }
     if (chatWs.send(frame)) {
+      if (countRetry) {
+        pending.retries += 1
+        // 计入已消耗预算并写回 IndexedDB：刷新恢复时读到的是实际重发次数，不会重跑整轮。
+        persistPending(pending)
+      }
       scheduleAckTimeout(pending)
       return
     }
@@ -739,8 +748,8 @@ export const useMessagesStore = defineStore('messages', () => {
 
   /**
    * 按 2s/5s/10s 间隔重发同一 clientMsgId；3 次重发仍失败则标记 failed（可手动重发）。
-   * retries 只在实际重发时递增：仅排定、尚未执行的定时重试不占用预算，
-   * 断线取消定时器后也不会把「没发生的重试」算进次数。
+   * 计数由 transmit(pending, true) 在 WS 成功受理重发帧后才递增并落库：
+   * 仅排定未执行、断线取消、或帧未被受理都不占预算，刷新后次数也不会回退。
    */
   function scheduleRetry(pending: PendingMessage): void {
     clearTimers(pending.clientMsgId)
@@ -755,8 +764,7 @@ export const useMessagesStore = defineStore('messages', () => {
     const delay = RETRY_DELAYS_MS[pending.retries]
     const timer = setTimeout(() => {
       retryTimers.delete(pending.clientMsgId)
-      pending.retries += 1
-      transmit(pending)
+      transmit(pending, true)
     }, delay)
     retryTimers.set(pending.clientMsgId, timer)
   }
@@ -1164,8 +1172,7 @@ export const useMessagesStore = defineStore('messages', () => {
   useConversationsStore().onConversationRemoved(removeConversation)
 
   function clear(): void {
-    const tracked = new Set([...ackTimers.keys(), ...retryTimers.keys()])
-    for (const clientMsgId of tracked) clearTimers(clientMsgId)
+    clearAllTimers()
     disposeRealtime()
     // F-03：登出/切账号清空待发消息缓存，避免把上一个账号的发送中消息带到下一个账号。
     void clearPending()
