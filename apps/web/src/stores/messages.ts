@@ -390,8 +390,10 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /**
-   * F-03：把恢复出来、仍处于 sending 的待发消息重新发出（retries 归零，复用原 clientMsgId）。
-   * 仅在 WS 已认证时调用；已有 ack/重试定时器的消息跳过，避免重复排定时器。
+   * F-03：把恢复出来、仍处于 sending 的待发消息按原 clientMsgId 重新发出。
+   * 仅在 WS 已认证时调用；有在途 ack / 重试定时器的消息跳过，避免重复发送。
+   * 不重置 retries：补发是「恢复投递」而非新一轮重试，短暂重连不应抹掉已执行的
+   * 在线重试次数，也不应额外消耗预算。
    */
   function resumePending(): void {
     if (chatWs.state !== 'authed') return
@@ -399,8 +401,6 @@ export const useMessagesStore = defineStore('messages', () => {
       for (const pending of list) {
         if (pending.status !== 'sending') continue
         if (ackTimers.has(pending.clientMsgId) || retryTimers.has(pending.clientMsgId)) continue
-        pending.retries = 0
-        persistPending(pending)
         transmit(pending)
       }
     }
@@ -682,6 +682,17 @@ export const useMessagesStore = defineStore('messages', () => {
     }
   }
 
+  /**
+   * 连接离开 authed：取消当前连接遗留的全部 ack / 重试定时器。
+   * 旧连接的 ack 永远不会到，定时重试也会在离线期间白跑并消耗预算；
+   * pending 保持 sending 与原 clientMsgId，等重新认证后由 resumePending() 补发。
+   */
+  function clearAllTimers(): void {
+    for (const clientMsgId of new Set([...ackTimers.keys(), ...retryTimers.keys()])) {
+      clearTimers(clientMsgId)
+    }
+  }
+
   function scheduleAckTimeout(pending: PendingMessage): void {
     clearTimers(pending.clientMsgId)
     const timer = setTimeout(() => {
@@ -726,7 +737,11 @@ export const useMessagesStore = defineStore('messages', () => {
     scheduleRetry(pending)
   }
 
-  /** 按 2s/5s/10s 间隔重发同一 clientMsgId；3 次重试仍失败则标记 failed（可手动重发）。 */
+  /**
+   * 按 2s/5s/10s 间隔重发同一 clientMsgId；3 次重发仍失败则标记 failed（可手动重发）。
+   * retries 只在实际重发时递增：仅排定、尚未执行的定时重试不占用预算，
+   * 断线取消定时器后也不会把「没发生的重试」算进次数。
+   */
   function scheduleRetry(pending: PendingMessage): void {
     clearTimers(pending.clientMsgId)
     if (pending.retries >= RETRY_DELAYS_MS.length) {
@@ -738,9 +753,9 @@ export const useMessagesStore = defineStore('messages', () => {
       return
     }
     const delay = RETRY_DELAYS_MS[pending.retries]
-    pending.retries += 1
     const timer = setTimeout(() => {
       retryTimers.delete(pending.clientMsgId)
+      pending.retries += 1
       transmit(pending)
     }, delay)
     retryTimers.set(pending.clientMsgId, timer)
@@ -1060,11 +1075,14 @@ export const useMessagesStore = defineStore('messages', () => {
     unsubscribers.push(chatWs.on('frame', handleFrame))
     unsubscribers.push(
       chatWs.on('statechange', (state: WsState) => {
-        if (state === 'authed') {
-          void handleAuthed()
-          // F-03：认证成功（刷新/重连）后恢复的待发消息才重发，避免提前耗光重试次数。
-          resumePending()
+        if (state !== 'authed') {
+          // 断线：旧连接的 ack / 定时重试全部作废，待发保持可恢复状态，不标失败、不耗预算。
+          clearAllTimers()
+          return
         }
+        void handleAuthed()
+        // F-03：认证成功（刷新/重连）后按原 clientMsgId 补发，由 ack 或补拉对账。
+        resumePending()
       }),
     )
 
