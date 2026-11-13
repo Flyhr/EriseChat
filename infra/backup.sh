@@ -27,23 +27,37 @@ echo "== [backup] $(date -Is) 开始 =="
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
-# 1) SQLite 在线备份：VACUUM INTO 生成一致快照（服务运行中安全）。
-if command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "$DATA_DIR/chat.db" "VACUUM INTO '$tmp_dir/chat.db';"
-else
-  echo "[backup] WARN 未找到 sqlite3，退化为文件拷贝（一致性无法保证，建议 apt-get install -y sqlite3）"
-  cp "$DATA_DIR/chat.db" "$tmp_dir/chat.db"
-fi
+# 1) SQLite 在线备份：必须生成一致性快照。缺 sqlite3 或快照失败一律非零退出，
+#    绝不复制运行中的 chat.db —— 那样会得到不一致、可能无法恢复的备份。
+command -v sqlite3 >/dev/null 2>&1 || {
+  echo "[backup] 未找到 sqlite3，无法生成一致性快照；请安装后重试（不复制运行中的数据库）"
+  exit 1
+}
+sqlite3 "$DATA_DIR/chat.db" "VACUUM INTO '$tmp_dir/chat.db';"
+[ -s "$tmp_dir/chat.db" ] || { echo "[backup] 数据库快照为空，拒绝发布备份"; exit 1; }
 chmod 600 "$tmp_dir/chat.db"
 
-# 2) 文件目录打包（files/ 消息附件、downloads/ 安装包；不存在则跳过）。
-tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" files downloads 2>/dev/null \
-  || tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" files 2>/dev/null \
-  || tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" --files-from /dev/null
+# 2) 附件归档：只纳入实际存在的目录；都不存在时生成空归档。
+#    不再用 2>/dev/null 的三级回退吞掉真实错误（磁盘满、权限、坏文件）。
+archive_targets=()
+for dir in files downloads; do
+  if [ -d "$DATA_DIR/$dir" ]; then
+    archive_targets+=("$dir")
+  fi
+done
+if [ "${#archive_targets[@]}" -gt 0 ]; then
+  tar -C "$DATA_DIR" -czf "$tmp_dir/files.tar.gz" "${archive_targets[@]}"
+else
+  tar -czf "$tmp_dir/files.tar.gz" --files-from /dev/null
+fi
 
-# 3) 合并为单个归档并设置权限。
-tar -C "$tmp_dir" -czf "$ARCHIVE" chat.db files.tar.gz
-chmod 600 "$ARCHIVE"
+# 3) 先写同目录临时归档，快照与附件都成功后原子 mv 发布最终文件；
+#    中途失败只留下临时文件并由 EXIT trap 清理，不会出现半截的正式备份。
+tmp_archive="$ARCHIVE.tmp.$$"
+trap 'rm -rf "$tmp_dir" "$tmp_archive"' EXIT
+tar -C "$tmp_dir" -czf "$tmp_archive" chat.db files.tar.gz
+chmod 600 "$tmp_archive"
+mv -f "$tmp_archive" "$ARCHIVE"
 echo "[backup] 已生成 $ARCHIVE（$(du -h "$ARCHIVE" | cut -f1)）"
 
 # 4) 可选：同步到异机（对象存储可在此接 rclone/aws cli）。
