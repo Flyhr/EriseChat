@@ -338,6 +338,9 @@ app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options)
         }
     }
 
+    // 探活失败必须体现在 HTTP 状态码：docker-compose healthcheck、deploy.sh、restore.sh
+    // 都用 curl -f 只判 2xx，恒 200 会把数据库故障实例当成健康服务上线/恢复成功。
+    // 诊断字段保持不变，便于日志与人工排查。
     return Results.Json(new
     {
         status = database == "ok" ? "ok" : "degraded",
@@ -345,7 +348,7 @@ app.MapGet("/api/health", async (ChatDbContext db, IOptions<AppOptions> options)
         version,
         protocolVersion,
         db = database,
-    });
+    }, statusCode: database == "ok" ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 });
 
 // SPA 兜底（M6 部署准备）：前端用 history 路由，刷新 /favorites、/chat/<id> 等深层路径时返回 index.html；
