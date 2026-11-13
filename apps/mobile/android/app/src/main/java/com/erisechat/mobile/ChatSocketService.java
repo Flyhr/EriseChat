@@ -772,6 +772,7 @@ public class ChatSocketService extends Service {
                 connected = true;
                 reconnectAttempt = 0;
                 lastStopReason = null;
+                // 重连后按新连接重新拉取会话状态：清掉旧连接暂存的候选，不补发（避免用过期的状态提醒）。
                 pendingCandidates.clear();
                 publishState();
                 updateForegroundNotification("正在接收新消息");

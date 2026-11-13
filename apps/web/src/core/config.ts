@@ -216,21 +216,37 @@ export function isPackagedShell(dev: boolean = Boolean(env.DEV)): boolean {
   return !dev && window.location.hostname === 'localhost'
 }
 
+/** 绝对地址且协议在允许集合内：单参数 `new URL` 解析，相对路径与协议相对地址（`//host`）都会失败。 */
+function isAbsoluteUrlWithProtocol(value: string, protocols: readonly string[]): boolean {
+  const trimmed = (value ?? '').trim()
+  if (!trimmed) return false
+  try {
+    const parsed = new URL(trimmed)
+    return protocols.includes(parsed.protocol) && parsed.hostname.length > 0
+  } catch {
+    return false
+  }
+}
+
 /**
- * 是否有可用的服务器地址（打包壳内不能指向壳自身）。
- * 打包壳的页面 origin 是壳自身（Electron `file://`、Android `http://localhost`）：
- * - 默认 `/api` 与按页面推导的 `ws://` 都会解析回壳地址，原生/主进程请求必然打到自己；
- * - 构建期配置了绝对 `VITE_API_BASE` / `VITE_WS_URL` 时，即使没保存服务器地址也可用；
- * - API 与 WS 都必须指向远端（ws 按 http 口径与页面 origin 比较）；
- * - 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要配置，始终返回 true。
+ * 实际交给原生服务的端点是否可用（打包壳内调用）。
+ * - API 必须是绝对 http(s) 地址，WS 必须是绝对 ws(s) 地址：原生侧没有页面基准，
+ *   相对路径、协议相对地址（`//host/ws`）与其他协议都无法被 OkHttp 使用；
+ * - 两者都不能指向壳自身（Electron `file://`、Android `http://localhost`），否则连接只会打到自己；
+ * - 同源部署（浏览器访问服务端静态页）与 Vite 开发态不需要这些约束，始终返回 true。
+ * 传参必须是实际交给插件的值：校验方按调用方补全后的地址判断会放行插件无法使用的端点。
  */
-export function hasUsableServer(packaged: boolean = isPackagedShell()): boolean {
+export function hasUsableServer(
+  apiBase: string,
+  wsUrl: string,
+  packaged: boolean = isPackagedShell(),
+): boolean {
   if (!packaged) return true
+  if (!isAbsoluteUrlWithProtocol(apiBase, ['http:', 'https:'])) return false
+  if (!isAbsoluteUrlWithProtocol(wsUrl, ['ws:', 'wss:'])) return false
   if (typeof window === 'undefined') return false
   const shellOrigin = window.location.origin
-  const apiKey = endpointKeyOf(resolveApiBase())
-  const wsKey = endpointKeyOf(resolveWsUrl())
-  return apiKey.length > 0 && apiKey !== shellOrigin && wsKey.length > 0 && wsKey !== shellOrigin
+  return endpointKeyOf(apiBase) !== shellOrigin && endpointKeyOf(wsUrl) !== shellOrigin
 }
 
 export interface ServerProbeResult {

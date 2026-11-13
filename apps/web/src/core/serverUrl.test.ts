@@ -157,7 +157,7 @@ describe('hasUsableServer', () => {
     } as unknown as Window)
   }
 
-  /** 临时改写构建期默认值，模拟 VITE_API_BASE / VITE_WS_URL 指向远端。 */
+  /** 临时改写构建期默认值，模拟 VITE_API_BASE / VITE_WS_URL。 */
   function withBuildTimeEndpoints(apiBase: string, wsUrl: string, run: () => void): void {
     const original = { apiBase: config.apiBase, wsUrl: config.wsUrl }
     config.apiBase = apiBase
@@ -170,20 +170,24 @@ describe('hasUsableServer', () => {
     }
   }
 
+  /** 与调用方一致：取实际交给插件的两个地址。 */
+  function endpoints(): [string, string] {
+    return [resolveAbsoluteApiBase(), resolveWsUrl()]
+  }
+
   it('非打包壳（同源部署 / Vite 开发）不需要配置服务器', () => {
-    expect(hasUsableServer(false)).toBe(true)
+    expect(hasUsableServer('/api', '/ws', false)).toBe(true)
   })
 
   it('打包壳未配置服务器时不可用：默认 /api 与按页面推导的 ws 都指回壳自身', () => {
     stubShell()
-    expect(resolveApiOrigin()).toBe('http://localhost')
-    expect(hasUsableServer(true)).toBe(false)
+    expect(hasUsableServer(...endpoints(), true)).toBe(false)
   })
 
   it('打包壳保存服务器地址后可用', () => {
     stubShell()
     setServerUrl('https://chat.example.com')
-    expect(hasUsableServer(true)).toBe(true)
+    expect(hasUsableServer(...endpoints(), true)).toBe(true)
   })
 
   it('桌面壳注入的地址同样算已配置', () => {
@@ -191,21 +195,32 @@ describe('hasUsableServer', () => {
       location: { href: 'http://localhost/', origin: 'http://localhost' },
       erisechatDesktop: { serverUrl: 'https://desktop.example.com' },
     } as unknown as Window)
-    expect(hasUsableServer(true)).toBe(true)
+    expect(hasUsableServer(...endpoints(), true)).toBe(true)
   })
 
   it('构建期配置了远端 API 与 WS 时可用（未保存服务器地址）', () => {
     stubShell()
     withBuildTimeEndpoints('https://chat.example.com/api', 'wss://chat.example.com/ws', () => {
       expect(getServerUrl()).toBe('')
-      expect(hasUsableServer(true)).toBe(true)
+      expect(hasUsableServer(...endpoints(), true)).toBe(true)
+    })
+  })
+
+  it('拒绝原生无法使用的端点：非 http(s) API、非 ws(s) WS、协议相对 WS', () => {
+    stubShell()
+    expect(hasUsableServer('file:///api', 'wss://chat.example.com/ws', true)).toBe(false)
+    withBuildTimeEndpoints('https://chat.example.com/api', 'ftp://chat.example.com/ws', () => {
+      expect(hasUsableServer(...endpoints(), true)).toBe(false)
+    })
+    withBuildTimeEndpoints('https://chat.example.com/api', '//chat.example.com/ws', () => {
+      expect(hasUsableServer(...endpoints(), true)).toBe(false)
     })
   })
 
   it('只有 API 指向远端、WS 仍在壳内时不可用', () => {
     stubShell()
     withBuildTimeEndpoints('https://chat.example.com/api', 'ws://localhost/ws', () => {
-      expect(hasUsableServer(true)).toBe(false)
+      expect(hasUsableServer(...endpoints(), true)).toBe(false)
     })
   })
 })

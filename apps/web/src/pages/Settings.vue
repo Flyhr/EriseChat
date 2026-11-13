@@ -608,7 +608,7 @@ function backgroundStartFailureMessage(result: BackgroundNotifyStartResult): str
     case 'channel_disabled':
       return '消息通知渠道已关闭，请在系统设置中开启'
     case 'server_unconfigured':
-      return '请先配置服务器地址后再开启'
+      return '请先配置有效的服务器地址后再开启'
     default:
       return '后台消息提醒开启失败'
   }
