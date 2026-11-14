@@ -493,6 +493,10 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("msg_type");
 
+                    b.Property<long?>("ReactionsUpdatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("reactions_updated_at");
+
                     b.Property<string>("ReplyTo")
                         .HasColumnType("TEXT")
                         .HasColumnName("reply_to");
@@ -527,6 +531,39 @@ namespace Chat.Server.Data.Migrations
                         {
                             t.HasCheckConstraint("ck_messages_msg_type", "msg_type IN ('text', 'image', 'file', 'voice', 'system')");
                         });
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.MessageReaction", b =>
+                {
+                    b.Property<string>("MessageId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("message_id");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("user_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Emoji")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("emoji");
+
+                    b.Property<long>("UpdatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("MessageId", "UserId");
+
+                    b.HasIndex("MessageId")
+                        .HasDatabaseName("idx_message_reactions_message");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("message_reactions", (string)null);
                 });
 
             modelBuilder.Entity("Chat.Server.Data.Entities.Session", b =>
@@ -816,6 +853,21 @@ namespace Chat.Server.Data.Migrations
                         .WithMany()
                         .HasForeignKey("SenderId")
                         .OnDelete(DeleteBehavior.ClientNoAction)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.MessageReaction", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.Message", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

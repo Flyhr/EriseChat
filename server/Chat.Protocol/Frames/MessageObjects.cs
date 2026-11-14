@@ -152,6 +152,7 @@ internal sealed class MessageContentJsonConverter : JsonConverter<MessageContent
 /// <param name="DeletedAt">撤回时间（UTC 毫秒）；非空表示已撤回，此时 content 为空文本且不带文件信息（F-18）。</param>
 /// <param name="Reply">回复引用摘要（可选，F-09）：仅当 replyTo 指向的消息存在时返回。</param>
 /// <param name="EditedAt">最近一次编辑时间（UTC 毫秒）；未编辑过则缺省（F-18）。</param>
+/// <param name="Reactions">表情回应摘要（可选，C3）：已撤回消息不返回；mine 按请求账号计算。</param>
 public sealed record Message(
     string MessageId,
     string ConversationId,
@@ -164,4 +165,5 @@ public sealed record Message(
     string? ReplyTo = null,
     long? DeletedAt = null,
     MessageReply? Reply = null,
-    long? EditedAt = null);
+    long? EditedAt = null,
+    IReadOnlyList<ReactionSummary>? Reactions = null);

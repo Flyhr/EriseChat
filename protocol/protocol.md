@@ -47,7 +47,7 @@
 - 认证完成前只接受 `auth` 帧；收到其它帧 → `error`（`AUTH_REQUIRED`）并关闭 `4002`。
 - `seq` 由服务端在事务内分配，客户端不得携带、不得修改；消息落库后不可变。
 
-## 3. 帧总表（与计划 §4.2 一一对应，共 23 个 type）
+## 3. 帧总表（与计划 §4.2 一一对应，共 24 个 type）
 
 | type | 方向 | 用途 | 备注 |
 |---|---|---|---|
@@ -62,6 +62,7 @@
 | `message.recalled` | S→C | 撤回广播 | 会话全部在线连接，含操作者连接（F-18） |
 | `message.edit` | C→S | 编辑文本消息 | 仅发送者本人、900 秒窗口内（F-18） |
 | `message.edited` | S→C | 编辑广播 | 会话全部在线连接，含操作者连接（F-18） |
+| `message.reactions` | S→C | 回应变化广播 | 会话全部在线连接；摘要共享、`mine` 按接收账号计算（C3） |
 | `sync.request` | C→S | 补拉请求 | 每会话携带 `lastSeq` |
 | `sync.response` | S→C | 补拉响应 | 每会话每批 ≤200 条 |
 | `conv.list` | 双向 | 会话列表 | C→S 请求 / S→C 返回全量 |
@@ -183,6 +184,7 @@
 | `createdAt` | integer | 是 | 创建时间（UTC 毫秒） |
 | `deletedAt` | integer | 否 | 撤回时间（UTC 毫秒）；非空表示已撤回，此时 `content` 为空文本、不再返回 `fileId` 等文件信息（F-18） |
 | `editedAt` | integer | 否 | 最近一次编辑时间（UTC 毫秒）；未编辑过则缺省（F-18） |
+| `reactions` | array | 否 | 表情回应摘要（C3）：`[{ "emoji", "count", "mine" }]`，`mine` 按请求账号计算；无回应或已撤回消息缺省（F-18 撤回后不再返回） |
 
 **Reply 对象（回复引用摘要，`Message.reply` / `message.ack.reply`，均可选）**：
 
@@ -267,6 +269,28 @@
 7. 历史分页与 `sync.response` 返回最新 `deletedAt` / `editedAt` / `content`；`sync.response` 另通过 `updates` 补齐 `updatedAfter` 之后的状态变化（撤回/编辑），见 §4.4。客户端进入会话时仍会拉取最新一页作为兜底，但不再依赖它补齐离线变更。
 8. `reply` 摘要：被引用消息已撤回时 `reply.text` 固定为「[已撤回]」、`messageId` 保留（点击可定位到占位行）。
 
+#### 消息表情回应（`message.reactions`，C3）
+
+`message.reactions`（S→C）：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `type` | string | 是 | 固定 `message.reactions` |
+| `conversationId` | string | 是 | 会话 ID |
+| `messageId` | string | 是 | 被回应消息 ID |
+| `seq` | integer | 是 | 被回应消息的会话内序号（回应不改变 `seq`） |
+| `reactions` | array | 是 | 最新摘要 `[{ "emoji", "count", "mine" }]`；空数组表示该消息已没有任何回应 |
+
+规则：
+
+1. 稳定表情标识由服务端白名单校验，新增只追加常量：`thumbs_up`、`heart`、`joy`、`wow`、`sad`、`tada`；显示（emoji 字形）由各端映射，协议不传字形。
+2. 每人对每条消息至多一条回应：选择其他表情即替换，再次选择同一表情幂等；取消即删除该行。界面上的「切换」由客户端转换成设置（PUT）或移除（DELETE）请求。
+3. 可回应对象：已落库、未撤回且 `msgType != system` 的消息；待发/发送失败、系统消息与已撤回消息不显示入口，服务端同样拒绝。
+4. 回应不是消息：不产生 `message.new`、不推进 `seq` / 已读 / 未读、不改会话排序、不触发 Web/Windows/Android 推送通知。
+5. 广播：变化成功后向该会话**全部在线连接（含操作者连接）**下发 `message.reactions`；摘要共享、`mine` 按接收账号计算，因此不同连接收到的帧内容可以不同。离线成员重连后由历史/同步补齐。
+6. 历史分页、搜索、定位上下文与 `sync.response` 的 Message 对象带 `reactions`（本人视角）；已撤回消息不返回 `reactions`，也不能再修改。`sync.response` 的 `updates` 也覆盖回应变化，见 §4.4。
+7. 失去成员资格后不能读取或修改该会话的回应；缓存与已打开界面由既有会话失权清理路径处理。
+
 
 
 ### 4.4 `sync.request` / `sync.response`（补拉同步）
@@ -302,7 +326,7 @@ batch 对象：
 |---|---|---|---|
 | `conversationId` | string | 是 | 会话 ID |
 | `messages` | array | 是 | Message 数组，按 `seq` **升序**；每条 `seq > lastSeq` |
-| `updates` | array | 否 | 状态变化消息：该会话中 `edited_at`/`deleted_at` 晚于 `updatedAfter` 的消息；`seq` 不变，仅用于覆盖本地缓存；缺省表示没有 |
+| `updates` | array | 否 | 状态变化消息：该会话中 `edited_at` / `deleted_at` / `reactions_updated_at` 晚于 `updatedAfter` 的消息（C3 起含回应变化）；`seq` 不变，仅用于覆盖本地缓存；缺省表示没有 |
 | `updatedThrough` | integer | 否 | 下次请求可用的 `updatedAfter`（服务端时钟，UTC 毫秒） |
 
 规则：
@@ -312,7 +336,7 @@ batch 对象：
 3. `lastSeq` 必须满足 `0 ≤ lastSeq ≤ 会话当前 lastSeq`，否则回 `error`（`VALIDATION_FAILED`）。
 4. `sync.request` 是只读操作，可重复调用；客户端仍需按 `messageId` 去重、按 `seq` 排序。
 5. 补拉只返回消息，不返回会话元数据；会话元数据由 `conv.list` / `conv.updated` 维护。
-6. `cursors[].updatedAfter`（F-34）用于补齐已缓存消息的撤回/编辑：服务端把 `edited_at` 或 `deleted_at` 晚于该时间的消息放入对应 batch 的 `updates`，按状态变更时间升序，随批一次性返回（状态变化量远小于消息量，不参与 `messages` 的每批 ≤200 条分页）。`updates` 中的消息 `seq` 不变，客户端只能按 `messageId` 覆盖已缓存消息，不得据此新增或重排消息。
+6. `cursors[].updatedAfter`（F-34）用于补齐已缓存消息的撤回/编辑（C3 起还包含回应新增、替换与取消）：服务端把 `edited_at`、`deleted_at` 或 `reactions_updated_at` 晚于该时间的消息放入对应 batch 的 `updates`，按状态变更时间升序，随批一次性返回（状态变化量远小于消息量，不参与 `messages` 的每批 ≤200 条分页）。`updates` 中的消息 `seq` 不变，客户端只能按 `messageId` 覆盖已缓存消息，不得据此新增或重排消息。回应恢复不依赖聊天消息 `seq` 前进：断线期间没有新消息、只要回应变化，`updates` 也会返回该消息；最后一个回应被移除时 `reactions` 为空数组，客户端据此清空本地缓存，而不是保留旧摘要。
 7. 客户端收到 batch 后把本会话 `updatedAfter` 更新为 `updatedThrough`（即使 `updates` 为空；缺省表示未请求状态同步）。`updatedThrough` 由服务端时钟产生，客户端不得使用本地时钟。
 8. 只有 `messages` 与 `updates` 都为空的会话不返回 batch；`hasMore` 仍只描述 `messages`（seq 补拉）是否还有更早未返回消息。
 
@@ -738,6 +762,16 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 链接规则：只扫描 text 消息，单个扫描窗口最多 200 条含 `http` 的候选消息（硬上限 400），页内按 URL 去重；URL 去掉尾部标点；`hasMore` 为 true 时按 `nextBeforeSeq` / `nextBeforeOffset` 继续翻页，没有有效链接的区间由同一个请求跨窗口继续扫描（单次最多 2000 条候选消息）。
     - 前端只负责展示与分页，不新增帧、不改库表；撤回、成员被移除后旧结果由既有消息与文件鉴权拦截。
 
+18. **消息表情回应（REST，v1，C3）**：每个账号对每条消息至多一个回应；界面上的「切换」由客户端转换成显式设置（PUT）或移除（DELETE），两者均幂等。回应不产生消息、不推进 `seq` / 已读 / 未读、不改会话排序、不触发系统通知；转发得到的是新消息，回应从空开始。
+
+    - `PUT /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`：请求体 `{ "reaction": "thumbs_up" }`；设置或替换我的回应，返回 `{ "reactions": [ { "emoji", "count", "mine" } ] }`（本人视角最新摘要）。
+    - `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`：移除我的回应；没有回应时幂等返回当前摘要（`200`）。
+    - 稳定表情标识（服务端白名单）：`thumbs_up`、`heart`、`joy`、`wow`、`sad`、`tada`；显示字形由客户端映射，协议不传 emoji 字形。
+    - 校验：表情不在白名单 → `VALIDATION_FAILED`（400）；消息不存在、不属于该会话或已撤回 → `NOT_FOUND`（404）；`system` 消息 → `VALIDATION_FAILED`（400）；非会话成员 → `NOT_MEMBER`（403）。
+    - 幂等与并发：相同表情重复 PUT、重复 DELETE 不重复写库也不重复广播；不同用户同时回应各自保留；同一用户并发设置由 `(message_id, user_id)` 主键保证最终只有一条。
+    - 实时：变化成功后向该会话全部在线连接广播 `message.reactions`（摘要共享、`mine` 按接收账号计算）；离线成员重连后由历史/同步拿最新摘要，撤回后不可再修改。
+    - 历史、搜索、定位上下文与补拉的 Message 对象均带 `reactions`（本人视角）；已撤回消息不返回回应。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -825,3 +859,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C2a 多图发送） | 2026-11-14 | FileContent 追加三个**可选**字段：`width` / `height`（image 消息的像素尺寸，1~20000，客户端用于预留占位，服务端只做范围校验）与 `albumId`（相册批次标识，8~64 位字母/数字/`-`/`_`，同一次确认发送的多张图片共享，服务端只做格式校验）；`file` 消息忽略这三个字段；旧客户端不传字段照常发送并逐图显示，旧服务端忽略未知字段；多图仍是多条独立 `message.send`（各自 `clientMsgId`、`seq` 与发送状态），服务端不合并、不改 `messages` 表结构、`messages.file_id` 语义不变；重连补拉按 `seq` 逐条还原，`albumId` 相同的相邻图片可还原为同一批次；单张失败只重试该条（复用已上传 `fileId` 与原 `clientMsgId`，不产生重复消息）；无新帧（`type` 仍 23 个） |
 | v1（C2c 会话共享媒体） | 2026-11-14 | 新增 REST `GET /api/conversations/{conversationId}/links`（从 text 消息提取 HTTP(S) 链接、按 `seq` 倒序分页，返回 `{ items: [{ url, messageId, messageSeq, senderId, createdAt }], hasMore }`，单页最多扫描 200 条含 `http` 的候选消息、页内按 URL 去重）；既有 `GET .../files` 起过滤已撤回消息（`deleted_at` 非空的行不再出现，下载仍被文件接口拒绝）；分页游标 `beforeSeq` 排他、`limit` 1~100 默认 50；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C2c 修订：共享链接游标） | 2026-11-14 | `GET /api/conversations/{conversationId}/links` 改为 `(beforeSeq, beforeOffset)` 组合游标，响应新增 `nextBeforeSeq` / `nextBeforeOffset`：只在 `seq` 等于 `beforeSeq` 的消息内从第 `beforeOffset` 个链接继续取，同一条消息里的多个链接可分页取完；没有有效链接的区间由服务端在同一请求内继续跨过（单次最多扫描 2000 条含 `http` 的候选消息）；只传 `beforeSeq` 的旧客户端保持「`seq` 小于 `beforeSeq`」语义；`files` 接口与撤回过滤不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（C3 消息表情回应） | 2026-11-14 | 新增 1 个帧（共 24 个 type）：`message.reactions`（S→C，摘要 `{ emoji, count, mine }`，摘要共享、`mine` 按接收账号计算，空数组表示已无回应）；Message 新增可选 `reactions`；新增 REST `PUT` / `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`（白名单 `thumbs_up`/`heart`/`joy`/`wow`/`sad`/`tada`，每人每消息至多一条，均幂等）；`messages` 新增 `reactions_updated_at INTEGER` 列，新增 `message_reactions` 表（主键 `(message_id, user_id)`）；`sync.response` 的 `updates` 起覆盖回应新增/替换/取消，恢复不依赖消息 `seq`，移除最后一个回应时返回空数组；回应不产生消息、不推进 `seq`/已读/未读、不改会话排序、不推送系统通知；`protocolVersion` 仍为 1 |

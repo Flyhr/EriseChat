@@ -43,7 +43,67 @@ public static class MessageEndpoints
             .RequireAuthorization()
             .Produces<Message>();
 
+        // C3：设置/移除我的表情回应（显式 PUT/DELETE，均幂等；界面上的「切换」由前端转换成两种请求）。
+        // 其中 PUT 重复相同表情、DELETE 重复移除都返回当前摘要且不重复广播。
+        app.MapPut("/api/conversations/{conversationId}/messages/{messageId}/reactions/mine", SetReactionAsync)
+            .WithName("SetMessageReaction")
+            .RequireAuthorization()
+            .Produces<MessageReactionsResponse>();
+
+        app.MapDelete("/api/conversations/{conversationId}/messages/{messageId}/reactions/mine", RemoveReactionAsync)
+            .WithName("RemoveMessageReaction")
+            .RequireAuthorization()
+            .Produces<MessageReactionsResponse>();
+
         return app;
+    }
+
+    /// <summary>C3：设置回应请求体；reaction 为稳定表情标识（服务端白名单校验）。</summary>
+    public sealed record SetReactionRequest(string? Reaction);
+
+    /// <summary>C3：当前账号视角的消息回应摘要（空数组表示该消息没有任何回应）。</summary>
+    public sealed record MessageReactionsResponse(IReadOnlyList<ReactionSummary> Reactions);
+
+    private static async Task<IResult> SetReactionAsync(
+        string conversationId,
+        string messageId,
+        SetReactionRequest request,
+        ClaimsPrincipal principal,
+        MessageService messages,
+        MessageHub hub,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        var result = await messages.SetReactionAsync(
+            userId,
+            conversationId,
+            messageId,
+            request.Reaction,
+            cancellationToken);
+        if (result.Changed)
+        {
+            await hub.BroadcastReactionsAsync(result);
+        }
+
+        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId]));
+    }
+
+    private static async Task<IResult> RemoveReactionAsync(
+        string conversationId,
+        string messageId,
+        ClaimsPrincipal principal,
+        MessageService messages,
+        MessageHub hub,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        var result = await messages.RemoveReactionAsync(userId, conversationId, messageId, cancellationToken);
+        if (result.Changed)
+        {
+            await hub.BroadcastReactionsAsync(result);
+        }
+
+        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId]));
     }
 
     private static async Task<IResult> GetHistoryAsync(

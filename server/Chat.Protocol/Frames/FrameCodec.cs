@@ -143,6 +143,8 @@ public static class FrameCodec
         FrameTypes.MessageRecalled => element.Deserialize<MessageRecalledFrame>(JsonOptions),
         FrameTypes.MessageEdit => element.Deserialize<MessageEditFrame>(JsonOptions),
         FrameTypes.MessageEdited => element.Deserialize<MessageEditedFrame>(JsonOptions),
+        // C3：消息回应变化广播（S→C）。
+        FrameTypes.MessageReactions => element.Deserialize<MessageReactionsFrame>(JsonOptions),
         FrameTypes.SyncRequest => element.Deserialize<SyncRequestFrame>(JsonOptions),
         FrameTypes.SyncResponse => element.Deserialize<SyncResponseFrame>(JsonOptions),
         // conv.list 双向同 type：S→C 响应带 conversations，C→S 请求不带（protocol.md §4.5）。

@@ -42,6 +42,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<GroupInviteLink> GroupInviteLinks => Set<GroupInviteLink>();
 
+    public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -52,6 +54,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureConversations(modelBuilder);
         ConfigureConversationMembers(modelBuilder);
         ConfigureMessages(modelBuilder);
+        ConfigureMessageReactions(modelBuilder);
         ConfigureFiles(modelBuilder);
         ConfigureInvites(modelBuilder);
         ConfigureAdminAuditLogs(modelBuilder);
@@ -243,6 +246,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.Property(message => message.CreatedAt).HasColumnName("created_at");
             entity.Property(message => message.DeletedAt).HasColumnName("deleted_at");
             entity.Property(message => message.EditedAt).HasColumnName("edited_at");
+            entity.Property(message => message.ReactionsUpdatedAt).HasColumnName("reactions_updated_at");
 
             entity.HasIndex(message => new { message.ConversationId, message.ClientMsgId }).IsUnique();
             entity.HasIndex(message => new { message.ConversationId, message.Seq })
@@ -262,6 +266,31 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.HasOne<Message>().WithMany()
                 .HasForeignKey(message => message.ReplyTo)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+    }
+
+    private static void ConfigureMessageReactions(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MessageReaction>(entity =>
+        {
+            entity.ToTable("message_reactions");
+
+            // 每人对每条消息至多一条：选择其他表情即替换本行，取消即删除本行（C3）。
+            entity.HasKey(reaction => new { reaction.MessageId, reaction.UserId });
+            entity.Property(reaction => reaction.MessageId).HasColumnName("message_id").IsRequired();
+            entity.Property(reaction => reaction.UserId).HasColumnName("user_id").IsRequired();
+            entity.Property(reaction => reaction.Emoji).HasColumnName("emoji").IsRequired();
+            entity.Property(reaction => reaction.CreatedAt).HasColumnName("created_at");
+            entity.Property(reaction => reaction.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(reaction => reaction.MessageId).HasDatabaseName("idx_message_reactions_message");
+
+            entity.HasOne<Message>().WithMany()
+                .HasForeignKey(reaction => reaction.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(reaction => reaction.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 

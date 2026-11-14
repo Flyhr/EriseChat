@@ -159,6 +159,7 @@ CREATE INDEX idx_conversation_members_user_id ON conversation_members (user_id);
 --                 孤儿清理兜底；下载鉴权与孤儿清理都依赖本列（M3-01）
 -- reply_to      : 被回复消息 ID（自引用）
 -- deleted_at    : 预留（v1 不做撤回，恒为 NULL；P2 撤回使用）
+-- reactions_updated_at : 回应最近变更时间（C3）：只用于 sync 增量补拉，不参与排序与未读统计
 -- ------------------------------------------------------------
 CREATE TABLE messages (
     id              TEXT PRIMARY KEY NOT NULL,
@@ -173,6 +174,7 @@ CREATE TABLE messages (
     created_at      INTEGER NOT NULL,
     deleted_at      INTEGER,
     edited_at       INTEGER,
+    reactions_updated_at INTEGER,
     UNIQUE (conversation_id, client_msg_id),
     FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users (id),
@@ -323,3 +325,23 @@ CREATE TABLE group_invite_links (
 );
 
 CREATE INDEX idx_group_invite_links_conversation ON group_invite_links (conversation_id);
+
+-- ------------------------------------------------------------
+-- message_reactions：消息表情回应（C3）
+-- message_id : 被回应的消息（撤回后行保留，读取时按消息状态过滤/隐藏）
+-- user_id    : 回应者；(message_id, user_id) 复合主键保证每人对每条消息至多一条
+-- emoji      : 稳定表情标识（服务端白名单校验；渲染由客户端映射）
+-- 说明：选择其他表情即替换本行，取消即删除本行；回应不产生消息、不推进 seq/已读/未读。
+-- ------------------------------------------------------------
+CREATE TABLE message_reactions (
+    message_id TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
+    emoji      TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id),
+    FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_message_reactions_message ON message_reactions (message_id);

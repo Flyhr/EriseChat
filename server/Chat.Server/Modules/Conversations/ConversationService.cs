@@ -1191,8 +1191,14 @@ public sealed class ConversationService
             .ToList();
     }
 
-    /// <summary>messages 实体 → 协议 Message 对象（content_json 原样解析为两态 content；reply 为可选的引用摘要）。</summary>
-    public static Message ToProtocolMessage(MessageEntity message, MessageReply? reply = null)
+    /// <summary>
+    /// messages 实体 → 协议 Message 对象（content_json 原样解析为两态 content；
+    /// reply 为可选的引用摘要；reactions 为可选的表情回应摘要（已撤回消息不返回，C3））。
+    /// </summary>
+    public static Message ToProtocolMessage(
+        MessageEntity message,
+        MessageReply? reply = null,
+        IReadOnlyList<ReactionSummary>? reactions = null)
     {
         using var document = JsonDocument.Parse(message.ContentJson);
         return new Message(
@@ -1207,7 +1213,8 @@ public sealed class ConversationService
             message.ReplyTo,
             message.DeletedAt,
             reply,
-            message.EditedAt);
+            message.EditedAt,
+            message.DeletedAt is null ? reactions : null);
     }
 
     /// <summary>

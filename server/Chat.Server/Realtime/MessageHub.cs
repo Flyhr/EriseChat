@@ -341,6 +341,22 @@ public sealed class MessageHub
         _notifier.PushUpdatedPerRecipient(perRecipient);
     }
 
+    /// <summary>
+    /// C3：回应变化后向会话内所有在线连接推送最新摘要（mine 按接收账号各自计算）；
+    /// 同账号的多端连接同样收到。个别连接发送失败只跳过，不影响 REST 结果。
+    /// </summary>
+    public async Task BroadcastReactionsAsync(MessageReactionResult result)
+    {
+        foreach (var (userId, reactions) in result.SummariesByUser)
+        {
+            var frame = new MessageReactionsFrame(result.ConversationId, result.MessageId, result.Seq, reactions);
+            foreach (var connection in _connections.GetConnections(userId))
+            {
+                await TrySendAsync(connection, frame);
+            }
+        }
+    }
+
     private async Task<int> BroadcastToAllAsync(IReadOnlyList<string> memberUserIds, FrameEnvelope frame)
     {
         var sent = 0;

@@ -39,6 +39,9 @@ public static class FrameTypes
     /// <summary>编辑消息广播/回执（S→C，F-18）。</summary>
     public const string MessageEdited = "message.edited";
 
+    /// <summary>消息回应变化广播（S→C，C3）：按接收账号计算 mine。</summary>
+    public const string MessageReactions = "message.reactions";
+
     /// <summary>补拉请求（C→S）。</summary>
     public const string SyncRequest = "sync.request";
 
