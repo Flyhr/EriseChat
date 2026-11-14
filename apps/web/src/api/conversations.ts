@@ -42,6 +42,21 @@ export interface GroupProfileUpdate {
 /** 共享文件类型（F-15）：与消息 msgType 对应。 */
 export type SharedFileType = 'image' | 'file'
 
+/** 共享链接条目（C2c）：一条链接及其所在的 text 消息，按消息 seq 倒序。 */
+export interface SharedLinkItem {
+  url: string
+  messageId: string
+  messageSeq: number
+  senderId: string
+  createdAt: number
+}
+
+/** 共享链接分页（C2c）：items 按 messageSeq 降序；beforeSeq 为排他游标。 */
+export interface SharedLinksPage {
+  items: SharedLinkItem[]
+  hasMore: boolean
+}
+
 /** 共享文件条目（F-15）：每个文件取其在会话中最新引用的消息（messageSeq 最大）。 */
 export interface SharedFileItem {
   fileId: string
@@ -143,6 +158,23 @@ export const conversationsApi = {
     if (options.limit !== undefined) params.set('limit', String(options.limit))
     return http.get<SharedFilesPage>(
       `/conversations/${conversationId}/files?${params.toString()}`,
+    )
+  },
+
+  /**
+   * 会话共享链接分页（C2c）：需登录且为会话成员；limit 1~100（默认 50），
+   * beforeSeq 为排他游标（传上一页最后一项的 messageSeq 继续向前翻）。
+   */
+  listLinks: (
+    conversationId: string,
+    options: { beforeSeq?: number; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams()
+    if (options.beforeSeq !== undefined) params.set('beforeSeq', String(options.beforeSeq))
+    if (options.limit !== undefined) params.set('limit', String(options.limit))
+    const query = params.toString()
+    return http.get<SharedLinksPage>(
+      `/conversations/${conversationId}/links${query ? `?${query}` : ''}`,
     )
   },
 }

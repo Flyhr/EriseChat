@@ -13,11 +13,15 @@ const props = defineProps<{
   index: number
   /** 当前图是否正在加载（区分「加载中」与「加载失败」）。 */
   loading?: boolean
+  /** 是否显示「定位原消息」动作（C2c：会话媒体面板使用）。 */
+  canLocate?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   'update:index': [index: number]
+  /** 请求定位到当前图片所在消息（C2c）。 */
+  locate: [messageId: string]
 }>()
 
 /** 预览打开时压入 history 哨兵：Android 返回/浏览器后退先关预览（UI-04 批次3）。 */
@@ -222,6 +226,14 @@ onBeforeUnmount(() => {
           @click="zoom(1)"
         >
           +
+        </button>
+        <button
+          v-if="props.canLocate && current"
+          type="button"
+          class="image-preview__button"
+          @click="emit('locate', current.messageId)"
+        >
+          定位原消息
         </button>
         <a
           v-if="current?.url"

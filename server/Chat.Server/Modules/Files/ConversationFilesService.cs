@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using Chat.Protocol;
 using Chat.Server.Common.Errors;
 using Chat.Server.Data;
@@ -21,6 +23,17 @@ public sealed record ConversationFileItem(
 /// <summary>共享文件分页（items 按 messageSeq 降序；hasMore 表示还有更早的引用）。</summary>
 public sealed record ConversationFilesPage(IReadOnlyList<ConversationFileItem> Items, bool HasMore);
 
+/// <summary>共享链接条目（C2c）：一条链接及其所在的 text 消息，按消息 seq 倒序分页。</summary>
+public sealed record ConversationLinkItem(
+    string Url,
+    string MessageId,
+    long MessageSeq,
+    string SenderId,
+    long CreatedAt);
+
+/// <summary>共享链接分页（items 按 messageSeq 降序；hasMore 表示还有更早的链接）。</summary>
+public sealed record ConversationLinksPage(IReadOnlyList<ConversationLinkItem> Items, bool HasMore);
+
 /// <summary>
 /// 会话共享文件汇总（F-15）：只统计 messages.file_id 非空的 image/file 消息，
 /// 按文件去重取最新一条引用消息（max seq），以该 seq 作为 beforeSeq 游标倒序分页。
@@ -33,6 +46,13 @@ public sealed class ConversationFilesService
     private const int MaxLimit = 100;
     private const int MaxIdLength = 64;
     private const int FileIdLogPrefixLength = 6;
+    /// <summary>链接汇总单页最多扫描的消息数，避免链接稀疏时全表扫描。</summary>
+    private const int MaxLinkScanWindow = 400;
+
+    /// <summary>HTTP/HTTPS URL 识别（与消息搜索 linkOnly 的识别规则一致）。</summary>
+    private static readonly Regex HttpUrlPattern = new(
+        @"https?://[^\s<>`）】]+",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly ChatDbContext _db;
     private readonly ILogger<ConversationFilesService> _logger;
@@ -54,11 +74,7 @@ public sealed class ConversationFilesService
         int? limit,
         CancellationToken cancellationToken)
     {
-        var id = (conversationId ?? string.Empty).Trim();
-        if (id.Length == 0 || id.Length > MaxIdLength)
-        {
-            throw ApiException.ValidationFailed("conversationId 不合法");
-        }
+        var id = await EnsureConversationMemberAsync(userId, conversationId, cancellationToken);
 
         var messageType = ParseType(type);
         var pageSize = NormalizeLimit(limit);
@@ -67,27 +83,13 @@ public sealed class ConversationFilesService
             throw ApiException.ValidationFailed("beforeSeq 必须是正整数");
         }
 
-        var exists = await _db.Conversations.AsNoTracking()
-            .AnyAsync(conversation => conversation.Id == id, cancellationToken);
-        if (!exists)
-        {
-            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
-        }
-
-        var isMember = await _db.ConversationMembers.AsNoTracking()
-            .AnyAsync(
-                member => member.ConversationId == id && member.UserId == userId,
-                cancellationToken);
-        if (!isMember)
-        {
-            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
-        }
-
         // 1) 按文件去重取最新引用 seq，倒序后再按 beforeSeq 过滤。
         // 注意：必须「先聚合出每个文件的 max seq，再过滤游标」，否则同一文件在旧页出现过引用时
         // 下一页会以更早的 seq 再次出现（重复项）。
+        // 撤回消息不再计入共享列表（FileId 仍保留在行上供孤儿清理，只能在消息层过滤）。
         var groups = await _db.Messages.AsNoTracking()
-            .Where(message => message.ConversationId == id && message.FileId != null && message.MsgType == messageType)
+            .Where(message => message.ConversationId == id && message.FileId != null &&
+                              message.MsgType == messageType && message.DeletedAt == null)
             .GroupBy(message => message.FileId!)
             .Select(group => new { FileId = group.Key, Seq = group.Max(message => message.Seq) })
             .OrderByDescending(item => item.Seq)
@@ -142,6 +144,136 @@ public sealed class ConversationFilesService
         }
 
         return new ConversationFilesPage(items, hasMore);
+    }
+
+    /// <summary>
+    /// 分页查询会话内共享链接（C2c）：从 text 消息里提取 HTTP(S) 链接，按消息 seq 倒序。
+    /// 会话不存在 404、非成员 403、非法 beforeSeq/limit 400；单页最多扫描 <see cref="MaxLinkScanWindow"/> 条候选消息。
+    /// </summary>
+    public async Task<ConversationLinksPage> GetSharedLinksAsync(
+        string userId,
+        string conversationId,
+        long? beforeSeq,
+        int? limit,
+        CancellationToken cancellationToken)
+    {
+        var id = await EnsureConversationMemberAsync(userId, conversationId, cancellationToken);
+        var pageSize = NormalizeLimit(limit);
+        if (beforeSeq is <= 0)
+        {
+            throw ApiException.ValidationFailed("beforeSeq 必须是正整数");
+        }
+
+        var scanWindow = Math.Max(pageSize, Math.Min(pageSize * 4, MaxLinkScanWindow));
+        var query = _db.Messages.AsNoTracking()
+            .Where(message => message.ConversationId == id && message.MsgType == MessageType.Text &&
+                              message.DeletedAt == null && message.ContentJson.Contains("http"));
+        if (beforeSeq is not null)
+        {
+            query = query.Where(message => message.Seq < beforeSeq.Value);
+        }
+
+        var rows = await query
+            .OrderByDescending(message => message.Seq)
+            .Take(scanWindow + 1)
+            .ToListAsync(cancellationToken);
+        var truncated = rows.Count > scanWindow;
+        if (truncated)
+        {
+            rows.RemoveAt(rows.Count - 1);
+        }
+
+        var items = new List<ConversationLinkItem>(pageSize);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var hasMore = false;
+        foreach (var message in rows)
+        {
+            foreach (var url in ExtractHttpUrls(message.ContentJson))
+            {
+                if (!seen.Add(url))
+                {
+                    continue;
+                }
+
+                if (items.Count >= pageSize)
+                {
+                    hasMore = true;
+                    break;
+                }
+
+                items.Add(new ConversationLinkItem(url, message.Id, message.Seq, message.SenderId, message.CreatedAt));
+            }
+
+            if (hasMore)
+            {
+                break;
+            }
+        }
+
+        // 没有条目时不回报 hasMore：客户端没有下一页游标，空页 + hasMore 会陷入重复请求。
+        return new ConversationLinksPage(items, (hasMore || truncated) && items.Count > 0);
+    }
+
+    /// <summary>校验会话存在且当前用户是成员，返回 trim 后的会话 ID（共享文件/链接共用）。</summary>
+    private async Task<string> EnsureConversationMemberAsync(
+        string userId,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        var id = (conversationId ?? string.Empty).Trim();
+        if (id.Length == 0 || id.Length > MaxIdLength)
+        {
+            throw ApiException.ValidationFailed("conversationId 不合法");
+        }
+
+        var exists = await _db.Conversations.AsNoTracking()
+            .AnyAsync(conversation => conversation.Id == id, cancellationToken);
+        if (!exists)
+        {
+            throw new ApiException(ErrorCodes.NotFound, "会话不存在", StatusCodes.Status404NotFound);
+        }
+
+        var isMember = await _db.ConversationMembers.AsNoTracking()
+            .AnyAsync(
+                member => member.ConversationId == id && member.UserId == userId,
+                cancellationToken);
+        if (!isMember)
+        {
+            throw new ApiException(ErrorCodes.NotMember, "你不是该会话成员", StatusCodes.Status403Forbidden);
+        }
+
+        return id;
+    }
+
+    /// <summary>从 text 消息的 contentJson 中提取 HTTP(S) 链接，去掉尾部标点（与消息搜索 linkOnly 口径一致）。</summary>
+    private static IEnumerable<string> ExtractHttpUrls(string contentJson)
+    {
+        string? text;
+        try
+        {
+            text = JsonSerializer.Deserialize<string>(contentJson);
+        }
+        catch (JsonException)
+        {
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            yield break;
+        }
+
+        foreach (Match match in HttpUrlPattern.Matches(text))
+        {
+            var url = match.Value.TrimEnd(
+                '.', ',', ';', ':', '!', '?', ')', ']', '}', '>', '"', '\'', '。', '，', '；', '：', '！', '？', '）', '】', '》');
+            if (url.Length <= "https://".Length)
+            {
+                continue;
+            }
+
+            yield return url;
+        }
     }
 
     private static MessageType ParseType(string? type)

@@ -23,6 +23,8 @@ const emit = defineEmits<{
   updated: [conversation: Conversation]
   left: [conversationId: string]
   'open-chat': [conversationId: string]
+  /** 请求在聊天区定位到指定消息（C2c：共享媒体面板）。 */
+  'locate-message': [messageId: string]
 }>()
 
 const isGroup = computed(() => props.conversation?.type === 'group')
@@ -101,6 +103,7 @@ function onKeydown(event: KeyboardEvent): void {
         <ConversationFilesPanel
           v-else-if="tab === 'files'"
           :conversation-id="conversation.conversationId"
+          @locate-message="emit('locate-message', $event)"
         />
       </div>
     </aside>

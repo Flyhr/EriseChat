@@ -730,6 +730,14 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 兑换校验：令牌不存在或对应群不存在 → `INVITE_INVALID`（404）；已撤销 → `INVITE_REVOKED`（410）；已过期 → `INVITE_EXPIRED`（410）；发起人已不在群、或 `GroupOnlyOwnerCanInvite` 下发起人已非群主 → `INVITE_INVALID`（403）；兑换者与发起人存在拉黑关系 → `BLOCKED`（403）；群成员数已达 `App:GroupMaxMembers` → `VALIDATION_FAILED`（400）。成员插入与系统消息在同一事务内完成，事务内重读成员数，重复/并发兑换不产生重复成员行。
     - 加入成功后写系统消息 `member.joined`（text 为「{昵称} 通过邀请链接加入群聊」），并按既有 `message.new` + `conv.updated` 推送；不新增帧类型。链接过期不自动续期。
 
+17. **会话共享媒体与链接（REST，v1，C2c）**：会话详情的「媒体／文件／链接」复用既有共享文件接口，并新增共享链接汇总；两者都只返回**未撤回**消息的附件/链接（撤回后立即从列表消失，下载仍由文件接口的撤回校验拒绝）。
+
+    - `GET /api/conversations/{conversationId}/files?type=image|file&beforeSeq&limit`（既有 F-15，本次起过滤 `deleted_at` 非空的消息）：返回 `{ "items": [ { "fileId", "name", "size", "mime", "messageId", "messageSeq", "senderId", "createdAt" } ], "hasMore" }`，同一 `fileId` 只保留最新引用的消息。
+    - `GET /api/conversations/{conversationId}/links?beforeSeq&limit`：从 text 消息中提取 HTTP(S) 链接，按消息 `seq` 倒序分页；返回 `{ "items": [ { "url", "messageId", "messageSeq", "senderId", "createdAt" } ], "hasMore" }`。
+    - 分页：`beforeSeq` 为排他游标（传上一页最后一项的 `messageSeq`）；`limit` 为 1~100，缺省 50；会话不存在 `NOT_FOUND`（404）、非成员 `NOT_MEMBER`（403）、游标非法 `VALIDATION_FAILED`（400）。
+    - 链接规则：只扫描 text 消息，单页最多扫描 200 条含 `http` 的候选消息（硬上限 400），页内按 URL 去重；URL 去掉尾部标点；没有条目时不返回 `hasMore`（避免空页无法前进）。
+    - 前端只负责展示与分页，不新增帧、不改库表；撤回、成员被移除后旧结果由既有消息与文件鉴权拦截。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -815,3 +823,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C1c 群邀请链接） | 2026-11-14 | 新增 `group_invite_links` 表（`token` 主键、`conversation_id`、`created_by`、`expires_at`、`revoked_at`、`created_at`、`idx_group_invite_links_conversation`，`protocol/schema.sql` 与 EF 迁移同步）与 5 个 REST 接口（创建/列出/撤销、预览、兑换加入）；新增错误码 `INVITE_REVOKED`（410）；令牌为 32 字节 base64url 随机串、不含邮箱、日志不记录，默认 7 天有效；兑换时校验撤销/有效期/发起人当前权限/拉黑关系/群容量，成员插入与系统消息同事务且重复/并发兑换幂等；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
 | v1（C1 会话成员邮箱收敛） | 2026-11-14 | 会话对象 `members[]` 的 `email` 字段不再下发（字段省略）：`GET/POST /api/conversations`、成员变更响应、WS `conv.list`/`conv.updated` 使用同一投影，均受影响；好友对象 `Friend.email` 与本人 `/api/me` 不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C2a 多图发送） | 2026-11-14 | FileContent 追加三个**可选**字段：`width` / `height`（image 消息的像素尺寸，1~20000，客户端用于预留占位，服务端只做范围校验）与 `albumId`（相册批次标识，8~64 位字母/数字/`-`/`_`，同一次确认发送的多张图片共享，服务端只做格式校验）；`file` 消息忽略这三个字段；旧客户端不传字段照常发送并逐图显示，旧服务端忽略未知字段；多图仍是多条独立 `message.send`（各自 `clientMsgId`、`seq` 与发送状态），服务端不合并、不改 `messages` 表结构、`messages.file_id` 语义不变；重连补拉按 `seq` 逐条还原，`albumId` 相同的相邻图片可还原为同一批次；单张失败只重试该条（复用已上传 `fileId` 与原 `clientMsgId`，不产生重复消息）；无新帧（`type` 仍 23 个） |
+| v1（C2c 会话共享媒体） | 2026-11-14 | 新增 REST `GET /api/conversations/{conversationId}/links`（从 text 消息提取 HTTP(S) 链接、按 `seq` 倒序分页，返回 `{ items: [{ url, messageId, messageSeq, senderId, createdAt }], hasMore }`，单页最多扫描 200 条含 `http` 的候选消息、页内按 URL 去重）；既有 `GET .../files` 起过滤已撤回消息（`deleted_at` 非空的行不再出现，下载仍被文件接口拒绝）；分页游标 `beforeSeq` 排他、`limit` 1~100 默认 50；无新帧、不改库表、`protocolVersion` 仍为 1 |

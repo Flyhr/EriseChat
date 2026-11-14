@@ -76,6 +76,12 @@ public static class ConversationsEndpoints
             .RequireAuthorization()
             .Produces<ConversationFilesPage>();
 
+        // C2c：会话共享链接汇总（只读分页；beforeSeq、limit）。
+        app.MapGet("/api/conversations/{conversationId}/links", GetSharedLinksAsync)
+            .WithName("ListConversationLinks")
+            .RequireAuthorization()
+            .Produces<ConversationLinksPage>();
+
         return app;
     }
 
@@ -380,6 +386,24 @@ public static class ConversationsEndpoints
             userId,
             conversationId,
             type,
+            beforeSeq,
+            limit,
+            cancellationToken);
+        return Results.Json(page);
+    }
+
+    private static async Task<IResult> GetSharedLinksAsync(
+        ClaimsPrincipal principal,
+        string conversationId,
+        long? beforeSeq,
+        int? limit,
+        ConversationFilesService files,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        var page = await files.GetSharedLinksAsync(
+            userId,
+            conversationId,
             beforeSeq,
             limit,
             cancellationToken);

@@ -778,6 +778,12 @@ async function onJumpToMessage(messageId: string): Promise<void> {
   }
 }
 
+/** C2c：从共享媒体面板定位原消息——先关明细面板（≤1199 为覆盖层），再滚到消息。 */
+async function onLocateFromDetails(messageId: string): Promise<void> {
+  closeDetails()
+  await onJumpToMessage(messageId)
+}
+
 // F-11：搜索结果跳转（?jumpSeq= / ?jumpMessageId=）：按目标加载上下文窗口后定位，
 // 完成后清掉查询参数，避免刷新页面重复跳转。
 let pendingJumpSeq: number | null = null
@@ -2322,6 +2328,7 @@ function onWindowDrop(event: DragEvent): void {
             @updated="onGroupUpdated"
             @left="onLeftGroup"
             @open-chat="onOpenMemberChat"
+            @locate-message="onLocateFromDetails"
           />
         </div>
       </template>
