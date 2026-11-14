@@ -225,6 +225,14 @@ public sealed class GroupInviteService
 
         await using (var transaction = await _db.Database.BeginTransactionAsync(cancellationToken))
         {
+            // 先执行一次空更新取得 SQLite 写锁：与「直接加人」共用同一把锁，避免两条入口
+            // 并发时都按旧人数通过容量检查、最终把群撑过上限。
+            await _db.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE conversations SET last_seq = last_seq WHERE id = {conversation.Id}",
+                cancellationToken);
+            // 写锁内重新加载会话，保证新成员 LastReadSeq 取到最新 last_seq。
+            await _db.Entry(conversation).ReloadAsync(cancellationToken);
+
             // 事务内重新读取成员数：SQLite 写事务串行，避免并发兑换把群撑过上限。
             var currentMemberIds = await _db.ConversationMembers
                 .Where(member => member.ConversationId == conversation.Id)
