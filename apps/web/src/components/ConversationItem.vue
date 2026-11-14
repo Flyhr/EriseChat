@@ -10,9 +10,12 @@ import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
 import UnreadBadge from './UnreadBadge.vue'
 import { usePresenceStore } from '../stores/presence'
+import { useDraftsStore } from '../stores/drafts'
+import { useMessagesStore } from '../stores/messages'
 
-// 会话列表项（UI-02 批次1，计划 §5.2）：行高桌面 72 / 紧凑 64 / 移动 44；头像 44；
-// 选中浅蓝底 + 左侧 3px 品牌色指示条；hover 浅灰蓝；标题单行、摘要一行、时间与未读角标保留。
+// 会话列表项（UI-02 批次1，计划 §5.2）：行高桌面 72 / 紧凑 56 / 移动 68；头像 44；
+// 选中底色 + 左侧 3px 品牌色指示条 + 加粗标题；hover 中性浅底；标题单行、摘要一行、时间与未读角标保留。
+// 批次 B1：摘要第二层按「发送失败 → 草稿 → 最近消息」显示，状态不靠额外彩色 badge 表达。
 // F-10：右侧「⋯」按钮 / 桌面右键打开小菜单，可切换置顶与免打扰；状态变化交给父组件调 store。
 const props = defineProps<{
   conversation: Conversation
@@ -81,6 +84,14 @@ const preview = computed(() => {
 })
 
 const timeText = computed(() => formatTime(props.conversation.lastMessage?.createdAt ?? props.conversation.createdAt))
+
+// 批次 B1：摘要第二层的状态来源——草稿取本机会话草稿，发送失败取待发队列里 status=failed 的条数。
+const drafts = useDraftsStore()
+const messages = useMessagesStore()
+const draftText = computed(() => drafts.draftOf(props.conversation.conversationId).trim())
+const failedCount = computed(
+  () => messages.pendingOf(props.conversation.conversationId).filter((item) => item.status === 'failed').length,
+)
 
 const menuOpen = ref(false)
 const moreButton = ref<HTMLButtonElement | null>(null)
@@ -209,7 +220,16 @@ function formatTime(timestamp: number): string {
       </span>
       <span class="conversation-item__body">
         <span class="conversation-item__title">{{ title }}</span>
-        <span class="conversation-item__preview">{{ preview }}</span>
+        <span
+          class="conversation-item__preview"
+          :class="{ 'conversation-item__preview--failed': failedCount > 0 }"
+        >
+          <template v-if="failedCount > 0">{{ failedCount }} 条发送失败</template>
+          <template v-else-if="draftText">
+            <span class="conversation-item__draft">[草稿]</span> {{ truncate(draftText) }}
+          </template>
+          <template v-else>{{ preview }}</template>
+        </span>
       </span>
       <span class="conversation-item__meta">
         <span class="conversation-item__time">{{ timeText }}</span>
@@ -319,7 +339,7 @@ function formatTime(timestamp: number): string {
 }
 
 .conversation-item--active {
-  /* 「澄蓝」主题：选中行用极浅的横向蓝色渐变，比纯色底更轻。 */
+  /* 批次 B1：选中行改为纯色底（原横向渐变），靠品牌竖条与加粗标题共同标识。 */
   background: var(--ec-row-active-bg);
 }
 
@@ -348,6 +368,13 @@ function formatTime(timestamp: number): string {
   cursor: pointer;
 }
 
+/* 键盘 Tab 到会话行时给出可见焦点（≥3:1），与选中底色相互独立。 */
+.conversation-item__main:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: calc(var(--ec-focus-offset) * -1);
+  border-radius: var(--ec-radius-sm);
+}
+
 .conversation-item__body {
   display: flex;
   flex: 1;
@@ -374,6 +401,17 @@ function formatTime(timestamp: number): string {
   white-space: nowrap;
 }
 
+/* 发送失败：文字 + 危险色，不新增彩色 badge；读屏由整行文本读出。 */
+.conversation-item__preview--failed {
+  color: var(--ec-danger);
+  font-weight: var(--ec-font-weight-medium);
+}
+
+.conversation-item__draft {
+  color: var(--ec-brand-600);
+  font-weight: var(--ec-font-weight-medium);
+}
+
 .conversation-item__meta {
   display: flex;
   flex: none;
@@ -385,7 +423,7 @@ function formatTime(timestamp: number): string {
 }
 
 .conversation-item__time {
-  color: var(--ec-text-secondary);
+  color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-small);
 }
 
@@ -439,9 +477,11 @@ function formatTime(timestamp: number): string {
   }
 }
 
-/* 键盘 Tab 到操作按钮时也可见，避免只能靠鼠标发现。 */
+/* 键盘 Tab 到操作按钮时也可见，避免只能靠鼠标发现；焦点环与列表底色 ≥3:1。 */
 .conversation-item__more:focus-visible {
   opacity: 1;
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: calc(var(--ec-focus-offset) * -1);
 }
 
 /* 触屏无 hover：操作按钮常显，保证可点（≥44×44 由 UI-04 触控规则兜底）。 */
@@ -493,14 +533,8 @@ function formatTime(timestamp: number): string {
   outline-offset: 1px;
 }
 
-/* 801~1199：紧凑行高 64（Electron 最小 960×640 仍可用）。 */
-@media (max-width: 1199px) {
-  .conversation-item {
-    min-height: min(64px, var(--ec-row-height));
-  }
-}
-
-/* ≤800：移动单栏列表行高由 token 控制（UI-05 移动端密度），压缩内边距。 */
+/* ≤800：移动单栏列表行高由 token 控制（UI-05 移动端密度），压缩内边距。
+   桌面两档密度统一由 --ec-row-height 提供（舒适 72 / 紧凑 56），不再另设 64 档。 */
 @media (max-width: 800px) {
   .conversation-item {
     min-height: var(--ec-row-min-height-mobile);

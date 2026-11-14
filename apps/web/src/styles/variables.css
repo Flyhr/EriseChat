@@ -7,71 +7,73 @@
    4) 颜色 token 由 styles/themes/azure.css / dark.css 按 data-ec-theme 提供（本文件 :root 为浅色回退基线）；
       派生值只引用变量，切换主题时自动跟随。主题由设置页选择，index.html 首屏预置避免闪烁。 */
 :root {
-  /* ==================== 颜色（聊天主题「澄蓝」，2026-10-26 落地） ==================== */
-  --ec-brand-500: #3b82f6; /* 品牌主色：图标/强调/气泡渐变起点 */
+  /* ==================== 颜色（中性表面 + 少量品牌色，批次 B1 收敛） ====================
+     70% 中性表面 + 20% 层级明暗 + 10% 品牌色：品牌色只用于选中、主按钮、自己的消息、
+     焦点、链接与未读；不再用大面积渐变、光晕与厚阴影制造层次（产品方案 §4.2）。 */
+  --ec-brand-500: #3b82f6; /* 品牌主色：图标/强调 */
   --ec-brand-600: #2563eb; /* 主按钮/发送气泡/选中文字：白字约 5.2:1，达标 */
   --ec-brand-700: #1d4ed8; /* 悬停/按下：白字约 6.3:1 */
   --ec-brand-100: #dbeafe; /* 浅色描边/选中指示底 */
-  --ec-brand-050: #eff6ff; /* 选中会话、菜单项背景 */
-  --ec-nav-bg: #f1f5fd; /* 全局导航底色 */
+  --ec-brand-050: #eff6ff; /* 选中菜单项背景 */
+  --ec-nav-bg: #f3f5f9; /* 全局导航底色（中性） */
   --ec-list-bg: #ffffff; /* 会话列表底色 */
-  --ec-chat-bg-a: #f8fbff; /* 聊天渐变起点 */
-  --ec-chat-bg-b: #eef5ff; /* 聊天渐变中间色 */
-  --ec-chat-bg-c: #e9f1fe; /* 聊天渐变终点 */
-  --ec-chat-bg-d: #e9f1fe; /* 保留旧 token（仅兼容渐变参考） */
-  --ec-chat-glow-a: rgba(219, 234, 254, 0.75); /* 聊天区左上 brand 光晕 */
-  --ec-chat-glow-b: rgba(224, 231, 255, 0.55); /* 聊天区右下 indigo 光晕 */
-  --ec-text-primary: #0f172a; /* 主要文字（白底约 17:1） */
-  --ec-text-secondary: #5f6d7e; /* 次要正文（时间/摘要；白底约 5.3:1、导航底约 4.8:1） */
-  --ec-text-tertiary: #94a3b8; /* 仅装饰性标签/占位（白底约 2.6:1，不承载正文） */
-  --ec-border: #e2e8f0; /* 分割线与边框 */
-  --ec-border-soft: #eef3fb; /* 列表行分割线/顶栏底边等更弱的边界 */
-  --ec-success: #059669; /* 成功状态 */
-  --ec-online: #059669; /* 在线圆点 */
+  --ec-chat-bg-a: #f5f7fb; /* 聊天底（批次 B1：三段渐变收敛为同一中性表面） */
+  --ec-chat-bg-b: #f5f7fb;
+  --ec-chat-bg-c: #f5f7fb;
+  --ec-chat-bg-d: #f5f7fb; /* 保留旧 token（仅兼容渐变参考） */
+  --ec-chat-glow-a: transparent; /* 批次 B1：移除品牌光晕 */
+  --ec-chat-glow-b: transparent;
+  --ec-text-primary: #101828; /* 主要文字（白底约 17.7:1） */
+  --ec-text-secondary: #475467; /* 次要正文（白底约 7.7:1、聊天底约 7.4:1） */
+  --ec-text-tertiary: #667085; /* 时间/元信息（白底约 5.0:1，可承载正文） */
+  --ec-border: #e4e7ec; /* 分割线与装饰边界（不承载控件轮廓） */
+  --ec-border-soft: #eef1f5; /* 列表行分割线/顶栏底边等更弱的边界 */
+  --ec-success: #047857; /* 成功状态（白底约 5.3:1） */
+  --ec-online: #059669; /* 在线圆点（图形，≥3:1） */
   --ec-danger: #dc2626; /* 发送失败与危险操作文字（白底约 4.8:1） */
-  --ec-focus-ring: #2563eb; /* 键盘焦点环（2px，偏移 2px） */
-  --ec-disabled: #a8b2bf; /* 禁用文本/图标 */
+  --ec-focus-ring: #2563eb; /* 键盘焦点环（2px，偏移 2px；白底约 5.2:1） */
+  --ec-disabled: #8a97a8; /* 禁用文本/图标（白底约 3.0:1） */
   --ec-scrim: rgba(15, 23, 42, 0.45); /* 抽屉/弹窗遮罩 */
   --ec-overlay: rgba(15, 23, 42, 0.78); /* 图片大图预览遮罩（深色，与旧 rgba 值一致） */
   --ec-overlay-border: rgba(255, 255, 255, 0.4); /* 深色遮罩上的按钮边框（可解释白） */
   --ec-overlay-hover: rgba(255, 255, 255, 0.12); /* 深色遮罩上的按钮悬停（可解释白） */
 
   /* ============ 颜色（派生；同色系推导，组件不得再自造色值） ============ */
-  --ec-bg-canvas: #f6f9fe; /* 页面画布 */
+  --ec-bg-canvas: #f5f7fb; /* 页面画布（产品方案 §4.2 浅色候选） */
   --ec-surface: #ffffff; /* 卡片/输入框/面板表面色（同 list-bg） */
-  --ec-surface-hover: #f2f7ff; /* 列表项/按钮悬停浅蓝底（brand-050 与白之间） */
-  --ec-border-strong: #cbd5e1; /* 滚动条滑块/强分割线：border 加深一档 */
-  --ec-bubble-self: #2563eb; /* 自己的气泡主体色（渐变由 --ec-bubble-self-bg 提供） */
-  --ec-bubble-self-bg: linear-gradient(135deg, var(--ec-brand-500) 0%, var(--ec-brand-600) 100%); /* 自己气泡渐变（随主题色） */
-  --ec-bubble-self-border: transparent; /* 渐变气泡不描边 */
+  --ec-surface-hover: #f1f5f9; /* 列表项/按钮悬停中性底 */
+  --ec-border-strong: #7d8ca0; /* 必要控件轮廓（白底 3.4:1、画布 3.2:1，满足非文本对比） */
+  --ec-bubble-self: #2563eb; /* 自己的气泡主体色（批次 B1：改为纯色，不再渐变） */
+  --ec-bubble-self-bg: #2563eb; /* 自己气泡底色（随主题） */
+  --ec-bubble-self-border: transparent; /* 纯色气泡不描边 */
   --ec-bubble-other: #ffffff; /* 对方气泡白色（D-05） */
-  --ec-bubble-other-border: #e7eef9; /* 对方气泡冷蓝描边 */
-  /* 无气泡媒体卡（文件/语音）：聊天底是浅蓝渐变，需白底 + 描边 + 投影拉开层次；
-     新增主题（含深色）只需覆写这组颜色 token，组件不写死色值。 */
+  --ec-bubble-other-border: #d8dfe8; /* 对方气泡中性描边 */
+  /* 无气泡媒体卡（文件/语音）：聊天底改为中性表面后，靠底色 + 描边区分层级。 */
   --ec-media-surface: #ffffff; /* 媒体卡底色 */
-  --ec-media-surface-hover: #f5f9ff; /* 媒体卡悬停底色 */
-  --ec-media-border: #cbd5e1; /* 媒体卡描边：比 --ec-border 深一档，浅蓝底上可辨 */
-  --ec-media-icon-surface: #eff6ff; /* 文件类型图标块底色 */
+  --ec-media-surface-hover: #f8fafc; /* 媒体卡悬停底色 */
+  --ec-media-border: #c3ccda; /* 媒体卡描边：比 --ec-border 深一档，中性底上可辨 */
+  --ec-media-icon-surface: #eff4fb; /* 文件类型图标块底色 */
   --ec-media-track: #dbe4f0; /* 语音进度条轨道 */
-  --ec-warning: #b45309; /* 警示文字：取可读深橙（白底约 4.8:1） */
+  --ec-warning: #b45309; /* 警示文字：取可读深橙（白底约 5.0:1） */
   --ec-text-inverse: #ffffff; /* 深色底上的文字（白字属可解释例外值） */
   --ec-scrollbar-thumb: var(--ec-border-strong);
   --ec-scrollbar-track: transparent;
-  --ec-row-active-bg: linear-gradient(90deg, rgba(239, 246, 255, 0.95), rgba(255, 255, 255, 0.5)); /* 选中会话行 */
-  --ec-header-bg: rgba(255, 255, 255, 0.84); /* 半透明磨砂顶栏 */
-  --ec-header-blur: blur(12px);
+  --ec-row-active-bg: #e4eefe; /* 选中会话行（纯色；品牌竖条 + 加粗标题共同标识） */
+  --ec-header-bg: #ffffff; /* 顶栏实色（批次 B1：去掉磨砂半透明） */
+  --ec-header-blur: none;
   --ec-chat-gradient: radial-gradient(circle at 16% -6%, var(--ec-chat-glow-a) 0%, transparent 44%),
     radial-gradient(circle at 88% 108%, var(--ec-chat-glow-b) 0%, transparent 48%),
     linear-gradient(180deg, var(--ec-chat-bg-a) 0%, var(--ec-chat-bg-b) 56%, var(--ec-chat-bg-c) 100%);
-  --ec-shadow-bubble: 0 2px 8px rgba(15, 23, 42, 0.06); /* 对方气泡 */
-  --ec-shadow-bubble-self: 0 4px 14px rgba(37, 99, 235, 0.22); /* 自己渐变气泡 */
-  --ec-composer-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); /* 输入卡片浮起阴影 */
-  --ec-shadow-media: 0 2px 8px rgba(15, 23, 42, 0.08); /* 无气泡媒体卡浮起阴影 */
+  /* 批次 B1：普通列表、气泡与输入区不再用阴影制造层次，阴影只留给菜单与浮层。 */
+  --ec-shadow-bubble: none; /* 对方气泡 */
+  --ec-shadow-bubble-self: none; /* 自己气泡 */
+  --ec-composer-shadow: none; /* 输入卡片 */
+  --ec-shadow-media: none; /* 无气泡媒体卡 */
 
   /* U-04 回收：原散落在组件里的语义色值，统一在此定义并由主题文件覆写。 */
   --ec-focus-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12); /* 输入框聚焦外圈：brand-500 12% */
   --ec-drop-overlay: rgba(37, 99, 235, 0.12); /* 拖拽投放遮罩：brand-600 12% */
-  --ec-date-badge-bg: rgba(241, 245, 253, 0.92); /* 日期胶囊底：nav-bg 92% */
+  --ec-date-badge-bg: rgba(243, 245, 249, 0.92); /* 日期胶囊底：nav-bg 92% */
   --ec-shadow-badge: 0 6px 16px rgba(37, 99, 235, 0.28); /* 新消息浮标投影：brand-600 28% */
   --ec-warning-soft: #fff1d6; /* 搜索命中高亮底：warning 的浅色派生 */
   --ec-chip-surface: rgba(255, 255, 255, 0.72); /* 顶栏成员计数等半透明胶囊底 */
@@ -82,9 +84,9 @@
   --ec-text-on-self-soft: rgba(255, 255, 255, 0.82);
   --ec-bubble-self-overlay: rgba(255, 255, 255, 0.22);
   --ec-bubble-self-overlay-soft: rgba(255, 255, 255, 0.18);
-  /* 左侧主导航 hover：原先复用 --ec-surface-hover，与导航底只差 1.016:1 几乎不可辨；
-     改为导航专用 token，按主题分别定义，hover 时底色与文字/图标色同时变化。 */
-  --ec-nav-item-hover-bg: #dbeafe;
+  /* 左侧主导航 hover：与中性导航底拉开一档明暗，hover 时文字/图标同步转品牌色。
+     选中态仍由 --ec-brand-050 + 左侧竖条 + 加粗标识（选中与 hover 不靠底色深浅区分）。 */
+  --ec-nav-item-hover-bg: #e4e9f2;
   --ec-nav-item-hover-text: #1d4ed8;
   /* 设置页主题预览是静态示意图，不随当前主题变化，故只在 :root 基线声明。 */
   --ec-theme-preview-light: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%);

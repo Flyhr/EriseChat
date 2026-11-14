@@ -272,10 +272,11 @@ async function onUpdateSettings(payload: {
   align-items: center;
   min-height: 36px;
   padding: 0 var(--ec-space-3);
-  border: 1px solid var(--ec-border);
+  /* 必要控件轮廓走 --ec-border-strong（≥3:1），分隔线才用 --ec-border。 */
+  border: 1px solid var(--ec-border-strong);
   border-radius: var(--ec-radius-input);
-  background: var(--ec-bg-canvas);
-  color: var(--ec-text-tertiary);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
   text-align: left;
   cursor: pointer;
@@ -336,6 +337,11 @@ async function onUpdateSettings(payload: {
 }
 }
 
+.ec-conversation-list__create:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
 .ec-conversation-list__filters {
   display: flex;
   flex: none;
@@ -368,8 +374,13 @@ async function onUpdateSettings(payload: {
 .ec-conversation-list__chip--active,
 .ec-conversation-list__chip--active:hover {
   background: var(--ec-brand-050);
-  color: var(--ec-brand-600);
+  color: var(--ec-brand-700);
   font-weight: var(--ec-font-weight-semibold);
+}
+
+.ec-conversation-list__chip:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .ec-conversation-list__items {
