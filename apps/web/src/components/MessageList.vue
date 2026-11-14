@@ -133,23 +133,30 @@ function getVisibleAnchor(): { messageId: string; offset: number } | null {
 /**
  * 按锚点恢复滚动位置：把该消息行顶部对齐到记录的偏移。
  * 会话已切换或该消息不在渲染窗口时返回 false，由调用方回退到高度差补偿或贴底。
+ * reserveDivider 只用于「首条未读」的首次定位：把行上方未读分隔的高度计入偏移，分隔不会被滚出视口。
+ * 普通恢复的 offset 已按行在 DOM 中的实际位置测得，再减一次分隔高度会把视口多推一段。
  */
-function restoreAnchor(anchor: { messageId: string; offset: number }, conversationId: string): boolean {
+function restoreAnchor(
+  anchor: { messageId: string; offset: number },
+  conversationId: string,
+  reserveDivider = false,
+): boolean {
   const element = container.value
   if (!element) return false
   if ((props.conversationId ?? '') !== conversationId) return false
   const row = element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.messageId)}"]`)
   if (!row) return false
-  // 首条未读上方的分隔线也属于落点：把它的高度计入偏移，否则分隔会被滚出视口。
   const previous = row.previousElementSibling
   const dividerHeight =
-    previous instanceof HTMLElement && previous.classList.contains('message-list__unread')
+    reserveDivider &&
+    previous instanceof HTMLElement &&
+    previous.classList.contains('message-list__unread')
       ? previous.getBoundingClientRect().height
       : 0
   const delta = row.getBoundingClientRect().top - element.getBoundingClientRect().top
   element.scrollTop += delta - anchor.offset - dividerHeight
-  // 程序化定位后同步记录锚点：后续图片解码仍按同一位置恢复。
-  lastVisibleAnchor = anchor
+  // 程序化定位后按真实位置重记锚点：后续图片解码、前插历史仍按同一位置恢复。
+  lastVisibleAnchor = getVisibleAnchor() ?? anchor
   return true
 }
 
@@ -171,7 +178,7 @@ function scrollToAnchor(anchor: { messageId: string; offset: number }): boolean 
   newMessageCount.value = 0
   const conversationId = props.conversationId ?? ''
   void nextTick(() => {
-    if (!restoreAnchor(anchor, conversationId)) {
+    if (!restoreAnchor(anchor, conversationId, true)) {
       scrollToBottom()
       emitNearBottom(true)
       return
@@ -179,6 +186,11 @@ function scrollToAnchor(anchor: { messageId: string; offset: number }): boolean 
     emitNearBottom(false)
   })
   return true
+}
+
+/** 批次 B2：页面在首屏数据到位后确认落点，委托列表补一次定位（返回是否已定位）。 */
+function applyAnchor(anchor: { messageId: string; offset: number }): boolean {
+  return scrollToAnchor(anchor)
 }
 
 function currentRange(): WindowRange {
@@ -459,7 +471,15 @@ function setScrollTop(value: number): void {
   if (container.value) container.value.scrollTop = Math.max(0, value)
 }
 
-defineExpose({ scrollToMessage, scrollToBottom, getScrollTop, setScrollTop, getVisibleAnchor })
+defineExpose({
+  scrollToMessage,
+  scrollToBottom,
+  jumpToBottom,
+  getScrollTop,
+  setScrollTop,
+  getVisibleAnchor,
+  applyAnchor,
+})
 
 // 切换会话：按页面给的落点恢复位置（指定消息 / 上次浏览 / 首条未读），没有落点才贴底。
 // 窗口重置到末尾；落点目标不在已加载消息里时退回贴底，并由页面决定是否给「查看未读起点」入口。
@@ -481,14 +501,25 @@ watch(
   },
 )
 
+// 定位窗口与正常时间线是两批消息：进入或退出定位时会整体换窗，不能按「前插历史」处理，
+// 否则退出定位会把正常时间线裁成前半段，滚到底也可能停在旧消息上。
+let locateWindowConversationId = props.conversationId ?? ''
+let wasLocateMode = props.locateMode
+
 // 消息数量变化：区分「前面插入历史」与「末尾追加新消息」。
 watch(
   () => props.messages.length,
   (next, previous) => {
-    if (props.locateMode) {
+    const conversationId = props.conversationId ?? ''
+    const locateToggled =
+      conversationId === locateWindowConversationId && props.locateMode !== wasLocateMode
+    locateWindowConversationId = conversationId
+    wasLocateMode = props.locateMode
+    if (props.locateMode || locateToggled) {
       windowRange.value = initialWindowRange(next, INITIAL_WINDOW_SIZE)
       lastFirstMessageId.value = firstMessageId()
       newMessageCount.value = 0
+      if (!props.locateMode) stickToBottom.value = true
       return
     }
 
@@ -549,9 +580,11 @@ watch(
 )
 
 // 自己发送新消息（pending 增加）时总是贴底并清浮标。
+// 切会话时 pending 数量也会变（另一个会话残留的待发项），那不是本会话新发送，不能抢落点。
 watch(
-  () => props.pending?.length ?? 0,
-  (next, previous) => {
+  () => [props.conversationId ?? '', props.pending?.length ?? 0] as const,
+  ([conversationId, next], [previousConversationId, previous]) => {
+    if (conversationId !== previousConversationId) return
     if (next <= previous) return
     stickToBottom.value = true
     newMessageCount.value = 0

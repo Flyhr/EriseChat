@@ -271,6 +271,9 @@ watch(
   { immediate: true },
 )
 
+/** 首屏历史请求失败：给出重试入口，避免页面一直停在加载态、落点永远不确认。 */
+const initialLoadFailed = ref(false)
+
 // F-37：定位窗口与正常时间线分离。置顶/引用/搜索跳转只展示目标附近的上下文窗口，
 // 不合并进会话缓存、不推进 lastSeq / 同步水位 / 历史分页起点；跳转后提供「回到最新」。
 const locateWindow = ref<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean } | null>(null)
@@ -294,15 +297,13 @@ function exitLocateWindow(): void {
   locateLoading.value = false
 }
 
-/** 回到最新：退出定位窗口并滚回正常时间线底部（定位期间未改动分页与同步水位）。 */
+/** 回到最新：退出定位窗口并让列表切到最后一页，滚动到位后由列表上报贴底。 */
 function backToLatest(): void {
   if (!locateMode.value) return
+  // 用户明确选择回到最新：解除「未读起点未加载」的拦截，让贴底上报按正常规则推进。
+  unreadJumpSeq.value = null
   exitLocateWindow()
-  atBottom.value = true
-  void nextTick(() => {
-    messageListRef.value?.scrollToBottom()
-    markActiveConversationRead()
-  })
+  void nextTick(() => messageListRef.value?.jumpToBottom?.())
 }
 
 // 回复引用（F-09）：replyTarget 记录当前回复目标与本地引用条摘要，发送成功或取消后清空；
@@ -311,10 +312,14 @@ const replyTarget = ref<{ messageId: string; preview: ReplyPreviewLike } | null>
 const messageListRef = ref<{
   scrollToMessage: (messageId: string) => boolean
   scrollToBottom: () => void
+  /** 切回最后一页并贴底（退出定位窗口后使用），滚动到位后会由列表上报贴底。 */
+  jumpToBottom?: () => void
   getScrollTop?: () => number
   setScrollTop?: (value: number) => void
   /** 批次 B2：首条可见消息与偏移，用于保存上次主动浏览的位置。 */
   getVisibleAnchor?: () => { messageId: string; offset: number } | null
+  /** 批次 B2：首屏数据到位后按落点补一次定位（进入时历史还没加载的情况）。 */
+  applyAnchor?: (anchor: { messageId: string; offset: number }) => boolean
 } | null>(null)
 const JUMP_CONTEXT_BEFORE = 25
 const JUMP_CONTEXT_AFTER = 25
@@ -651,6 +656,8 @@ async function ensureMessageVisible(
     forceContext?: boolean
     /** 写回窗口前校验：调用方身份/窗口是否仍有效（迟到的重连刷新不得重开旧窗口）。 */
     guard?: () => boolean
+    /** 按序号取到上下文窗口后用窗口内消息重选落点（未读起点可能落在自己发的消息上）。 */
+    pickFrom?: (messages: Message[]) => Message | undefined
   } = {},
 ): Promise<boolean> {
   const findLoadedId = (): string | undefined =>
@@ -675,8 +682,10 @@ async function ensureMessageVisible(
     await nextTick()
     if (activeId.value !== conversationId) return false
     if (options.guard && !options.guard()) return false
+    const picked = options.pickFrom?.(page.messages)
     const targetId =
       target.messageId ??
+      picked?.messageId ??
       page.messages.find((message) => message.seq === target.seq)?.messageId
     if (!targetId || !page.messages.some((message) => message.messageId === targetId)) {
       return false
@@ -978,19 +987,23 @@ function saveReadingAnchor(conversationId: string, atLatest: boolean): void {
   writeReadingAnchor(scope, conversationId, anchor)
 }
 
-/**
- * 计算进入会话的落点，优先级：指定消息 → 上次主动浏览位置 → 首条未读 → 最新消息。
- * 指定消息（深链接/搜索/引用跳转）由定位窗口处理，这里不抢；未读起点未加载时只给入口。
- */
-function resolveLanding(conversationId: string): {
+/** 进入会话的落点；anchor 与 unreadJumpSeq 都为 null 时贴底最新。 */
+type Landing = {
   anchor: { messageId: string; offset: number } | null
   unreadStartId: string | null
   unreadJumpSeq: number | null
-} {
-  const none = { anchor: null, unreadStartId: null, unreadJumpSeq: null }
+}
+
+/**
+ * 计算进入会话的落点，优先级：指定消息 → 上次主动浏览位置 → 首条未读 → 最新消息。
+ * 指定消息（深链接/搜索/引用跳转）由定位窗口处理，这里不抢；未读起点未加载时只给入口。
+ * 返回 null 表示首屏数据（缓存与历史）还没到位、无法判定，应由 confirmLanding 在数据就绪后重算。
+ */
+function resolveLanding(conversationId: string): Landing | null {
+  const none: Landing = { anchor: null, unreadStartId: null, unreadJumpSeq: null }
   if (pendingJumpMessageId !== null || pendingJumpSeq !== null) return none
   const loaded = messages.messagesOf(conversationId)
-  if (loaded.length === 0) return none
+  if (loaded.length === 0) return null
 
   const saved = readReadingAnchor(readingScope.value, conversationId)
   if (saved && loaded.some((message) => message.messageId === saved.messageId)) {
@@ -998,9 +1011,13 @@ function resolveLanding(conversationId: string): {
   }
 
   const readSeq = conversations.readSeqOf(conversationId)
-  const firstUnread = loaded.find(
-    (message) => message.seq > readSeq && message.senderId !== selfUserId.value,
-  )
+  // 首屏只拉最近一页，已读水位与窗口起点之间可能还隔着未加载的消息：
+  // 只有窗口起点紧接已读水位时，窗口里的第一条未读才是真正的首条未读，否则只能给入口。
+  const windowStartSeq = loaded[0]?.seq ?? Number.POSITIVE_INFINITY
+  const coversUnreadStart = windowStartSeq <= readSeq + 1
+  const firstUnread = coversUnreadStart
+    ? loaded.find((message) => message.seq > readSeq && message.senderId !== selfUserId.value)
+    : undefined
   if (firstUnread) {
     return {
       anchor: { messageId: firstUnread.messageId, offset: 8 },
@@ -1016,14 +1033,69 @@ function resolveLanding(conversationId: string): {
   return none
 }
 
+/** 首屏落点是否还没确认：数据未到位时既不能贴底，也不能上报已读。 */
+const landingPending = ref(false)
+
+/** 应用已确认的落点；有具体锚点时不算贴底，停在最新处才算。 */
+function applyLanding(landing: Landing): void {
+  landingPending.value = false
+  initialAnchor.value = landing.anchor
+  unreadStartId.value = landing.unreadStartId
+  unreadJumpSeq.value = landing.unreadJumpSeq
+  atBottom.value = landing.anchor === null
+}
+
+/** 首屏数据就绪后确认落点；只在待确认时补做一次，不打断用户之后的滚动。 */
+function confirmLanding(conversationId: string): void {
+  if (!landingPending.value || activeId.value !== conversationId) return
+  const landing = resolveLanding(conversationId)
+  if (!landing) {
+    // 历史仍不可用（离线或加载失败）：保持待确认，不能把未读当成已读清掉。
+    if (!messages.isLoaded(conversationId)) return
+    // 会话确实没有消息：按「最新」收尾。
+    applyLanding({ anchor: null, unreadStartId: null, unreadJumpSeq: null })
+    void nextTick(markActiveConversationRead)
+    return
+  }
+  applyLanding(landing)
+  if (!landing.anchor) {
+    void nextTick(markActiveConversationRead)
+    return
+  }
+  const anchor = landing.anchor
+  void nextTick(() => {
+    if (activeId.value !== conversationId) return
+    // 数据晚到时列表已按空列表贴底渲染过，这里按落点补一次定位。
+    messageListRef.value?.applyAnchor?.(anchor)
+  })
+}
+
+// 历史也可能由补拉/同步补上（loadInitial 失败或提前返回）：就绪后补确认一次落点。
+watch(activeLoaded, (loaded) => {
+  if (loaded && activeId.value) confirmLanding(activeId.value)
+})
+
 /** 「查看未读起点」：复用定位能力按 seq 取上下文窗口，不推进已读。 */
 async function jumpToUnreadStart(): Promise<void> {
   const conversationId = activeId.value
   const seq = unreadJumpSeq.value
   if (!conversationId || seq === null) return
-  const located = await ensureMessageVisible(conversationId, { seq })
+  // 入口给的是「已读边界 + 1」，可能正好是自己发的消息：落点取其后第一条他人消息。
+  const firstUnreadOf = (list: Message[]): Message | undefined =>
+    list.find((message) => message.seq >= seq && message.senderId !== selfUserId.value)
+  const cached = firstUnreadOf(activeMessages.value)
+  const located = await ensureMessageVisible(
+    conversationId,
+    cached ? { messageId: cached.messageId } : { seq },
+    { pickFrom: firstUnreadOf },
+  )
   if (!located) {
     pageNotice.value = '未读起点不在当前加载范围，可手动加载更早消息查看'
+    return
+  }
+  // 边界附近的窗口里可能仍只有自己的消息：保留入口，等用户继续加载。
+  if (!cached && !firstUnreadOf(locateWindow.value?.messages ?? [])) {
+    pageNotice.value = '当前显示的是已读边界附近的消息'
     return
   }
   unreadJumpSeq.value = null
@@ -1033,6 +1105,10 @@ async function jumpToUnreadStart(): Promise<void> {
 // 读到最新后不再保留「以下是未读消息」分隔，避免历史分隔与已读状态矛盾。
 watch(atBottom, (value) => {
   if (value) unreadStartId.value = null
+})
+// 其他端读掉这批未读后入口自动失效，避免留下「有 0 条未读消息」的横幅。
+watch(unreadJumpCount, (count) => {
+  if (count === 0) unreadJumpSeq.value = null
 })
 /** 单聊对端用户 ID（群聊为空，不展示已读回执）。 */
 const peerUserId = computed(
@@ -1069,6 +1145,16 @@ const typingText = computed(() => {
   return typing.typingLabel(activeId.value, conversation.type, (userId) => nameById.get(userId) ?? '')
 })
 
+/** 首屏历史请求失败后重试；成功后由 activeLoaded 监听补确认落点。 */
+function retryInitialLoad(): void {
+  const conversationId = activeId.value
+  if (!conversationId) return
+  initialLoadFailed.value = false
+  void messages.loadInitial(conversationId).catch(() => {
+    if (activeId.value === conversationId) initialLoadFailed.value = true
+  })
+}
+
 // 切换会话：首次进入拉最新一页历史（M2-05）；已加载过直接用缓存，后续新消息由 message.new 合并。
 // 批次 B2：离开时保存阅读位置，进入时按「指定消息 → 上次浏览 → 首条未读 → 最新」决定落点。
 watch(
@@ -1081,19 +1167,29 @@ watch(
     unreadStartId.value = null
     unreadJumpSeq.value = null
     atBottom.value = true
+    landingPending.value = false
+    initialLoadFailed.value = false
     // 离开会话即清除其「输入中」状态（M3-09，避免残留旧会话提示）。
     if (previousId) typing.clearConversation(previousId)
     if (!conversationId) return
     const landing = resolveLanding(conversationId)
-    initialAnchor.value = landing.anchor
-    unreadStartId.value = landing.unreadStartId
-    unreadJumpSeq.value = landing.unreadJumpSeq
-    // 落点不是最新消息时不贴底：首屏不推进已读，等用户真正回到底部再上报。
-    atBottom.value = !landing.anchor
-    void messages.loadInitial(conversationId).then(() => {
-      // 首次加载并滚到底后上报一次已读（M3-09）。
-      void nextTick(markActiveConversationRead)
-    })
+    if (landing) {
+      applyLanding(landing)
+    } else {
+      // 首屏数据（缓存与历史）还没到位：先不定落点，也不贴底、不推进已读。
+      landingPending.value = true
+      atBottom.value = false
+    }
+    void messages
+      .loadInitial(conversationId)
+      .catch(() => {
+        if (activeId.value === conversationId) initialLoadFailed.value = true
+      })
+      .finally(() => {
+        confirmLanding(conversationId)
+        // 落点已在最新位置时补报一次已读（M3-09）；未确认或停在未读处会被内部拦下。
+        if (activeId.value === conversationId) void nextTick(markActiveConversationRead)
+      })
   },
   { immediate: true },
 )
@@ -1104,6 +1200,10 @@ watch(
 function markActiveConversationRead(): void {
   // F-37：定位窗口不是最新位置，滚动/可见性变化不能推进已读游标。
   if (locateMode.value || locateRequesting.value) return
+  // 首屏落点还没确认（数据未到位）：此时上报会把未读直接清掉。
+  if (landingPending.value) return
+  // 未读起点不在已加载范围：入口还挂着，用户并没看到这些消息，不能按「已到最新」推进已读。
+  if (unreadJumpSeq.value !== null) return
   const conversationId = activeId.value
   const lastSeq = activeConversation.value?.lastSeq ?? 0
   const advance = shouldAdvanceRead({
@@ -1120,8 +1220,11 @@ function markActiveConversationRead(): void {
 
 /** 消息列表滚动/自动贴底事件：回到或停在底部时推进已读（M3-09）。 */
 function onNearBottomChange(value: boolean): void {
+  const wasAtBottom = atBottom.value
   atBottom.value = value
   if (locateMode.value || locateRequesting.value) return
+  // 用户自己从历史滚回底部（不是首屏的程序化贴底）：按协议「滚到底即已读」解除入口拦截。
+  if (value && !wasAtBottom) unreadJumpSeq.value = null
   if (value) markActiveConversationRead()
 }
 
@@ -1160,6 +1263,8 @@ onMounted(async () => {
   window.addEventListener('drop', onWindowDrop)
   await conversations.restoreFromCache()
   await messages.restoreFromCache()
+  // 缓存恢复后首屏数据才到位：补确认一次进入时的落点（此前按「待确认」处理）。
+  if (activeId.value) confirmLanding(activeId.value)
 })
 
 onBeforeUnmount(() => {
@@ -1932,32 +2037,46 @@ function onWindowDrop(event: DragEvent): void {
               ref="loadingRef"
               class="chat-page__loading"
               role="status"
-              aria-label="消息加载中"
-              aria-busy="true"
+              :aria-label="initialLoadFailed ? '消息加载失败' : '消息加载中'"
+              :aria-busy="!initialLoadFailed"
             >
-              <div
-                v-for="index in 3"
-                :key="index"
-                class="chat-page__loading-row"
-                :class="{ 'chat-page__loading-row--self': index === 2 }"
-              >
-                <div class="ec-skeleton chat-page__loading-avatar" />
-                <div class="chat-page__loading-lines">
-                  <div class="ec-skeleton chat-page__loading-line" />
-                  <div class="ec-skeleton chat-page__loading-line chat-page__loading-line--short" />
+              <template v-if="!initialLoadFailed">
+                <div
+                  v-for="index in 3"
+                  :key="index"
+                  class="chat-page__loading-row"
+                  :class="{ 'chat-page__loading-row--self': index === 2 }"
+                >
+                  <div class="ec-skeleton chat-page__loading-avatar" />
+                  <div class="chat-page__loading-lines">
+                    <div class="ec-skeleton chat-page__loading-line" />
+                    <div class="ec-skeleton chat-page__loading-line chat-page__loading-line--short" />
+                  </div>
                 </div>
+              </template>
+              <div v-else class="chat-page__loading-failed">
+                <p class="ec-state-text" role="alert">消息加载失败</p>
+                <button type="button" class="chat-page__inline-action" @click="retryInitialLoad">
+                  重试
+                </button>
               </div>
-              <p v-if="slowLoading" class="ec-state-text ec-state-slow" role="status">仍在加载消息…</p>
+              <p
+                v-if="slowLoading && !initialLoadFailed"
+                class="ec-state-text ec-state-slow"
+                role="status"
+              >
+                仍在加载消息…
+              </p>
             </div>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <div v-if="locateMode" class="chat-page__locate">
               <span>{{ locateLoading ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
-              <button type="button" class="chat-page__locate-back" @click="backToLatest">回到最新</button>
+              <button type="button" class="chat-page__inline-action" @click="backToLatest">回到最新</button>
             </div>
             <!-- 批次 B2：未读起点不在已加载消息里时，先展示近期消息并给出入口。 -->
             <div v-else-if="unreadJumpSeq !== null" class="chat-page__locate">
               <span>有 {{ unreadJumpCount }} 条未读消息</span>
-              <button type="button" class="chat-page__locate-back" @click="jumpToUnreadStart">查看未读起点</button>
+              <button type="button" class="chat-page__inline-action" @click="jumpToUnreadStart">查看未读起点</button>
             </div>
             <MessageList
               ref="messageListRef"
@@ -2360,6 +2479,14 @@ function onWindowDrop(event: DragEvent): void {
   padding: var(--ec-space-6) var(--ec-space-4);
 }
 
+/* 首屏历史请求失败：只留一行说明与重试入口，不再继续闪骨架。 */
+.chat-page__loading-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ec-space-2);
+}
+
 .chat-page__loading-row {
   display: flex;
   gap: var(--ec-space-3);
@@ -2494,7 +2621,7 @@ function onWindowDrop(event: DragEvent): void {
   font-size: 12px;
 }
 
-.chat-page__locate-back {
+.chat-page__inline-action {
   flex: none;
   padding: 4px var(--ec-space-3);
   border: 1px solid var(--ec-brand-600);
@@ -2505,7 +2632,7 @@ function onWindowDrop(event: DragEvent): void {
   cursor: pointer;
 }
 
-.chat-page__locate-back:hover {
+.chat-page__inline-action:hover {
   background: var(--ec-brand-600);
   color: var(--ec-text-inverse);
 }

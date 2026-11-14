@@ -223,9 +223,15 @@ export const useConversationsStore = defineStore('conversations', () => {
     return peerReadSeq.value[conversationId]?.[userId]
   }
 
-  /** 本地已读游标（判断是否值得再次上报，避免重复 read.update）。 */
+  /**
+   * 会话已读水位：本地游标与服务端 last_read_seq 取较大值。
+   * 换设备/清缓存后本地游标为 0，只有合并服务端水位才不会把已读消息重新当成未读；
+   * 同时用于判断是否值得再次上报（避免重复 read.update）。
+   */
   function readSeqOf(conversationId: string): number {
-    return lastReadSeqByConversation.value[conversationId] ?? 0
+    const local = lastReadSeqByConversation.value[conversationId] ?? 0
+    const server = getById(conversationId)?.lastReadSeq ?? 0
+    return Math.max(local, server)
   }
 
   /**
