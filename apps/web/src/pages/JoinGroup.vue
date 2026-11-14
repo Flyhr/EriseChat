@@ -2,15 +2,18 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { inviteLinksApi, type GroupInvitePreview } from '../api/inviteLinks'
+import { resolveServerOrigin } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
 import { isInviteTokenLike } from '../core/inviteToken'
 import { showToast } from '../core/toast'
+import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
 
 // 群邀请链接落地页（C1c）：登录后由用户确认再加入；服务端负责有效期、撤销、发起人权限、
 // 拉黑与群容量校验，页面只展示预览与结果。令牌不写入日志、不展示明文。
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const conversations = useConversationsStore()
 
 // 令牌跟随当前路由：同一应用内从 /join/A 切到 /join/B 会复用本组件，不能只在挂载时读一次。
@@ -47,20 +50,43 @@ async function loadPreview(): Promise<void> {
   }
 }
 
+/** 兑换发起时的登录身份；响应回来时用于判断期间是否退出登录、被踢、切换账号或服务器。 */
+interface JoinSession {
+  token: string | null
+  userId: string
+  origin: string
+}
+
+function captureSession(): JoinSession {
+  return { token: auth.accessToken, userId: auth.user?.userId ?? '', origin: resolveServerOrigin() }
+}
+
+function isSameSession(session: JoinSession): boolean {
+  return (
+    auth.accessToken === session.token &&
+    (auth.user?.userId ?? '') === session.userId &&
+    resolveServerOrigin() === session.origin
+  )
+}
+
 async function join(): Promise<void> {
   if (joining.value) return
   // 兑换绑定点击时的令牌：地址已切到别的链接时不得沿用旧预览的令牌。
   const currentToken = token.value
   if (!isInviteTokenLike(currentToken)) return
+  const session = captureSession()
+  if (!session.token) return
   joining.value = true
   try {
     const conversation = await inviteLinksApi.join(currentToken)
+    // 迟到的成功响应：期间已退出登录/被踢/切换账号或服务器，或地址已切到别的链接时，
+    // 不得把旧会话写回缓存（upsert 会写 IndexedDB），也不再提示与跳转。
+    if (!isSameSession(session) || currentToken !== token.value) return
     conversations.upsert([conversation])
     showToast('已加入群聊', 'success')
-    if (currentToken === token.value) {
-      await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
-    }
+    await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
   } catch (error) {
+    if (!isSameSession(session) || currentToken !== token.value) return
     showToast(friendlyError(error), 'error')
   } finally {
     joining.value = false
