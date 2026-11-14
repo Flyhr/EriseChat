@@ -6,6 +6,7 @@ using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
+using Chat.Server.Modules.Blocks;
 using Chat.Server.Modules.Conversations;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -107,11 +108,13 @@ public sealed class MessageService
     public const int ReplyTextMaxLength = 120;
 
     private readonly ChatDbContext _db;
+    private readonly BlockService _blocks;
     private readonly AppOptions _appOptions;
 
-    public MessageService(ChatDbContext db, IOptions<AppOptions> appOptions)
+    public MessageService(ChatDbContext db, BlockService blocks, IOptions<AppOptions> appOptions)
     {
         _db = db;
+        _blocks = blocks;
         _appOptions = appOptions.Value;
     }
 
@@ -184,6 +187,12 @@ public sealed class MessageService
                 ToProtocolMessage(existing, ToOptionalReply(existingReply)),
                 Array.Empty<string>(),
                 Created: false);
+        }
+
+        // C1b：单聊任一方拉黑时拒绝新发送；上方幂等回执不拦（已落库消息的重试仍返回原回执）。
+        if (conversation.Type == ConversationType.Direct)
+        {
+            await _blocks.EnsureDirectMessageAllowedAsync(senderId, conversationId, cancellationToken);
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -395,6 +404,12 @@ public sealed class MessageService
             if (existing is not null)
             {
                 return new MessageForwardResult(ToProtocolMessage(existing), Array.Empty<string>(), Created: false);
+            }
+
+            // C1b：转发到单聊时同样校验拉黑关系（幂等回执已在上方返回，不拦重复请求）。
+            if (targetConversation.Type == ConversationType.Direct)
+            {
+                await _blocks.EnsureDirectMessageAllowedAsync(userId, targetId, cancellationToken);
             }
 
             var source = await _db.Messages.AsNoTracking()

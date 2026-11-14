@@ -291,3 +291,21 @@ CREATE TABLE favorites (
 
 CREATE INDEX idx_favorites_user_created ON favorites (user_id, created_at);
 CREATE INDEX idx_favorites_message ON favorites (message_id);
+
+-- ------------------------------------------------------------
+-- blocks：拉黑关系（C1b，有方向的单向行）
+-- blocker_user_id : 发起拉黑的用户
+-- blocked_user_id : 被拉黑的用户
+-- 说明：任一方拉黑期间，双方不能私聊、转发到对方私聊、再次申请好友或直接邀请对方入群；
+--       共同群消息与历史消息读取不受影响；拉黑不改变好友关系，解除拉黑只删除对应行。
+-- ------------------------------------------------------------
+CREATE TABLE blocks (
+    blocker_user_id TEXT NOT NULL,
+    blocked_user_id TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
+    PRIMARY KEY (blocker_user_id, blocked_user_id),
+    FOREIGN KEY (blocker_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (blocked_user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_blocks_blocked ON blocks (blocked_user_id);

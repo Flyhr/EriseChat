@@ -8,6 +8,7 @@ using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
+using Chat.Server.Modules.Blocks;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
@@ -96,6 +97,9 @@ builder.Services.AddScoped<FavoritesService>();
 // F-17：好友关系（好友申请/好友列表/备注分组）与 friend.changed 推送。
 builder.Services.AddScoped<FriendService>();
 builder.Services.AddSingleton<FriendRealtimeNotifier>();
+
+// C1b：拉黑关系（有方向单向行）；好友申请、群邀请、私聊发送/转发在业务入口调用其规则。
+builder.Services.AddScoped<BlockService>();
 
 // 消息（M1-08）：发送/补拉业务在 MessageService，WS 帧编排在 Realtime.MessageHub。
 builder.Services.AddScoped<MessageService>();
@@ -286,6 +290,8 @@ app.MapUserEndpoints();
 // 登录会话（F-13）：GET /api/sessions 与 DELETE /api/sessions/{sessionId}（软撤销 + WS 踢下线）。
 app.MapSessionEndpoints();
 app.MapFriendEndpoints();
+// 拉黑关系（C1b）：GET /api/blocks、PUT/DELETE /api/blocks/{userId}（幂等）。
+app.MapBlockEndpoints();
 // 个人收藏（F-38）：GET/POST /api/favorites、DELETE /api/favorites/{messageId}。
 app.MapFavoriteEndpoints();
 

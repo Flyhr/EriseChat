@@ -2,6 +2,7 @@ using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Data;
+using Chat.Server.Modules.Blocks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using FriendEntity = Chat.Server.Data.Entities.Friend;
@@ -42,11 +43,13 @@ public sealed class FriendService
     public const int PendingOutgoingLimit = 50;
 
     private readonly ChatDbContext _db;
+    private readonly BlockService _blocks;
     private readonly ILogger<FriendService> _logger;
 
-    public FriendService(ChatDbContext db, ILogger<FriendService> logger)
+    public FriendService(ChatDbContext db, BlockService blocks, ILogger<FriendService> logger)
     {
         _db = db;
+        _blocks = blocks;
         _logger = logger;
     }
 
@@ -134,6 +137,9 @@ public sealed class FriendService
         {
             throw ApiException.ValidationFailed("该账号当前不可用");
         }
+
+        // C1b：任一方拉黑时不允许再次申请好友；放在幂等分支之前，重试也返回 BLOCKED。
+        await _blocks.EnsureInteractionAllowedAsync(currentUserId, targetUserId, cancellationToken);
 
         var alreadyFriend = await _db.Friends.AsNoTracking()
             .AnyAsync(friend => friend.OwnerUserId == currentUserId && friend.FriendUserId == targetUserId,
@@ -223,6 +229,9 @@ public sealed class FriendService
                                          item.Status == FriendRequestStatus.Pending,
                 cancellationToken)
             ?? throw ApiException.NotFound("好友申请不存在或已处理");
+
+        // C1b：拉黑之后不再接受此前落库的申请（例如申请在拉黑前发出、拉黑后才被点接受）。
+        await _blocks.EnsureInteractionAllowedAsync(currentUserId, request.FromUserId, cancellationToken);
 
         var now = Now();
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);

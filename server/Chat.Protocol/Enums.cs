@@ -108,6 +108,9 @@ public static class ErrorCodes
     /// <summary>无权限执行该操作。</summary>
     public const string Forbidden = "FORBIDDEN";
 
+    /// <summary>双方存在拉黑关系，禁止私聊、好友申请或群邀请（C1b，REST 与 WS 共用）。</summary>
+    public const string Blocked = "BLOCKED";
+
     /// <summary>不是目标会话成员。</summary>
     public const string NotMember = "NOT_MEMBER";
 

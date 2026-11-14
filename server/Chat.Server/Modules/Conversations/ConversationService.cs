@@ -4,6 +4,7 @@ using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
+using Chat.Server.Modules.Blocks;
 using Chat.Server.Modules.Messages;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -55,17 +56,20 @@ public sealed class ConversationService
     private const int FileIdMaxLength = 64;
 
     private readonly ChatDbContext _db;
+    private readonly BlockService _blocks;
     private readonly SystemMessageWriter _systemMessages;
     private readonly AppOptions _appOptions;
     private readonly ILogger<ConversationService> _logger;
 
     public ConversationService(
         ChatDbContext db,
+        BlockService blocks,
         SystemMessageWriter systemMessages,
         IOptions<AppOptions> appOptions,
         ILogger<ConversationService> logger)
     {
         _db = db;
+        _blocks = blocks;
         _systemMessages = systemMessages;
         _appOptions = appOptions.Value;
         _logger = logger;
@@ -123,6 +127,9 @@ public sealed class ConversationService
         {
             throw new ApiException(ErrorCodes.NotFound, "目标用户不存在或不可用", StatusCodes.Status404NotFound);
         }
+
+        // C1b：任一方拉黑时不能新建单聊；已有单聊仍可读取历史（发送会被 MessageService 拦）。
+        await _blocks.EnsureInteractionAllowedAsync(currentUserId, otherUserId, cancellationToken);
 
         var normalizedTitle = NormalizeTitle(title);
         var directKey = BuildDirectKey(currentUserId, otherUserId);
@@ -234,6 +241,12 @@ public sealed class ConversationService
         if (invitedUsers.Any(user => user.Status != UserStatus.Active))
         {
             throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不可用", StatusCodes.Status404NotFound);
+        }
+
+        // C1b：建群时直接选人也算邀请，任一方拉黑时逐个拒绝。
+        foreach (var invitedId in invitedIds)
+        {
+            await _blocks.EnsureInteractionAllowedAsync(currentUserId, invitedId, cancellationToken);
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -371,6 +384,12 @@ public sealed class ConversationService
         if (candidateUsers.Any(user => user.Status != UserStatus.Active))
         {
             throw new ApiException(ErrorCodes.NotFound, "部分被邀请用户不可用", StatusCodes.Status404NotFound);
+        }
+
+        // C1b：任一方拉黑时不把对方拉进群（逐个校验候选；已在群成员不受影响）。
+        foreach (var candidateId in candidateIds)
+        {
+            await _blocks.EnsureInteractionAllowedAsync(currentUserId, candidateId, cancellationToken);
         }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();

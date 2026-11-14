@@ -576,6 +576,7 @@ batch 对象：
 | `ACCOUNT_DISABLED` | 账号已被禁用 |
 | `FILE_TOO_LARGE` | 上传文件超过大小上限（默认 50MB，可配置） |
 | `FILE_TYPE_NOT_ALLOWED` | 文件 MIME 或扩展名不在允许范围 |
+| `BLOCKED` | 双方存在拉黑关系，禁止私聊、好友申请或群邀请（C1b） |
 
 ## 6. 时序示例
 
@@ -707,6 +708,14 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 附件不复制：新消息与原消息引用同一 `files.id`（`messages.file_id`），客户端不重复下载/上传；此后目标会话成员按现有 `GET /api/files/{id}` 鉴权访问附件。原会话失去访问权不影响目标会话成员访问。
     - 广播：落库成功后向目标会话全部在线连接推送 `message.new`（含转发者本人连接，`clientMsgId` 置空，客户端按 `messageId` 去重）；幂等命中不广播。广播为尽力而为：单个在线连接发送失败只记录并跳过，不影响接口成功返回（消息已落库）。
 
+15. **拉黑关系（REST，v1，C1b）**：拉黑是有方向的单向关系（`blocks` 表，`blocker_user_id` → `blocked_user_id`）；任一方拉黑期间，双方不能新建单聊、不能互发或转发单聊消息、不能再次申请好友，也不能直接邀请对方入群。拉黑不改变好友关系，不影响已有单聊历史的读取（仍按会话成员权限）、共同群消息的收发与 `seq` 连续性；解除拉黑后按当时的好友/会话状态恢复。
+
+    - `GET /api/blocks`：当前账号拉黑的用户列表（按拉黑时间倒序），响应 `{ "blocks": [ { "userId", "displayName", "avatarFileId", "createdAt" } ] }`。
+    - `PUT /api/blocks/{userId}`：拉黑目标用户，成功返回 `{ "block": { ... } }`。**幂等**：已拉黑时返回原条目，不重复写入；不能拉黑自己（`VALIDATION_FAILED`）；目标不存在返回 `NOT_FOUND`。
+    - `DELETE /api/blocks/{userId}`：解除拉黑。**幂等**：不存在时同样返回 `204`。
+    - 服务端拦截点：好友申请发送、拉黑后接受此前落库的旧申请、新建单聊、建群直接选人、后续邀请成员均返回 `BLOCKED`（403）；单聊的 `message.send` 与转发到单聊的 `POST /api/messages/forward` 同样返回 `BLOCKED`。已落库消息的重试（`clientMsgId` 幂等命中）仍返回原回执，不受拉黑影响。
+    - 拉黑/解除不推送 WS 帧；客户端在打开资料卡、设置页时重新拉取，同账号多端各自刷新。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -788,3 +797,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（更新清单扩展） | 2026-11-12 | `GET /api/version` 追加四个可选字段 `webVersion` / `minVersion` / `releaseNotes` / `publishedAt`（旧客户端忽略；`version`、`protocolVersion`、`artifacts` 结构不变）；Web 构建产出 `web-version.json`，服务端据此下发 `webVersion`；发行元数据仅在 `release.json` 与 Web、两平台产物版本全部一致时下发；清单按平台版本判断更新，`version` 仅作总览；返回 `Cache-Control: no-store`；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（更新分发扩展） | 2026-11-12 | `/download/files/{fileName}` 额外放行固定名 `latest.yml` 与 `EriseChat-Setup-x.y.z.exe.blockmap`，单段文件名与路径穿越校验不变，安装包与 blockmap 保留 Range；`latest.yml` 返回 `Cache-Control: no-store`；`release.json` 不对外提供；`/api/version` 与原有 exe/APK 下载契约不变 |
 | v1（C1a 用户搜索隐私） | 2026-11-14 | `GET /api/users?search=` 不再返回他人邮箱（`email` 字段省略；仅 `/api/me` 与 `PATCH /api/me/profile` 下发本人邮箱）；搜索只按昵称模糊匹配，邮箱改为「整串是完整合法邮箱时精确匹配」，取消邮箱子串检索以避免枚举他人账号；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（C1b 拉黑与私聊权限） | 2026-11-14 | 新增 `blocks` 表（有方向单向行：`blocker_user_id` → `blocked_user_id`，复合主键 + `idx_blocks_blocked`，`protocol/schema.sql` 与 EF 迁移同步）与 REST `GET /api/blocks`、`PUT/DELETE /api/blocks/{userId}`（均幂等）；新增错误码 `BLOCKED`（403）：任一方拉黑期间，好友申请、拉黑后接受旧申请、新建单聊、建群选人、邀请成员、单聊发送、转发到单聊均拒绝，已落库消息的幂等重试不受影响；拉黑不改变好友关系，共同群消息与历史读取照常；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |

@@ -38,6 +38,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<Favorite> Favorites => Set<Favorite>();
 
+    public DbSet<Block> Blocks => Set<Block>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -55,6 +57,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureFriends(modelBuilder);
         ConfigureFriendRequests(modelBuilder);
         ConfigureFavorites(modelBuilder);
+        ConfigureBlocks(modelBuilder);
     }
 
     /// <summary>枚举 ↔ TEXT 小写转换（与 schema.sql 的 CHECK 值域一致）。</summary>
@@ -424,6 +427,29 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
             entity.HasOne<User>().WithMany()
                 .HasForeignKey(request => request.ToUserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureBlocks(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Block>(entity =>
+        {
+            entity.ToTable("blocks");
+
+            // 有方向的拉黑关系：任一行存在即阻止双方私聊/申请/邀请（C1b）。
+            entity.HasKey(block => new { block.BlockerUserId, block.BlockedUserId });
+            entity.Property(block => block.BlockerUserId).HasColumnName("blocker_user_id").IsRequired();
+            entity.Property(block => block.BlockedUserId).HasColumnName("blocked_user_id").IsRequired();
+            entity.Property(block => block.CreatedAt).HasColumnName("created_at");
+
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(block => block.BlockerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(block => block.BlockedUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(block => block.BlockedUserId).HasDatabaseName("idx_blocks_blocked");
         });
     }
 }
