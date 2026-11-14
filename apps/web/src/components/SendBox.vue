@@ -73,9 +73,14 @@ const props = withDefaults(
   },
 )
 
-/** 输入框可见行数：默认 3 行，最多 5 行，超出在框内滚动（行高取自 CSS，见 .send-box__input）。 */
-const TEXTAREA_MIN_ROWS = 3
+/** 输入框可见行数（批次 B3）：手机从 1 行起、桌面从 2 行起，统一最多 5 行，超出在框内滚动。
+ *  行高取自 CSS（见 .send-box__input），断点沿用全站 800px。 */
 const TEXTAREA_MAX_ROWS = 5
+
+function textareaMinRows(): number {
+  if (typeof window === 'undefined') return 2
+  return window.matchMedia('(max-width: 800px)').matches ? 1 : 2
+}
 
 /** 输入文本（F-04）：挂载时按所在会话的草稿初始化，切换会话时由 watch(conversationId) 重置。 */
 const text = ref(props.initialDraft ?? '')
@@ -173,13 +178,13 @@ function cancelRecording(): void {
   handle.cancel()
 }
 
-/** 依据内容调整 textarea 高度：默认 3 行、最多 5 行，超过后改为内部滚动。 */
+/** 依据内容调整 textarea 高度：手机 1 行 / 桌面 2 行起，最多 5 行，超过后改为内部滚动。 */
 function resizeInput(): void {
   const el = input.value
   if (!el) return
-  // 行高按实际计算值取，避免主题/字号变化后 3~5 行的像素上限失配（'normal' 时退回 21px）。
+  // 行高按实际计算值取，避免主题/字号变化后行数上限失配（'normal' 时退回 21px）。
   const lineHeight = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 21
-  const minHeight = lineHeight * TEXTAREA_MIN_ROWS
+  const minHeight = lineHeight * textareaMinRows()
   const maxHeight = lineHeight * TEXTAREA_MAX_ROWS
   el.style.height = 'auto'
   const contentHeight = el.scrollHeight
@@ -187,8 +192,31 @@ function resizeInput(): void {
   el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden'
 }
 
-/** 供 Chat 页在 Emoji 抽屉选择表情后调用：插入到当前光标处并保持焦点，不发送。 */
-function insertEmoji(emoji: string): void {
+/** 断点切换、软键盘弹出与旋转都会改变可视高度：重算输入框高度（手机 1 行 / 桌面 2 行）。 */
+let resizeFrame = 0
+
+function onViewportResize(): void {
+  if (resizeFrame) return
+  resizeFrame = window.requestAnimationFrame(() => {
+    resizeFrame = 0
+    resizeInput()
+  })
+}
+
+// 输入法组合状态（批次 B3）：候选选词阶段的 Enter 只用于确认候选，不发送消息。
+const composing = ref(false)
+let compositionEndedAt = 0
+
+function onCompositionStart(): void {
+  composing.value = true
+}
+
+function onCompositionEnd(): void {
+  composing.value = false
+  compositionEndedAt = Date.now()
+}
+
+/** 供 Chat 页在 Emoji 抽屉选择表情后调用：插入到当前光标处并保持焦点，不发送。 */function insertEmoji(emoji: string): void {
   const el = input.value
   const caret = el?.selectionStart ?? text.value.length
   const result = insertAtCursor(text.value, caret, emoji)
@@ -282,7 +310,8 @@ function selectActiveMention(): void {
 
 /** 键盘：面板打开时 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭；面板打开时 Enter 不发送消息。 */
 function onKeydown(event: KeyboardEvent): void {
-  if (event.isComposing || event.keyCode === 229) return
+  // 输入法组合中（含 Safari/Android 的 keyCode 229）一律不处理 Enter。
+  if (event.isComposing || event.keyCode === 229 || composing.value) return
 
   if (mentionOpen.value) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -303,6 +332,8 @@ function onKeydown(event: KeyboardEvent): void {
   }
 
   if (event.key === 'Enter' && !event.shiftKey) {
+    // 部分输入法在 compositionend 后立刻补发 Enter：短窗口内视为确认候选，不发送。
+    if (Date.now() - compositionEndedAt < 40) return
     event.preventDefault()
     submit()
     return
@@ -327,6 +358,10 @@ watch(mentionOpen, (open) => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
   document.removeEventListener('keydown', onRecordingKeydown, true)
+  window.removeEventListener('resize', onViewportResize)
+  window.visualViewport?.removeEventListener('resize', onViewportResize)
+  if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
+  resizeFrame = 0
   clearRecordingTimer()
   const handle = recording.value
   recording.value = null
@@ -362,7 +397,10 @@ watch(text, (value) => {
 })
 
 onMounted(() => {
-  if (text.value) void nextTick(resizeInput)
+  // 手机 1 行 / 桌面 2 行由脚本统一设置（rows 属性只是首帧占位）。
+  void nextTick(resizeInput)
+  window.addEventListener('resize', onViewportResize)
+  window.visualViewport?.addEventListener('resize', onViewportResize)
 })
 
 function submit(): void {
@@ -553,7 +591,7 @@ function onInput(): void {
         ref="input"
         v-model="text"
         class="send-box__input"
-        rows="3"
+        rows="2"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息"
@@ -561,6 +599,8 @@ function onInput(): void {
         :aria-activedescendant="mentionActiveId"
         @input="onInput"
         @keydown="onKeydown"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
         @keyup="updateMentionState"
         @click="updateMentionState"
         @focus="updateMentionState"
@@ -819,9 +859,9 @@ function onInput(): void {
 
 .send-box__input {
   width: 100%;
-  /* 默认 3 行、最多 5 行（1.5 行高 × 14px ≈ 21px/行），超过 5 行由 resizeInput 切为内部滚动。
-     行高变化时这里的像素上下限跟着变，避免与脚本里的行数计算失配。 */
-  min-height: calc(var(--ec-line-height-body, 1.5) * 1em * 3);
+  /* 桌面 2 行起、最多 5 行（批次 B3），超过 5 行由 resizeInput 切为内部滚动；
+     手机起始 1 行见下方 ≤800 覆盖。行高变化时像素上下限跟着变，避免与脚本行数失配。 */
+  min-height: calc(var(--ec-line-height-body, 1.5) * 1em * 2);
   max-height: calc(var(--ec-line-height-body, 1.5) * 1em * 5);
   padding: 0;
   border: none;
@@ -931,7 +971,8 @@ function onInput(): void {
   }
 
   .send-box__input {
-    min-height: var(--ec-size-mobile-input-min);
+    /* 批次 B3：手机输入框从 1 行起（工具栏另占 44px，输入区整体仍可点）。 */
+    min-height: calc(var(--ec-line-height-body, 1.5) * 1em);
     max-height: var(--ec-size-mobile-input-max);
   }
 

@@ -26,7 +26,11 @@ onMounted(() => {
     offline.value = state !== 'authed'
   })
 })
-onBeforeUnmount(() => unsubscribeWs?.())
+onBeforeUnmount(() => {
+  unsubscribeWs?.()
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 
 // 消息列表（纯展示，UI-02 批次2）：按 seq 升序渲染（输入即有序），跨天插入日期分隔；
 // 群聊他人消息展示头像+昵称；用户向上翻阅时收到新消息只累加「有新消息 ↓」浮标，不强制滚底。
@@ -102,6 +106,9 @@ const lastFirstMessageId = ref(props.messages[0]?.messageId ?? '')
 const loadAnchor = ref<{ scrollTop: number; scrollHeight: number } | null>(null)
 /** 批次 B2：最近一次滚动后的可见锚点，图片解码撑高列表时用它把视口拉回原位。 */
 let lastVisibleAnchor: { messageId: string; offset: number } | null = null
+/** 批次 B3：消息区尺寸变化（输入框增高 / 软键盘弹出）时保持贴底或阅读锚点。 */
+let resizeObserver: ResizeObserver | null = null
+let resizeObserverReady = false
 
 function totalMessages(): number {
   return props.messages.length
@@ -553,6 +560,21 @@ watch(
 onMounted(() => {
   windowRange.value = initialWindowRange(totalMessages(), INITIAL_WINDOW_SIZE)
   lastFirstMessageId.value = firstMessageId()
+  // 批次 B3：输入框增高、软键盘弹出都会改变消息区高度——贴底时保持贴底，浏览历史时按锚点保持位置。
+  if (typeof ResizeObserver !== 'undefined' && container.value) {
+    resizeObserver = new ResizeObserver(() => {
+      if (!resizeObserverReady) return
+      if (stickToBottom.value) {
+        scrollToBottom()
+        return
+      }
+      if (lastVisibleAnchor) restoreAnchor(lastVisibleAnchor, props.conversationId ?? '')
+    })
+    resizeObserver.observe(container.value)
+    window.requestAnimationFrame(() => {
+      resizeObserverReady = true
+    })
+  }
   const anchor = props.initialAnchor
   if (anchor && scrollToAnchor(anchor)) return
   void nextTick(() => {
