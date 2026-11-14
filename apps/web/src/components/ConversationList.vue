@@ -162,13 +162,6 @@ async function onUpdateSettings(payload: {
 
 <template>
   <section class="ec-conversation-list" aria-label="会话列表">
-    <!-- UI-D P2：补回参考图的列表标题（F-11 移除后信息层级偏弱）。 -->
-    <div class="ec-conversation-list__titlebar">
-      <div class="ec-conversation-list__greeting">
-        <p class="ec-conversation-list__eyebrow">欢迎回来</p>
-        <h1 class="ec-conversation-list__title">消息</h1>
-      </div>
-    </div>
     <header class="ec-conversation-list__header">
       <button
         type="button"
@@ -183,10 +176,10 @@ async function onUpdateSettings(payload: {
         type="button"
         class="ec-conversation-list__create"
         aria-label="发起聊天"
+        title="发起聊天"
         @click="emit('create')"
       >
-        <AppIcon name="plus" :size="16" />
-        <span class="ec-conversation-list__create-label">发起聊天</span>
+        <AppIcon name="plus" :size="18" />
       </button>
     </header>
 
@@ -243,48 +236,6 @@ async function onUpdateSettings(payload: {
 </template>
 
 <style scoped>
-/* UI-D P2：列表标题行，与聊天顶栏形成明确的信息层级。 */
-.ec-conversation-list__titlebar {
-  display: flex;
-  flex: none;
-  align-items: center;
-  height: 44px;
-  padding: 0 var(--ec-space-4);
-}
-
-.ec-conversation-list__greeting {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* UI-D P3：参考图 08 的欢迎语只在移动端出现，桌面保持单行标题。 */
-.ec-conversation-list__eyebrow {
-  display: none;
-  margin: 0;
-  color: var(--ec-text-secondary);
-  font-size: 11px;
-  line-height: 1.3;
-}
-
-@media (max-width: 800px) {
-  .ec-conversation-list__titlebar {
-    height: 56px;
-  }
-
-  .ec-conversation-list__eyebrow {
-    display: block;
-  }
-}
-
-.ec-conversation-list__title {
-  margin: 0;
-  color: var(--ec-text-primary);
-  font-size: 18px;
-  font-weight: var(--ec-font-weight-semibold);
-  line-height: 1.3;
-}
-
 .ec-conversation-list {
   display: flex;
   flex-direction: column;
@@ -361,16 +312,16 @@ async function onUpdateSettings(payload: {
 
 .ec-conversation-list__create {
   display: inline-flex;
-  gap: var(--ec-space-1);
-  align-items: center;
   flex: none;
-  padding: 4px var(--ec-space-2);
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   border: none;
   border-radius: var(--ec-radius-sm);
   background: transparent;
   color: var(--ec-brand-600);
-  font-size: var(--ec-font-size-secondary);
-  font-weight: var(--ec-font-weight-medium);
   cursor: pointer;
   transition: background var(--ec-transition-fast) var(--ec-ease);
 }
@@ -497,10 +448,6 @@ async function onUpdateSettings(payload: {
     min-height: var(--ec-touch-target);
     padding: 0;
     border-radius: var(--ec-radius-full);
-  }
-
-  .ec-conversation-list__create-label {
-    display: none;
   }
 
   .ec-conversation-list__searchbox {

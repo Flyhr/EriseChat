@@ -377,10 +377,10 @@ onBeforeUnmount(() => {
           type="button"
           class="contacts-page__new-group"
           aria-label="新建群聊"
+          title="新建群聊"
           @click="newGroupOpen = true"
         >
-          <AppIcon name="plus" :size="16" />
-          <span class="contacts-page__new-group-label">新建群聊</span>
+          <AppIcon name="plus" :size="18" />
         </button>
       </header>
 
@@ -690,16 +690,23 @@ onBeforeUnmount(() => {
 
 .contacts-page__new-group {
   display: inline-flex;
-  gap: var(--ec-space-1);
+  flex: none;
   align-items: center;
-  padding: 4px var(--ec-space-2);
-  border: 1px solid var(--ec-border);
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  /* 必要控件轮廓走 --ec-border-strong（≥3:1）。 */
+  border: 1px solid var(--ec-border-strong);
   border-radius: var(--ec-radius-full);
   background: var(--ec-surface);
   color: var(--ec-brand-600);
-  font-size: var(--ec-font-size-secondary);
-  font-weight: var(--ec-font-weight-medium);
   cursor: pointer;
+}
+
+.contacts-page__new-group:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 .contacts-page__tabs {
@@ -1051,12 +1058,9 @@ onBeforeUnmount(() => {
   }
 
   .contacts-page__new-group {
-    min-height: 36px;
+    width: var(--ec-touch-target);
+    height: var(--ec-touch-target);
     border-radius: var(--ec-radius-full);
-  }
-
-  .contacts-page__new-group-label {
-    display: none;
   }
 
   .contacts-page__tabs {
