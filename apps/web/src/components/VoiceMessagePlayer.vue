@@ -36,6 +36,8 @@ let audio: HTMLAudioElement | null = null
 let disposed = false
 /** audio 尚未创建时点进度条记下的位置，播放时从该处开始。 */
 let pendingSeekMs = 0
+/** 用户本会话内明确拖动/键盘定位过：下次播放以最新位置为准，不再套用暂停时缓存的旧位置。 */
+let userSeeked = false
 
 const totalMs = computed(() =>
   Number.isFinite(props.durationMs) && props.durationMs > 0 ? Math.floor(props.durationMs) : 0,
@@ -68,6 +70,7 @@ function stopPlayback(): void {
   progressMs.value = 0
   seekMs.value = null
   pendingSeekMs = 0
+  userSeeked = false
   if (state.value === 'playing') state.value = 'idle'
   releaseVoicePlayback(stopPlayback)
 }
@@ -76,6 +79,7 @@ function onEnded(): void {
   progressMs.value = 0
   seekMs.value = null
   pendingSeekMs = 0
+  userSeeked = false
   state.value = 'idle'
   clearVoicePosition(props.fileId)
   releaseVoicePlayback(stopPlayback)
@@ -91,6 +95,7 @@ function onError(): void {
   state.value = 'error'
   progressMs.value = 0
   seekMs.value = null
+  userSeeked = false
   clearVoicePosition(props.fileId)
   releaseVoicePlayback(stopPlayback)
 }
@@ -100,6 +105,9 @@ function applySeek(ms: number): void {
   const target = clampVoiceSeekMs(ms, props.durationMs)
   progressMs.value = target
   pendingSeekMs = target
+  userSeeked = true
+  // 以最新拖动位置覆盖暂停时缓存的位置，避免下次播放被旧位置盖掉。
+  if (target > 0 && target < totalMs.value) rememberVoicePosition(props.fileId, target)
   if (!audio) return
   if (target >= totalMs.value && totalMs.value > 0) {
     // 拖到最右端：按播放结束处理（复位）
@@ -203,7 +211,8 @@ async function togglePlayback(): Promise<void> {
     }
   }
   // C2b：从当前登录期间记录的位置继续（播完已清除，不会把进度按旧值恢复）。
-  const savedMs = recallVoicePosition(props.fileId)
+  // 用户刚拖动过时以最新位置为准，不被暂停时缓存的旧位置覆盖。
+  const savedMs = userSeeked ? 0 : recallVoicePosition(props.fileId)
   if (savedMs > 0 && savedMs < totalMs.value) {
     pendingSeekMs = savedMs
     audio.currentTime = savedMs / 1000
@@ -212,7 +221,10 @@ async function togglePlayback(): Promise<void> {
   claimVoicePlayback(stopPlayback)
   try {
     await audio.play()
-    if (!disposed) state.value = 'playing'
+    if (!disposed) {
+      state.value = 'playing'
+      userSeeked = false
+    }
   } catch {
     if (!disposed) state.value = 'error'
     releaseVoicePlayback(stopPlayback)

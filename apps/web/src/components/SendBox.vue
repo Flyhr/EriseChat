@@ -11,6 +11,7 @@ import { filesOfClipboard, normalizeDroppedFile } from '../core/fileDrop'
 import { replyCardText, type ReplyPreviewLike } from '../core/replyPreview'
 import { mapRecorderError, startVoiceRecording, type VoiceRecorderHandle } from '../core/recorder'
 import { formatDuration } from '../core/voice'
+import { claimVoicePlayback, releaseVoicePlayback } from '../core/voicePlayer'
 
 // 发送框（纯展示 + 本地输入）：文本只 emit send，附件只 emit file-selected；
 // 上传、压缩、发送状态机由 pages/Chat.vue 与 stores/messages.ts 负责。
@@ -116,6 +117,14 @@ const voiceSupported = computed(
 )
 let recordingTimer: number | null = null
 let recordingStartedAt = 0
+/** 录音/试听操作令牌：切换会话或卸载时递增，迟到的启动/停止结果直接作废。 */
+let voiceSession = 0
+
+/** 让所有在途的录音启动/停止失效（切会话、卸载、取消后调用）。 */
+function invalidateVoiceSession(): void {
+  voiceSession += 1
+  recordingStopping.value = false
+}
 
 // C2b：录音结束后先进试听，用户确认「发送」才交给父组件；取消/重录不入队。
 interface VoicePreview {
@@ -129,13 +138,17 @@ const previewPlaying = ref(false)
 let previewAudio: HTMLAudioElement | null = null
 const previewActive = computed(() => voicePreview.value !== null)
 
+/** 停止试听并交还全局播放权（暂停、重录、发送、切换会话或卸载时调用）。 */
+function stopPreviewPlayback(): void {
+  if (previewAudio) previewAudio.pause()
+  previewPlaying.value = false
+  releaseVoicePlayback(stopPreviewPlayback)
+}
+
 /** 释放试听音频与对象 URL（取消、重录、发送、切换会话或卸载时调用）。 */
 function clearVoicePreview(): void {
-  if (previewAudio) {
-    previewAudio.pause()
-    previewAudio = null
-  }
-  previewPlaying.value = false
+  stopPreviewPlayback()
+  previewAudio = null
   if (voicePreview.value) URL.revokeObjectURL(voicePreview.value.url)
   voicePreview.value = null
 }
@@ -148,17 +161,20 @@ async function togglePreviewPlayback(): Promise<void> {
     previewAudio.addEventListener('ended', () => {
       previewPlaying.value = false
       if (previewAudio) previewAudio.currentTime = 0
+      releaseVoicePlayback(stopPreviewPlayback)
     })
   }
   if (previewPlaying.value) {
-    previewAudio.pause()
-    previewPlaying.value = false
+    stopPreviewPlayback()
     return
   }
+  // 与聊天里的语音消息共用全局单路播放：开始试听前先停掉正在播放的语音。
+  claimVoicePlayback(stopPreviewPlayback)
   try {
     await previewAudio.play()
     previewPlaying.value = true
   } catch {
+    releaseVoicePlayback(stopPreviewPlayback)
     emit('voice-error', '试听失败，请重试')
   }
 }
@@ -215,8 +231,14 @@ async function startRecording(): Promise<void> {
     return
   }
   closeMention()
+  const session = voiceSession
   try {
     const handle = await startVoiceRecording()
+    // 等待麦克风授权期间切换了会话/卸载：迟到的句柄直接取消，不要登记到输入区。
+    if (session !== voiceSession) {
+      handle.cancel()
+      return
+    }
     recording.value = handle
     recordingStartedAt = Date.now()
     recordingElapsed.value = 0
@@ -226,6 +248,7 @@ async function startRecording(): Promise<void> {
       if (recordingElapsed.value >= 60_000) void finishRecording(true)
     }, 200)
   } catch (error) {
+    if (session !== voiceSession) return
     emit('voice-error', mapRecorderError(error))
   }
 }
@@ -233,10 +256,13 @@ async function startRecording(): Promise<void> {
 async function finishRecording(autoStop = false): Promise<void> {
   const handle = recording.value
   if (!handle || recordingStopping.value) return
+  const session = voiceSession
   recordingStopping.value = true
   clearRecordingTimer()
   try {
     const result = await handle.stop()
+    // 停止期间切换了会话/卸载：丢弃结果，不再创建试听。
+    if (session !== voiceSession) return
     recording.value = null
     if (result.durationMs < 1_000 || result.blob.size === 0) {
       emit('voice-error', '录音时间太短（至少 1 秒）')
@@ -251,11 +277,14 @@ async function finishRecording(autoStop = false): Promise<void> {
       autoStopped: autoStop || handle.autoStopped,
     }
   } catch {
+    if (session !== voiceSession) return
     recording.value = null
     emit('voice-error', '录音结束失败，请重试')
   } finally {
-    recordingStopping.value = false
-    recordingElapsed.value = 0
+    if (session === voiceSession) {
+      recordingStopping.value = false
+      recordingElapsed.value = 0
+    }
   }
 }
 
@@ -265,7 +294,19 @@ function cancelRecording(): void {
   recording.value = null
   clearRecordingTimer()
   recordingElapsed.value = 0
+  invalidateVoiceSession()
   handle.cancel()
+}
+
+/** 切换会话/卸载时放弃录音与试听：让迟到的启动/停止结果失效，并取消录音句柄。 */
+function abandonVoiceInput(): void {
+  invalidateVoiceSession()
+  const handle = recording.value
+  recording.value = null
+  clearRecordingTimer()
+  recordingElapsed.value = 0
+  handle?.cancel()
+  clearVoicePreview()
 }
 
 /** 依据内容调整 textarea 高度：手机 1 行 / 桌面 2 行起，最多 5 行，超过后改为内部滚动。 */
@@ -448,24 +489,20 @@ watch(mentionOpen, (open) => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
   document.removeEventListener('keydown', onRecordingKeydown, true)
+  document.removeEventListener('keydown', onPreviewKeydown, true)
   window.removeEventListener('resize', onViewportResize)
   window.visualViewport?.removeEventListener('resize', onViewportResize)
   if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
   resizeFrame = 0
-  clearRecordingTimer()
-  clearVoicePreview()
-  const handle = recording.value
-  recording.value = null
-  handle?.cancel()
+  abandonVoiceInput()
 })
 
-// 切换会话/成员变化时关闭面板，避免把上一个会话的候选带过去；录音中切换会话则取消录音。
+// 切换会话/成员变化时关闭面板，避免把上一个会话的候选带过去；录音与试听随会话切换失效。
 watch(
   () => props.conversationId,
   () => {
     closeMention()
-    cancelRecording()
-    clearVoicePreview()
+    abandonVoiceInput()
   },
 )
 watch(
