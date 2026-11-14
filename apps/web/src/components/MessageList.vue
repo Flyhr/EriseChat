@@ -84,6 +84,8 @@ const emit = defineEmits<{
   'jump-to-message': [messageId: string]
   /** F-40：多选模式下切换消息选中状态。 */
   'toggle-select': [messageId: string]
+  /** C3：点击回应条切换自己在该消息上的表情（由会话页提交设置/移除）。 */
+  'toggle-reaction': [messageId: string, emoji: string]
 }>()
 
 const container = ref<HTMLDivElement | null>(null)
@@ -406,6 +408,36 @@ function onImageLoaded(): void {
   void nextTick(() => restoreAnchor(anchor, conversationId))
 }
 
+/**
+ * C3：回应条出现/消失会改变行高。只有消息集合不变（纯回应变化）时才按锚点补偿，
+ * 避免与历史前插、新消息追加和会话切换的既有逻辑互相干扰。
+ */
+const reactionSignature = computed(() =>
+  props.messages
+    .map((message) => {
+      const reactions = message.reactions?.map((reaction) => `${reaction.emoji}${reaction.count}`).join(',') ?? ''
+      return `${message.messageId}:${reactions}`
+    })
+    .join('\n'),
+)
+let previousMessageIds = ''
+let previousReactionSignature = ''
+
+watch(
+  reactionSignature,
+  () => {
+    const messageIds = props.messages.map((message) => message.messageId).join('\n')
+    const onlyReactionsChanged =
+      messageIds === previousMessageIds &&
+      previousReactionSignature !== '' &&
+      reactionSignature.value !== previousReactionSignature
+    previousMessageIds = messageIds
+    previousReactionSignature = reactionSignature.value
+    if (onlyReactionsChanged) onImageLoaded()
+  },
+  { flush: 'pre' },
+)
+
 /** F-18：把气泡的操作菜单请求原样转发给会话页。 */
 function forwardOpenActions(messageId: string, position: { x: number; y: number }): void {
   emit('open-actions', messageId, position)
@@ -658,11 +690,13 @@ onMounted(() => {
             :self-display-name="selfDisplayName ?? ''"
             :selectable="selecting === true"
             :selected="selectedIds?.includes(item.message.messageId) ?? false"
+            :reactions="item.message.reactions"
             @image-loaded="onImageLoaded"
             @preview-image="emit('preview-image', $event)"
             @open-actions="forwardOpenActions"
             @jump-to-message="emit('jump-to-message', $event)"
             @toggle-select="emit('toggle-select', $event)"
+            @toggle-reaction="(messageId, emoji) => emit('toggle-reaction', messageId, emoji)"
           />
         </template>
       </template>

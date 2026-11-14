@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue'
-import type { Message, VoiceContent } from '../types/frames'
+import type { Message, ReactionSummary, VoiceContent } from '../types/frames'
 import type { PendingMessage, PendingStatus } from '../stores/messages'
 import { systemMessageText } from '../core/groupChat'
 import { hasSelfMention, splitRichText } from '../core/mentions'
 import { isNativeShell, openExternalUrl } from '../core/externalLink'
+import { reactionGlyph, reactionLabel } from '../core/reactions'
 import { replyCardText } from '../core/replyPreview'
 import Avatar from './Avatar.vue'
 import AppIcon from './AppIcon.vue'
@@ -42,6 +43,8 @@ const props = withDefaults(
     selected?: boolean
     /** UI-D P2-B：断线期间 pending 消息展示「消息待发送」而非「发送中」。 */
     offline?: boolean
+    /** C3：服务端权威的回应摘要（含本人选择）；空数组表示没有回应。 */
+    reactions?: readonly ReactionSummary[]
   }>(),
   {
     self: false,
@@ -55,6 +58,7 @@ const props = withDefaults(
     selectable: false,
     selected: false,
     offline: false,
+    reactions: () => [],
   },
 )
 
@@ -70,7 +74,17 @@ const emit = defineEmits<{
   'jump-to-message': [messageId: string]
   /** F-40：多选模式下切换该消息的选中状态。 */
   'toggle-select': [messageId: string]
+  /** C3：点击回应条切换自己在该消息上的表情（同一表情再次点击即取消）。 */
+  'toggle-reaction': [messageId: string, emoji: string]
 }>()
+
+/** C3：已撤回的消息不展示回应；其余按服务端摘要渲染。 */
+const reactionItems = computed(() =>
+  recalled.value ? [] : (props.reactions ?? []).filter((reaction) => reaction.count > 0),
+)
+
+/** 回应只针对已落库消息；pending 消息没有 messageId，也不会渲染回应条。 */
+const reactionTargetId = computed(() => ('messageId' in props.message ? props.message.messageId : ''))
 
 /** F-28：语音消息内容（{ fileId, durationMs }）；非语音/已撤回时为空。 */
 const voiceContent = computed<VoiceContent | null>(() => {
@@ -363,6 +377,23 @@ const timeText = computed(() =>
             {{ receipt === 'read' ? '已读' : '未读' }}
           </span>
         </div>
+      </div>
+      <!-- C3：回应条（气泡/媒体卡下方、时间元信息上方）；多选模式下让位给整行点选。 -->
+      <div v-if="reactionItems.length > 0 && !selectable" class="message-reactions" role="group" aria-label="消息表情回应">
+        <button
+          v-for="reaction in reactionItems"
+          :key="reaction.emoji"
+          type="button"
+          class="message-reactions__item"
+          :class="{ 'message-reactions__item--mine': reaction.mine }"
+          :aria-label="`${reactionLabel(reaction.emoji)}，${reaction.count} 人`"
+          :aria-pressed="reaction.mine"
+          :title="reactionLabel(reaction.emoji)"
+          @click.stop="emit('toggle-reaction', reactionTargetId, reaction.emoji)"
+        >
+          <span class="message-reactions__glyph" aria-hidden="true">{{ reactionGlyph(reaction.emoji) }}</span>
+          <span class="message-reactions__count">{{ reaction.count }}</span>
+        </button>
       </div>
       <div class="message-row__meta">
         <!-- 媒体消息不套气泡，时间与已读回执改到媒体下方同一行。 -->
@@ -784,6 +815,59 @@ const timeText = computed(() =>
     height: 32px;
     opacity: 1;
   }
+}
+
+/* C3：回应条。自己一侧右对齐；窄屏允许换行，不改变气泡宽度与媒体卡布局。 */
+.message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ec-space-1);
+  margin-top: var(--ec-space-1);
+}
+
+.message-row--self .message-reactions {
+  justify-content: flex-end;
+}
+
+.message-reactions__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 0 var(--ec-space-2);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-surface);
+  color: var(--ec-text-secondary);
+  font: inherit;
+  font-size: var(--ec-font-size-secondary);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--ec-transition-fast) var(--ec-ease);
+}
+
+.message-reactions__item:hover {
+  background: var(--ec-surface-hover);
+}
+
+.message-reactions__item--mine {
+  border-color: var(--ec-brand-600);
+  background: var(--ec-brand-050);
+  color: var(--ec-brand-600);
+}
+
+.message-reactions__item:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: 1px;
+}
+
+.message-reactions__glyph {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.message-reactions__count {
+  font-variant-numeric: tabular-nums;
 }
 
 </style>

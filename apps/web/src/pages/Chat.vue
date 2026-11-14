@@ -16,6 +16,7 @@ import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
+import { messagesApi } from '../api/messages'
 import { isImageFile, validateAttachment } from '../core/attachments'
 import { createUploadItem, type PendingImageItem, type UploadItem } from '../core/uploadQueue'
 import type { FileContent } from '../types/frames'
@@ -39,6 +40,7 @@ import {
   writeReadingAnchor,
 } from '../core/readingPosition'
 import { shouldAdvanceRead } from '../core/readReceipt'
+import { myReactionOf } from '../core/reactions'
 import { showToast } from '../core/toast'
 import { TypingThrottle } from '../core/typingThrottle'
 import type { ReplyPreviewLike } from '../core/replyPreview'
@@ -367,6 +369,52 @@ const actionMenuSenderName = computed(() => {
 function onOpenActions(messageId: string, position: { x: number; y: number }): void {
   if (!activeId.value) return
   actionMenu.value = { messageId, x: position.x, y: position.y }
+}
+
+/** C3：操作菜单里高亮本人已选的表情（再点同一表情即取消）。 */
+const actionMenuSelfReaction = computed(() => myReactionOf(actionMenuMessage.value?.reactions))
+
+/** C3：正在提交回应的消息 ID，同一消息在途期间忽略重复点击。 */
+const reactionBusyIds = ref<string[]>([])
+
+/** C3：菜单顶部表情行——关闭菜单后按「同一表情再点即取消」换算成设置/移除。 */
+function onReactionSelect(emoji: string): void {
+  const message = actionMenuMessage.value
+  actionMenu.value = null
+  if (message) void submitReaction(message, emoji)
+}
+
+/** C3：回应条快捷切换（点击自己已选的表情即取消）。 */
+function onToggleReaction(messageId: string, emoji: string): void {
+  const message = displayMessages.value.find((item) => item.messageId === messageId)
+  if (message) void submitReaction(message, emoji)
+}
+
+/**
+ * C3：提交回应。只以服务端返回的权威摘要为准，失败时保留最后一次确认状态并提示；
+ * 切会话/切账号或在途期间收到更新的推送时丢弃迟到的响应。
+ */
+async function submitReaction(message: Message, emoji: string): Promise<void> {
+  const conversationId = activeId.value
+  if (!conversationId || reactionBusyIds.value.includes(message.messageId)) return
+  if (typeof message.deletedAt === 'number') return
+  const userId = selfUserId.value
+  const version = messages.reactionVersionOf(conversationId, message.messageId)
+  const mine = myReactionOf(message.reactions)
+  reactionBusyIds.value = [...reactionBusyIds.value, message.messageId]
+  try {
+    const result =
+      mine === emoji
+        ? await messagesApi.removeReaction(conversationId, message.messageId)
+        : await messagesApi.setReaction(conversationId, message.messageId, emoji)
+    if (activeId.value !== conversationId || selfUserId.value !== userId) return
+    if (messages.reactionVersionOf(conversationId, message.messageId) !== version) return
+    messages.applyReactionSummary(conversationId, message.messageId, result.reactions)
+  } catch (cause) {
+    if (activeId.value === conversationId) showToast(friendlyError(cause), 'error')
+  } finally {
+    reactionBusyIds.value = reactionBusyIds.value.filter((id) => id !== message.messageId)
+  }
 }
 
 /** F-26：resolve 消息发送者昵称（收藏快照用；找不到时回退「我 / 未知成员」）。 */
@@ -2256,6 +2304,7 @@ function onWindowDrop(event: DragEvent): void {
               @open-actions="onOpenActions"
               @jump-to-message="onJumpToMessage"
               @toggle-select="toggleSelected"
+              @toggle-reaction="onToggleReaction"
             />
             <div v-if="selecting" class="chat-page__selection-bar" role="region" aria-label="多选操作">
               <span class="chat-page__selection-count">
@@ -2375,7 +2424,9 @@ function onWindowDrop(event: DragEvent): void {
           actionMenuMessage.messageId === pinnedMessage.messageId,
       )"
       :position="actionMenu ? { x: actionMenu.x, y: actionMenu.y } : { x: 0, y: 0 }"
+      :self-reaction="actionMenuSelfReaction"
       @select="onActionSelect"
+      @react="onReactionSelect"
       @close="actionMenu = null"
     />
     <AppDialog

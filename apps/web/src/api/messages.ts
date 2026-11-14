@@ -2,7 +2,7 @@
 // 正常收发走 WebSocket（core/ws.ts）；这里的 REST 只做历史分页兜底（project-overview.md §7.5）。
 // F-11：新增消息搜索（REST 形状，不属于协议帧；Message 结构沿用 protocol.md §4.3）。
 import { http } from '../core/http'
-import type { Message } from '../types/frames'
+import type { Message, ReactionSummary } from '../types/frames'
 
 export interface MessagePage {
   /** 按 seq 升序 */
@@ -25,6 +25,11 @@ export interface MessageContextPage {
   messages: Message[]
   hasOlder: boolean
   hasNewer: boolean
+}
+
+/** C3：设置/移除回应后服务端返回该消息的最新摘要（mine 按当前账号计算）。 */
+export interface MessageReactionsResponse {
+  reactions: ReactionSummary[]
 }
 
 export interface MessageSearchOptions {
@@ -91,4 +96,15 @@ export const messagesApi = {
    */
   forward: (body: { messageId: string; targetConversationId: string; clientMsgId: string }) =>
     http.post<Message>('/messages/forward', body),
+  /** C3：设置我在该消息上的回应（同一表情重复 PUT 幂等）。 */
+  setReaction: (conversationId: string, messageId: string, reaction: string) =>
+    http.put<MessageReactionsResponse>(
+      `/conversations/${conversationId}/messages/${messageId}/reactions/mine`,
+      { reaction },
+    ),
+  /** C3：移除我在该消息上的回应（无回应时同样幂等）。 */
+  removeReaction: (conversationId: string, messageId: string) =>
+    http.delete<MessageReactionsResponse>(
+      `/conversations/${conversationId}/messages/${messageId}/reactions/mine`,
+    ),
 }

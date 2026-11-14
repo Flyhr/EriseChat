@@ -6,6 +6,7 @@ import {
   type MessageActionId,
   type MessageActionOptions,
 } from '../core/messageActions'
+import { REACTION_EMOJIS, reactionGlyph, reactionLabel } from '../core/reactions'
 
 // F-18：消息操作菜单（右键/长按打开）。只负责展示与派发 action，
 // 撤回/编辑是否可用由 core/messageActions 按身份与时间窗口过滤（服务端仍是最终判定）。
@@ -25,6 +26,8 @@ const props = withDefaults(
     pinned?: boolean
     /** 触发位置（视口坐标；移动端贴底时忽略）。 */
     position: { x: number; y: number }
+    /** C3：本人已选的表情标识（用于高亮与再次点击取消）。 */
+    selfReaction?: string
   }>(),
   {
     isGroup: false,
@@ -33,17 +36,21 @@ const props = withDefaults(
     canManagePinned: false,
     pinned: false,
     position: () => ({ x: 0, y: 0 }),
+    selfReaction: '',
   },
 )
 
 const emit = defineEmits<{
   select: [action: MessageActionId]
   close: []
+  /** C3：选择常用表情回应（由会话页换算成设置/移除请求）。 */
+  react: [emoji: string]
 }>()
 
 const MENU_WIDTH = 148
 const ITEM_HEIGHT = 40
 const MARGIN = 8
+const REACTION_ROW_HEIGHT = 44
 
 const menu = ref<HTMLElement | null>(null)
 let previousFocus: HTMLElement | null = null
@@ -64,7 +71,7 @@ const actions = computed(() => {
 const menuStyle = computed(() => {
   if (!props.open) return undefined
   if (window.matchMedia('(max-width: 800px)').matches) return undefined
-  const height = actions.value.length * ITEM_HEIGHT + MARGIN * 2
+  const height = actions.value.length * ITEM_HEIGHT + REACTION_ROW_HEIGHT + MARGIN * 2
   const maxX = Math.max(MARGIN, window.innerWidth - MENU_WIDTH - MARGIN)
   const maxY = Math.max(MARGIN, window.innerHeight - height - MARGIN)
   const x = Math.min(Math.max(props.position.x, MARGIN), maxX)
@@ -133,6 +140,22 @@ onBeforeUnmount(() => {
       aria-label="消息操作"
       :style="menuStyle"
     >
+      <!-- C3：菜单顶部一排常用表情；点击即设置/切换自己的回应，Esc 与焦点归还沿用菜单行为。 -->
+      <div class="message-action-menu__reactions" role="group" aria-label="表情回应">
+        <button
+          v-for="emoji in REACTION_EMOJIS"
+          :key="emoji"
+          type="button"
+          role="menuitem"
+          class="message-action-menu__reaction"
+          :class="{ 'message-action-menu__reaction--active': emoji === selfReaction }"
+          :aria-label="reactionLabel(emoji)"
+          :aria-pressed="emoji === selfReaction"
+          @click="emit('react', emoji)"
+        >
+          {{ reactionGlyph(emoji) }}
+        </button>
+      </div>
       <button
         v-for="action in actions"
         :key="action.id"
@@ -193,6 +216,41 @@ onBeforeUnmount(() => {
 .message-action-menu__item--danger:hover {
   background: var(--ec-surface-hover);
   color: var(--ec-danger);
+}
+
+/* C3：常用表情行（与菜单项同处 role="menu"，方向键在整份 menuitem 列表内循环）。 */
+.message-action-menu__reactions {
+  display: flex;
+  gap: var(--ec-space-1);
+  margin-bottom: var(--ec-space-1);
+  padding: 0 var(--ec-space-1) var(--ec-space-1);
+  border-bottom: 1px solid var(--ec-border);
+}
+
+.message-action-menu__reaction {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--ec-radius-sm);
+  background: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.message-action-menu__reaction:hover {
+  background: var(--ec-brand-050);
+}
+
+.message-action-menu__reaction--active {
+  border-color: var(--ec-brand-600);
+  background: var(--ec-brand-050);
+}
+
+.message-action-menu__reaction:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: 1px;
 }
 
 /* ≤800：贴底操作表（类似系统 ActionSheet），按钮加高便于触摸。 */
