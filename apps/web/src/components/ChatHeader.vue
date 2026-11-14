@@ -72,24 +72,28 @@ function onDocumentPointerDown(event: PointerEvent): void {
 }
 
 function onDocumentKeyDown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') closeMenu()
+  if (event.key !== 'Escape' || !menuOpen.value) return
+  // 顶层浮层先消费 Esc：否则聊天页的 Esc 监听会同时把会话切回列表。
+  event.preventDefault()
+  closeMenu()
 }
 
 watch(menuOpen, (open) => {
   if (typeof document === 'undefined') return
   if (open) {
     document.addEventListener('pointerdown', onDocumentPointerDown, true)
-    document.addEventListener('keydown', onDocumentKeyDown)
+    // 捕获阶段注册，保证早于聊天页的 bubble 监听。
+    document.addEventListener('keydown', onDocumentKeyDown, true)
   } else {
     document.removeEventListener('pointerdown', onDocumentPointerDown, true)
-    document.removeEventListener('keydown', onDocumentKeyDown)
+    document.removeEventListener('keydown', onDocumentKeyDown, true)
   }
 })
 
 onBeforeUnmount(() => {
   if (typeof document === 'undefined') return
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
-  document.removeEventListener('keydown', onDocumentKeyDown)
+  document.removeEventListener('keydown', onDocumentKeyDown, true)
 })
 
 // 详情容器关闭后把焦点还给「更多」按钮（批次 B2 焦点归还）。
