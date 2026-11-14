@@ -317,7 +317,7 @@ cursor 对象：
 |---|---|---|---|
 | `type` | string | 是 | 固定 `sync.response` |
 | `reqId` | string | 否 | 回传请求的 `reqId` |
-| `batches` | array | 是 | 每项 `{ conversationId, messages }`；无新消息的会话不出现 |
+| `batches` | array | 是 | 每项 `{ conversationId, messages }`；无新消息的会话不出现（客户端未提供 `updatedAfter` 时会返回游标初始化 batch，见规则 7） |
 | `hasMore` | boolean | 是 | `true` 表示至少一个会话还有未返回消息，需继续请求 |
 
 batch 对象：
@@ -327,7 +327,7 @@ batch 对象：
 | `conversationId` | string | 是 | 会话 ID |
 | `messages` | array | 是 | Message 数组，按 `seq` **升序**；每条 `seq > lastSeq` |
 | `updates` | array | 否 | 状态变化消息：该会话中 `edited_at` / `deleted_at` / `reactions_updated_at` 晚于 `updatedAfter` 的消息（C3 起含回应变化）；`seq` 不变，仅用于覆盖本地缓存；缺省表示没有 |
-| `updatedThrough` | integer | 否 | 下次请求可用的 `updatedAfter`（服务端时钟，UTC 毫秒） |
+| `updatedThrough` | integer | 否 | 下次请求可用的 `updatedAfter`（服务端时钟，UTC 毫秒）；每条返回的 batch 都携带，客户端首次没有 `updatedAfter` 时靠它建立游标 |
 
 规则：
 
@@ -337,8 +337,8 @@ batch 对象：
 4. `sync.request` 是只读操作，可重复调用；客户端仍需按 `messageId` 去重、按 `seq` 排序。
 5. 补拉只返回消息，不返回会话元数据；会话元数据由 `conv.list` / `conv.updated` 维护。
 6. `cursors[].updatedAfter`（F-34）用于补齐已缓存消息的撤回/编辑（C3 起还包含回应新增、替换与取消）：服务端把 `edited_at`、`deleted_at` 或 `reactions_updated_at` 晚于该时间的消息放入对应 batch 的 `updates`，按状态变更时间升序，随批一次性返回（状态变化量远小于消息量，不参与 `messages` 的每批 ≤200 条分页）。`updates` 中的消息 `seq` 不变，客户端只能按 `messageId` 覆盖已缓存消息，不得据此新增或重排消息。回应恢复不依赖聊天消息 `seq` 前进：断线期间没有新消息、只要回应变化，`updates` 也会返回该消息；最后一个回应被移除时 `reactions` 为空数组，客户端据此清空本地缓存，而不是保留旧摘要。
-7. 客户端收到 batch 后把本会话 `updatedAfter` 更新为 `updatedThrough`（即使 `updates` 为空；缺省表示未请求状态同步）。`updatedThrough` 由服务端时钟产生，客户端不得使用本地时钟。
-8. 只有 `messages` 与 `updates` 都为空的会话不返回 batch；`hasMore` 仍只描述 `messages`（seq 补拉）是否还有更早未返回消息。
+7. 客户端收到 batch 后把本会话 `updatedAfter` 更新为 `updatedThrough`（即使 `updates` 为空；缺省表示未请求状态同步）。`updatedThrough` 由服务端时钟产生，客户端不得使用本地时钟。客户端首次同步（空缓存登录）没有 `updatedAfter`，服务端仍会返回该会话的 batch 并携带 `updatedThrough` 作为**游标初始化**，客户端保存后下一次请求即可带上 `updatedAfter`；否则会出现「没有游标就不发 `updatedAfter`、不发就永远拿不到游标」的死循环。
+8. 只有 `messages` 与 `updates` 都为空的会话不返回 batch（**例外**：客户端未提供 `updatedAfter` 的会话，即使两者都为空也返回一条仅含 `updatedThrough` 的游标初始化 batch）；`hasMore` 仍只描述 `messages`（seq 补拉）是否还有更早未返回消息。
 
 ### 4.5 `conv.list` / `conv.updated`（会话列表）
 
@@ -860,3 +860,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C2c 会话共享媒体） | 2026-11-14 | 新增 REST `GET /api/conversations/{conversationId}/links`（从 text 消息提取 HTTP(S) 链接、按 `seq` 倒序分页，返回 `{ items: [{ url, messageId, messageSeq, senderId, createdAt }], hasMore }`，单页最多扫描 200 条含 `http` 的候选消息、页内按 URL 去重）；既有 `GET .../files` 起过滤已撤回消息（`deleted_at` 非空的行不再出现，下载仍被文件接口拒绝）；分页游标 `beforeSeq` 排他、`limit` 1~100 默认 50；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C2c 修订：共享链接游标） | 2026-11-14 | `GET /api/conversations/{conversationId}/links` 改为 `(beforeSeq, beforeOffset)` 组合游标，响应新增 `nextBeforeSeq` / `nextBeforeOffset`：只在 `seq` 等于 `beforeSeq` 的消息内从第 `beforeOffset` 个链接继续取，同一条消息里的多个链接可分页取完；没有有效链接的区间由服务端在同一请求内继续跨过（单次最多扫描 2000 条含 `http` 的候选消息）；只传 `beforeSeq` 的旧客户端保持「`seq` 小于 `beforeSeq`」语义；`files` 接口与撤回过滤不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C3 消息表情回应） | 2026-11-14 | 新增 1 个帧（共 24 个 type）：`message.reactions`（S→C，摘要 `{ emoji, count, mine }`，摘要共享、`mine` 按接收账号计算，空数组表示已无回应）；Message 新增可选 `reactions`；新增 REST `PUT` / `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`（白名单 `thumbs_up`/`heart`/`joy`/`wow`/`sad`/`tada`，每人每消息至多一条，均幂等）；`messages` 新增 `reactions_updated_at INTEGER` 列，新增 `message_reactions` 表（主键 `(message_id, user_id)`）；`sync.response` 的 `updates` 起覆盖回应新增/替换/取消，恢复不依赖消息 `seq`，移除最后一个回应时返回空数组；回应不产生消息、不推进 `seq`/已读/未读、不改会话排序、不推送系统通知；`protocolVersion` 仍为 1 |
+| v1（C3 修订：回应同步游标与并发写入） | 2026-11-14 | ① `sync.response` 的每条 batch 都携带 `updatedThrough`；客户端未提供 `updatedAfter` 的会话即使没有新消息/状态变化也返回一条仅含 `updatedThrough` 的**游标初始化** batch，修复空缓存客户端「没有游标就不发 `updatedAfter`」的死循环；② 回应设置/移除的服务端成员与消息状态校验、读取本人回应、写入放进同一 SQLite 写事务（`BEGIN IMMEDIATE`），同账号多端并发设置、替换或删除不再因复合主键冲突返回 500（后到者等待写锁后走幂等/替换分支）；无新帧、不改库表、`protocolVersion` 仍为 1 |

@@ -614,11 +614,12 @@ public sealed class MessageService
 
             // F-34：补齐断线期间对「已缓存消息」的撤回/编辑；seq 不变，只带最新状态。
             // 状态变化数量远小于消息量，随批一次性返回（messages 仍按每批 200 条分页）。
+            // C3 修订：每条返回的 batch 都下发 updatedThrough。客户端首次同步（空缓存登录）
+            // 没有 updatedAfter，靠这条游标初始化打破「没有游标就不发 updatedAfter」的循环。
             var updates = new List<MessageEntity>();
-            long? updatedThrough = null;
+            var updatedThrough = syncCutoff;
             if (cursor.UpdatedAfter is > 0)
             {
-                updatedThrough = syncCutoff;
                 updates = await _db.Messages.AsNoTracking()
                     .Where(message => message.ConversationId == conversationId
                         && ((message.EditedAt != null && message.EditedAt > cursor.UpdatedAfter)
@@ -630,7 +631,9 @@ public sealed class MessageService
                     .ToListAsync(cancellationToken);
             }
 
-            if (rows.Count > 0 || updates.Count > 0)
+            // C3 修订：没有 updatedAfter 的会话即使本轮没有消息/状态变化也要回 batch，
+            // 供客户端建立首次同步游标（之后才会带上 updatedAfter）。
+            if (rows.Count > 0 || updates.Count > 0 || cursor.UpdatedAfter is not > 0)
             {
                 pages.Add(new SyncPage(conversationId, rows, updates, updatedThrough));
             }
@@ -1451,6 +1454,10 @@ public sealed class MessageService
             throw ApiException.ValidationFailed("不支持的表情回应");
         }
 
+        // C3 修订：权限/消息状态校验、读取本人回应与写入放进同一写事务。
+        // BeginTransaction 默认使用 BEGIN IMMEDIATE，事务开始即持有写锁；同账号两端并发设置时，
+        // 后到者等待写锁后读到已提交回应，走幂等/替换分支，而不是撞复合主键后返回 500。
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         var (message, id) = await EnsureReactableAsync(userId, conversationId, messageId, cancellationToken);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var existing = await _db.MessageReactions.FirstOrDefaultAsync(
@@ -1483,7 +1490,9 @@ public sealed class MessageService
             await _db.SaveChangesAsync(cancellationToken);
         }
 
-        return await BuildReactionResultAsync(message, changed, cancellationToken);
+        var result = await BuildReactionResultAsync(message, changed, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     /// <summary>C3：移除我的表情回应；没有回应时幂等返回（changed=false）。</summary>
@@ -1493,19 +1502,26 @@ public sealed class MessageService
         string? messageId,
         CancellationToken cancellationToken)
     {
+        // C3 修订：与设置一致，删除也在同一写事务内先校验再读改写，避免同账号两端并发时
+        // 读到过期快照（重复删除仍幂等返回 changed=false）。
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         var (message, id) = await EnsureReactableAsync(userId, conversationId, messageId, cancellationToken);
         var existing = await _db.MessageReactions.FirstOrDefaultAsync(
             reaction => reaction.MessageId == id && reaction.UserId == userId,
             cancellationToken);
         if (existing is null)
         {
-            return await BuildReactionResultAsync(message, false, cancellationToken);
+            var unchanged = await BuildReactionResultAsync(message, false, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return unchanged;
         }
 
         _db.MessageReactions.Remove(existing);
         message.ReactionsUpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await _db.SaveChangesAsync(cancellationToken);
-        return await BuildReactionResultAsync(message, true, cancellationToken);
+        var removed = await BuildReactionResultAsync(message, true, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return removed;
     }
 
     /// <summary>校验成员资格与消息可回应状态：存在、未撤回、非 system（消息归属会话同时校验）。</summary>
