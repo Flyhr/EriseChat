@@ -3,13 +3,12 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
+import ChatDetailsPanel from '../components/ChatDetailsPanel.vue'
 import ChatHeader from '../components/ChatHeader.vue'
 import ConversationList from '../components/ConversationList.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
 import ForwardDialog from '../components/ForwardDialog.vue'
 import EmptyState from '../components/EmptyState.vue'
-import GroupMembersPanel from '../components/GroupMembersPanel.vue'
-import ConversationFilesPanel from '../components/ConversationFilesPanel.vue'
 import ImagePreview from '../components/ImagePreview.vue'
 import MessageActionMenu from '../components/MessageActionMenu.vue'
 import MessageList from '../components/MessageList.vue'
@@ -128,16 +127,20 @@ const activeTitle = computed(() =>
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
-// 右侧面板（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，aside 由群聊「群资料」或顶栏「文件」按钮触发。
-const activeDrawer = ref<'emoji' | 'group' | null>(null)
-/** aside 当前页签（F-15）：群聊可在「群资料与成员」「文件」间切换；单聊仅有「文件」。 */
+// 页内浮层（UI-02，计划 §5.6）：同一时刻最多一个；emoji 由输入框表情按钮触发，
+// details（群资料与成员 / 共享文件）由顶栏「更多」菜单触发，统一交给 ChatDetailsPanel 渲染。
+const activeDrawer = ref<'emoji' | 'details' | null>(null)
+/** 详情容器当前页签（F-15）：群聊可在「群资料与成员」「文件」间切换；单聊仅有「文件」。 */
 const asideTab = ref<'members' | 'files'>('members')
 /** 面板打开时压入 history 哨兵：Android 返回/浏览器后退先关面板，不直接退出会话（UI-04）。 */
 const panelGuard = createPanelHistoryGuard(() => {
   activeDrawer.value = null
 })
-/** 右侧 aside（群资料与成员 / 共享文件）：与聊天窗口同层的 grid 列，打开时聊天区收窄。 */
-const asideOpen = computed(() => Boolean(activeId.value) && activeDrawer.value === 'group')
+/** 详情容器是否打开：与聊天窗口同层的 grid 列，宽屏收窄聊天区、窄屏覆盖、手机全屏。 */
+const asideOpen = computed(() => Boolean(activeId.value) && activeDrawer.value === 'details')
+/** 顶栏实例与「更多」按钮：详情关闭后把焦点还给触发按钮（批次 B2）。 */
+const headerRef = ref<InstanceType<typeof ChatHeader> | null>(null)
+const detailsTrigger = ref<HTMLElement | null>(null)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void; focusInput: () => void } | null>(null)
 
@@ -1026,6 +1029,8 @@ onMounted(async () => {
   typing.subscribeRealtime()
   offWsState = chatWs.on('statechange', onWsStateChange)
   document.addEventListener('visibilitychange', markActiveConversationRead)
+  // 统一 Esc：先关表情面板 / 详情，再退出会话（弹窗与预览各自优先处理，见 onChatEscape）。
+  document.addEventListener('keydown', onChatEscape)
   window.addEventListener('dragover', onWindowDragOver)
   window.addEventListener('drop', onWindowDrop)
   await conversations.restoreFromCache()
@@ -1050,7 +1055,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
-  document.removeEventListener('keydown', onEmojiEscape)
+  document.removeEventListener('keydown', onChatEscape)
   panelGuard.dispose()
   closePreview()
 })
@@ -1145,56 +1150,93 @@ function onEmojiOutsidePointer(event: MouseEvent): void {
   if (!isEmojiLayerTarget(event.target)) activeDrawer.value = null
 }
 
-function onEmojiEscape(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return
-  // F-21：面板内弹窗打开时，Esc 应先交给 AppDialog 关闭确认框，不连带收起面板。
-  // F-41：成员资料浮窗同理，Esc 只关浮窗，不连带收起整个侧栏。
-  if (document.querySelector('.ec-dialog, .member-card')) return
-  activeDrawer.value = null
+/**
+ * 页内浮层的统一 Esc 处理（批次 B2）：弹窗 / 浮窗 / 搜索 / 图片预览各自优先处理，
+ * 然后依次收起表情面板、关闭详情容器，最后才退出会话（手机返回列表）。
+ * 顺序即「先关详情，再退出会话」，避免一次 Esc 直接跳回列表。
+ */
+function onChatEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || event.defaultPrevented) return
+  // 这些浮层有自己的 Esc 语义（关弹窗 / 关预览 / 关搜索），不在这里抢事件。
+  if (document.querySelector('.ec-dialog, .member-card, .ec-search-mask, .image-preview')) return
+  if (activeDrawer.value === 'emoji') {
+    activeDrawer.value = null
+    return
+  }
+  if (asideOpen.value) {
+    closeDetails()
+    return
+  }
+  if (isMobileConversation()) backToList()
+}
+
+/** 手机单栏下已打开会话（Esc 的第二段语义是退出会话回到列表）。 */
+function isMobileConversation(): boolean {
+  if (!activeId.value) return false
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(max-width: 800px)').matches
 }
 
 watch(activeDrawer, (drawer) => {
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
-  document.removeEventListener('keydown', onEmojiEscape)
   if (drawer) panelGuard.push()
   else panelGuard.dispose()
-  if (drawer === 'emoji') {
-    document.addEventListener('mousedown', onEmojiOutsidePointer)
-    document.addEventListener('keydown', onEmojiEscape)
-    return
-  }
-  // 群成员是内嵌侧栏，不监听外部点击；保留 Esc 收起与顶栏/关闭按钮切换。
-  if (drawer === 'group') {
-    document.addEventListener('keydown', onEmojiEscape)
-  }
+  // 表情面板需要「点击外部收起」；详情容器是内嵌/覆盖层，只用关闭按钮、遮罩、Esc 与返回键收起。
+  if (drawer === 'emoji') document.addEventListener('mousedown', onEmojiOutsidePointer)
 })
+
+/** 打开详情容器并记录触发元素（关闭后归还焦点）。 */
+function openDetails(tab: 'members' | 'files'): void {
+  if (!activeId.value) return
+  if (tab === 'members' && !isGroup.value) return
+  detailsTrigger.value = headerRef.value?.moreButtonEl ?? null
+  asideTab.value = tab
+  activeDrawer.value = 'details'
+}
+
+/** 关闭详情容器：焦点由容器在关闭后还给触发按钮。 */
+function closeDetails(): void {
+  if (activeDrawer.value !== 'details') return
+  activeDrawer.value = null
+}
 
 function toggleGroupDrawer(): void {
   if (!isGroup.value) return
-  if (activeDrawer.value === 'group' && asideTab.value === 'members') {
-    activeDrawer.value = null
+  if (asideOpen.value && asideTab.value === 'members') {
+    closeDetails()
     return
   }
-  asideTab.value = 'members'
-  activeDrawer.value = 'group'
+  openDetails('members')
 }
 
-/** F-15：顶栏「文件」按钮——打开 aside 并定位文件页签；再次点击收起。 */
+/** F-15：顶栏「文件」入口——打开详情容器并定位文件页签；再次触发收起。 */
 function toggleFilesPanel(): void {
   if (!activeId.value) return
-  if (activeDrawer.value === 'group' && asideTab.value === 'files') {
-    activeDrawer.value = null
+  if (asideOpen.value && asideTab.value === 'files') {
+    closeDetails()
     return
   }
-  asideTab.value = 'files'
-  activeDrawer.value = 'group'
+  openDetails('files')
 }
 
-/** F-15：aside 内页签切换（群聊：群资料与成员 / 文件）。 */
+/** F-15：详情容器内页签切换（群聊：群资料与成员 / 文件）。 */
 function switchAsideTab(tab: 'members' | 'files'): void {
   if (tab === 'members' && !isGroup.value) return
   asideTab.value = tab
-  activeDrawer.value = 'group'
+  activeDrawer.value = 'details'
+}
+
+/** 顶栏「更多」菜单的免打扰开关：与会话列表同一入口（只改本人成员设置，不广播）。 */
+async function toggleMute(): Promise<void> {
+  const conversation = activeConversation.value
+  if (!conversation) return
+  const next = !conversation.muted
+  try {
+    await conversations.setMemberSettings(conversation.conversationId, { muted: next })
+    showToast(next ? '已开启消息免打扰' : '已关闭消息免打扰', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  }
 }
 
 // Emoji 面板选择：插入到发送框光标处，不发送、不关闭面板（可连续选多个）。
@@ -1720,14 +1762,17 @@ function onWindowDrop(event: DragEvent): void {
 
       <template v-if="activeConversation">
         <ChatHeader
+          ref="headerRef"
           :title="activeTitle"
           :is-group="isGroup"
           :member-count="memberCount"
           :peer-presence="peerPresence"
           :avatar-file-id="headerAvatarFileId"
+          :muted="activeConversation.muted"
           :show-back="true"
           @open-group="toggleGroupDrawer"
           @open-files="toggleFilesPanel"
+          @toggle-mute="toggleMute"
           @back="backToList"
           @search="openConversationSearch"
         />
@@ -1863,67 +1908,19 @@ function onWindowDrop(event: DragEvent): void {
               />
             </div>
           </div>
-          <!-- 801~1199 覆盖式成员面板的遮罩；≥1200 推挤与 ≤800 全宽时由 CSS 隐藏。 -->
-          <div
-            v-if="asideOpen"
-            class="chat-page__members-mask"
-            aria-hidden="true"
-            @click="activeDrawer = null"
+          <!-- 801~1199 覆盖式详情面板的遮罩；≥1200 推挤与 ≤800 全宽时由详情容器隐藏。 -->
+          <ChatDetailsPanel
+            :open="asideOpen"
+            :conversation="activeConversation"
+            :self-user-id="selfUserId"
+            :tab="asideTab"
+            :trigger="detailsTrigger"
+            @close="closeDetails"
+            @update:tab="switchAsideTab"
+            @updated="onGroupUpdated"
+            @left="onLeftGroup"
+            @open-chat="onOpenMemberChat"
           />
-          <!-- 会话侧栏（F-15 页签）：群聊「群资料与成员」「文件」，单聊仅「文件」；与聊天窗口同层。 -->
-          <aside v-if="asideOpen && activeConversation" class="chat-page__members" aria-label="会话侧栏">
-            <header class="chat-page__members-header">
-              <div v-if="isGroup" class="chat-page__members-tabs" role="tablist" aria-label="侧栏页签">
-                <button
-                  type="button"
-                  role="tab"
-                  :aria-selected="asideTab === 'members'"
-                  :class="[
-                    'chat-page__members-tab',
-                    { 'chat-page__members-tab--active': asideTab === 'members' },
-                  ]"
-                  @click="switchAsideTab('members')"
-                >
-                  群资料与成员
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  :aria-selected="asideTab === 'files'"
-                  :class="[
-                    'chat-page__members-tab',
-                    { 'chat-page__members-tab--active': asideTab === 'files' },
-                  ]"
-                  @click="switchAsideTab('files')"
-                >
-                  文件
-                </button>
-              </div>
-              <h2 v-else class="chat-page__members-title">文件</h2>
-              <button
-                type="button"
-                class="chat-page__members-close"
-                aria-label="关闭侧栏"
-                @click="activeDrawer = null"
-              >
-                <AppIcon name="close" :size="18" />
-              </button>
-            </header>
-            <div class="chat-page__members-body">
-              <GroupMembersPanel
-                v-if="asideTab === 'members' && isGroup"
-                :conversation="activeConversation"
-                :self-user-id="selfUserId"
-                @updated="onGroupUpdated"
-                @left="onLeftGroup"
-                @open-chat="onOpenMemberChat"
-              />
-              <ConversationFilesPanel
-                v-else-if="asideTab === 'files' && activeId"
-                :conversation-id="activeId"
-              />
-            </div>
-          </aside>
         </div>
       </template>
       <EmptyState
@@ -2077,12 +2074,7 @@ function onWindowDrop(event: DragEvent): void {
 @media (max-width: 1199px) {
   .chat-page {
     grid-template-columns: 260px minmax(0, 1fr);
-  }
-
-  .chat-page__members {
-    width: 260px;
-  }
-}
+  }}
 
 /* F-36：群置顶消息条（位于顶栏与消息区之间，不参与消息滚动）。 */
 .chat-page__pinned {
@@ -2161,121 +2153,6 @@ function onWindowDrop(event: DragEvent): void {
   /* 渐变上移到顶栏以下的整块聊天容器：typing 预留区、消息区、输入区共用同一背景，
      消除原来因 .message-list 独占渐变而在顶栏下方产生的浅色缝隙。 */
   background: var(--ec-chat-gradient);
-}
-
-/* 群成员面板（UI-03 追加）：与聊天窗口同层，位于聊天顶栏下方紧邻右侧，
-   打开时聊天区收窄而非被遮罩覆盖；高度与内容行一致，不盖住顶栏「群资料」。 */
-.chat-page__members {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  width: var(--ec-drawer-width);
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid var(--ec-border);
-  background: var(--ec-surface);
-}
-
-.chat-page__members-header {
-  display: flex;
-  flex: none;
-  gap: var(--ec-space-2);
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--ec-space-3) var(--ec-space-4);
-  border-bottom: 1px solid var(--ec-border);
-}
-
-.chat-page__members-title {
-  margin: 0;
-  color: var(--ec-text-primary);
-  font-size: 15px;
-  font-weight: var(--ec-font-weight-semibold);
-}
-
-/* F-15：aside 页签（群聊：群资料与成员 / 文件）。 */
-.chat-page__members-tabs {
-  display: flex;
-  gap: var(--ec-space-1);
-  min-width: 0;
-  padding: 3px;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-surface-hover);
-}
-
-.chat-page__members-tab {
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 var(--ec-space-3);
-  border: none;
-  border-radius: var(--ec-radius-full);
-  background: transparent;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.chat-page__members-tab--active {
-  background: var(--ec-surface);
-  color: var(--ec-text-primary);
-  font-weight: var(--ec-font-weight-semibold);
-  box-shadow: var(--ec-shadow-sm);
-}
-
-.chat-page__members-close {
-  display: grid;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: none;
-  border-radius: var(--ec-radius-sm);
-  background: transparent;
-  color: var(--ec-text-secondary);
-  cursor: pointer;
-}
-
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
-@media (hover: hover) and (pointer: fine) {
-.chat-page__members-close:hover {
-  background: var(--ec-surface-hover);
-  color: var(--ec-text-primary);
-}
-}
-
-.chat-page__members-body {
-  flex: 1;
-  min-height: 0;
-  padding: var(--ec-space-4);
-  overflow-y: auto;
-}
-
-/* 801~1199 覆盖式成员面板的遮罩；默认隐藏（仅该档显示）。 */
-.chat-page__members-mask {
-  display: none;
-}
-
-/* 801~1199（窄桌面/小窗口）：成员面板改为覆盖式——绝对定位在聊天区右侧并加遮罩，
-   聊天列保持全宽，避免四栏硬挤导致输入区过窄；点遮罩、Esc 或关闭按钮均可关闭。 */
-@media (min-width: 801px) and (max-width: 1199px) {
-  .chat-page__members-mask {
-    position: absolute;
-    inset: 0;
-    z-index: 14;
-    display: block;
-    background: var(--ec-scrim);
-  }
-
-  .chat-page__members {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 15;
-    width: var(--ec-drawer-width);
-    box-shadow: var(--ec-shadow-lg);
-  }
 }
 
 /* 底部输入区容器：为悬浮 Emoji 面板提供定位基准（面板绝对定位，不占文档流高度）。 */
@@ -2425,28 +2302,10 @@ function onWindowDrop(event: DragEvent): void {
     display: none;
   }
 
-  .chat-page__content--members .chat-page__members {
-    flex: 1;
-    width: 100%;
-    border-left: none;
-  }
-
   .chat-page__emoji {
     right: var(--ec-space-3);
     left: var(--ec-space-3);
     width: auto;
-  }
-}
-
-/* UI-04 批次4 / F-15：移动端侧栏关闭按钮与页签触控热区。 */
-@media (max-width: 800px) {
-  .chat-page__members-close {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  .chat-page__members-tab {
-    min-height: 44px;
   }
 }
 

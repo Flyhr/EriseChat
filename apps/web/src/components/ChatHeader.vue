@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { presenceLabelOf } from '../core/presence'
 import AppIcon from './AppIcon.vue'
 import Avatar from './Avatar.vue'
-import ComingSoonHint from './ComingSoonHint.vue'
 import PresenceDot from './PresenceDot.vue'
 
 // 聊天顶栏（UI-02 批次2，计划 §5.3）：左侧标题 + 单聊在线状态/群成员数；
-// 右侧资料入口与占位按钮（消息搜索未实现时灰显，不放假按钮）；返回按钮供 ≤800 移动布局（批次4）启用。
+// 右侧搜索、共享文件与「更多」菜单（批次 B2：接本会话搜索、共享文件、免打扰、群资料）。
+// 「更多」在手机上替代原来的不可用占位按钮，桌面保留搜索/文件直达图标。
 const props = withDefaults(
   defineProps<{
     title: string
@@ -19,18 +19,81 @@ const props = withDefaults(
     showBack?: boolean
     /** 群头像 files.id（F-23）：仅群聊可能有值；null 表示未设置。 */
     avatarFileId?: string | null
+    /** 当前会话是否免打扰：决定菜单里显示「消息免打扰」还是「取消免打扰」。 */
+    muted?: boolean
   }>(),
-  { showBack: false, avatarFileId: null },
+  { showBack: false, avatarFileId: null, muted: false },
 )
 
 const emit = defineEmits<{
   'open-group': []
   'open-files': []
+  'toggle-mute': []
   back: []
   search: []
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.peerPresence))
+
+// 「更多」菜单：Esc 关闭并把焦点还给触发按钮；点击外部关闭。
+const menuOpen = ref(false)
+const moreButton = ref<HTMLButtonElement | null>(null)
+const menuRef = ref<HTMLElement | null>(null)
+const moreWrap = ref<HTMLElement | null>(null)
+
+function closeMenu(returnFocus = true): void {
+  if (!menuOpen.value) return
+  menuOpen.value = false
+  if (returnFocus) moreButton.value?.focus()
+}
+
+function toggleMenu(): void {
+  if (menuOpen.value) {
+    closeMenu(false)
+    return
+  }
+  menuOpen.value = true
+  void nextTick(() => menuRef.value?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus())
+}
+
+function pick(action: 'search' | 'files' | 'mute' | 'group'): void {
+  closeMenu(false)
+  if (action === 'search') emit('search')
+  else if (action === 'files') emit('open-files')
+  else if (action === 'mute') emit('toggle-mute')
+  else emit('open-group')
+}
+
+function onDocumentPointerDown(event: PointerEvent): void {
+  if (!menuOpen.value) return
+  const target = event.target as Node | null
+  if (target && moreWrap.value?.contains(target)) return
+  closeMenu(false)
+}
+
+function onDocumentKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') closeMenu()
+}
+
+watch(menuOpen, (open) => {
+  if (typeof document === 'undefined') return
+  if (open) {
+    document.addEventListener('pointerdown', onDocumentPointerDown, true)
+    document.addEventListener('keydown', onDocumentKeyDown)
+  } else {
+    document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+    document.removeEventListener('keydown', onDocumentKeyDown)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (typeof document === 'undefined') return
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true)
+  document.removeEventListener('keydown', onDocumentKeyDown)
+})
+
+// 详情容器关闭后把焦点还给「更多」按钮（批次 B2 焦点归还）。
+defineExpose({ moreButtonEl: moreButton })
 </script>
 
 <template>
@@ -70,34 +133,68 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
     <div class="ec-chat-header__actions">
       <button
         type="button"
-        class="ec-chat-header__action ec-chat-header__icon-button"
+        class="ec-chat-header__action ec-chat-header__icon-button ec-chat-header__action--desktop"
         aria-label="搜索当前会话消息"
         title="搜索当前会话消息"
         @click="emit('search')"
       >
         <AppIcon name="search" />
       </button>
-      <!-- F-15：会话共享文件入口（群聊/单聊都可用），打开右侧 aside 的「文件」页签。 -->
+      <!-- F-15：会话共享文件入口，打开详情容器的「文件」页签。 -->
       <button
         type="button"
-        class="ec-chat-header__action ec-chat-header__icon-button"
+        class="ec-chat-header__action ec-chat-header__icon-button ec-chat-header__action--desktop"
         aria-label="查看会话共享文件"
         title="查看会话共享文件"
         @click="emit('open-files')"
       >
         <AppIcon name="file" />
       </button>
-      <ComingSoonHint label="更多" layout="inline" :show-hint="false" class="ec-chat-header__action">
-        <AppIcon name="more" />
-      </ComingSoonHint>
-      <button
-        v-if="isGroup"
-        type="button"
-        class="ec-chat-header__action ec-chat-header__action--text"
-        @click="emit('open-group')"
-      >
-        群资料
-      </button>
+
+      <div ref="moreWrap" class="ec-chat-header__more-wrap">
+        <button
+          ref="moreButton"
+          type="button"
+          class="ec-chat-header__action ec-chat-header__icon-button"
+          aria-label="更多"
+          title="更多"
+          aria-haspopup="menu"
+          :aria-expanded="menuOpen"
+          @click="toggleMenu"
+        >
+          <AppIcon name="more" />
+        </button>
+        <div
+          v-if="menuOpen"
+          ref="menuRef"
+          class="ec-chat-header__menu"
+          role="menu"
+          aria-label="会话操作"
+        >
+          <button type="button" role="menuitem" class="ec-chat-header__menu-item" @click="pick('search')">
+            <AppIcon name="search" :size="16" />
+            <span>搜索本会话</span>
+          </button>
+          <button type="button" role="menuitem" class="ec-chat-header__menu-item" @click="pick('files')">
+            <AppIcon name="file" :size="16" />
+            <span>共享文件</span>
+          </button>
+          <button type="button" role="menuitem" class="ec-chat-header__menu-item" @click="pick('mute')">
+            <AppIcon name="mute" :size="16" />
+            <span>{{ muted ? '取消免打扰' : '消息免打扰' }}</span>
+          </button>
+          <button
+            v-if="isGroup"
+            type="button"
+            role="menuitem"
+            class="ec-chat-header__menu-item"
+            @click="pick('group')"
+          >
+            <AppIcon name="groups" :size="16" />
+            <span>群资料</span>
+          </button>
+        </div>
+      </div>
     </div>
   </header>
 </template>
@@ -133,10 +230,8 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   height: var(--ec-header-height);
   padding: 0 var(--ec-space-5);
   border-bottom: 1px solid var(--ec-border-soft);
-  /* 「澄蓝」主题：半透明磨砂顶栏，聊天区光晕透出。 */
+  /* 批次 B1：顶栏改实色，聊天区不再透出渐变/光晕。 */
   background: var(--ec-header-bg);
-  -webkit-backdrop-filter: var(--ec-header-blur);
-  backdrop-filter: var(--ec-header-blur);
 }
 
 .ec-chat-header__main {
@@ -165,35 +260,11 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   white-space: nowrap;
 }
 
-.ec-chat-header__presence {
-  flex: none;
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-secondary);
-  font-weight: var(--ec-font-weight-regular);
-}
-
-.ec-chat-header__member-count {
-  flex: none;
-  padding: 3px var(--ec-space-2);
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-chip-surface);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  font-weight: var(--ec-font-weight-regular);
-}
-
 .ec-chat-header__actions {
   display: flex;
   flex: none;
   gap: var(--ec-space-1);
   align-items: center;
-}
-
-/* ComingSoonHint 的 inline 布局默认撑满整行（用于设置页整行占位），
-   在顶栏这里要作为 32px 图标按钮使用，必须收掉 width:100%。 */
-.ec-chat-header__actions :deep(.ec-coming-soon--inline) {
-  width: auto;
 }
 
 .ec-chat-header__action {
@@ -209,22 +280,15 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   background: transparent;
   color: var(--ec-text-secondary);
   white-space: nowrap;
-  cursor: not-allowed;
-}
-
-.ec-chat-header__action--text {
-  padding: 0 var(--ec-space-2);
-  color: var(--ec-brand-600);
-  font-size: var(--ec-font-size-secondary);
-  font-weight: var(--ec-font-weight-medium);
   cursor: pointer;
+  transition: background var(--ec-transition-fast) var(--ec-ease);
 }
 
-/* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
 @media (hover: hover) and (pointer: fine) {
-.ec-chat-header__action--text:hover {
-  background: var(--ec-brand-050);
-}
+  .ec-chat-header__action:hover {
+    background: var(--ec-surface-hover);
+    color: var(--ec-text-primary);
+  }
 }
 
 .ec-chat-header__icon-button {
@@ -232,6 +296,59 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
   border: none;
   background: transparent;
   cursor: pointer;
+}
+
+.ec-chat-header__action:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
+/* 「更多」菜单：相对触发按钮定位；阴影只用于浮层（批次 B1 规则）。 */
+.ec-chat-header__more-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.ec-chat-header__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: var(--ec-space-1);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-md);
+  background: var(--ec-surface);
+  box-shadow: var(--ec-shadow-lg);
+}
+
+.ec-chat-header__menu-item {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ec-chat-header__menu-item:hover {
+    background: var(--ec-surface-hover);
+  }
+}
+
+.ec-chat-header__menu-item:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: 1px;
 }
 
 /* ≤800：移动单栏聊天详情，显示返回按钮。 */
@@ -250,15 +367,17 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
 /* UI-04 批次4：移动端顶栏按钮触控热区 ≥44×44。 */
 @media (max-width: 800px) {
   .ec-chat-header__icon-button,
-  .ec-chat-header__action,
-  .ec-chat-header__action--text {
+  .ec-chat-header__action {
     min-width: 44px;
+    min-height: 44px;
+  }
+
+  .ec-chat-header__menu-item {
     min-height: 44px;
   }
 }
 
-/* UI-05 移动端：顶栏压到 60px、标题 17px；「搜索/更多」占位入口在窄屏隐藏，
-   保留真实的「群资料」按钮，避免顶栏拥挤。 */
+/* UI-05 移动端：顶栏压到 60px、标题 17px；搜索/文件直达图标收进「更多」菜单，避免顶栏拥挤。 */
 @media (max-width: 800px) {
   .ec-chat-header {
     gap: var(--ec-space-2);
@@ -270,12 +389,8 @@ const presenceText = computed(() => presenceLabelOf(props.peerPresence))
     font-size: var(--ec-font-size-mobile-header);
   }
 
-  .ec-chat-header__actions > .ec-chat-header__action:not(.ec-chat-header__action--text) {
+  .ec-chat-header__action--desktop {
     display: none;
-  }
-
-  .ec-chat-header__action--text {
-    height: var(--ec-touch-target);
   }
 }
 </style>
