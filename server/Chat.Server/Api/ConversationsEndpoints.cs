@@ -107,7 +107,12 @@ public static class ConversationsEndpoints
                 request.MemberIds,
                 cancellationToken);
 
-            notifier.PushUpdated(new[] { conversation });
+            await PushConvUpdatedAsync(
+                conversations,
+                notifier,
+                conversation.ConversationId,
+                conversation.Members.Select(member => member.UserId).ToArray(),
+                cancellationToken);
             return Results.Json(conversation);
         }
 
@@ -119,13 +124,18 @@ public static class ConversationsEndpoints
                 request.MemberIds,
                 cancellationToken);
 
-            // 先推系统消息（message.new），再推完整会话（conv.updated）；两者都只发给在线成员。
+            // 先推系统消息（message.new），再按收件人视角推完整会话（conv.updated）；两者都只发给在线成员。
             if (result.SystemMessage is not null)
             {
                 notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
             }
 
-            notifier.PushUpdated(new[] { result.Conversation });
+            await PushConvUpdatedAsync(
+                conversations,
+                notifier,
+                result.Conversation.ConversationId,
+                result.MemberUserIds,
+                cancellationToken);
             return Results.Json(result.Conversation);
         }
 
@@ -144,11 +154,16 @@ public static class ConversationsEndpoints
         var userId = principal.UserId();
         var result = await conversations.AddMembersAsync(userId, conversationId, request.UserIds, cancellationToken);
 
-        // 有变更才推送：message.new（系统消息）先于 conv.updated（含全体成员的最新会话）。
+        // 有变更才推送：message.new（系统消息）先于 conv.updated（按收件人视角，见 §4.5）。
         if (result.SystemMessage is not null)
         {
             notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
-            notifier.PushUpdated(new[] { result.Conversation });
+            await PushConvUpdatedAsync(
+                conversations,
+                notifier,
+                result.Conversation.ConversationId,
+                result.MemberUserIds,
+                cancellationToken);
         }
 
         return Results.Json(result.Conversation);
@@ -172,7 +187,12 @@ public static class ConversationsEndpoints
         if (result.SystemMessage is not null)
         {
             notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
-            notifier.PushUpdated(new[] { result.Conversation });
+            await PushConvUpdatedAsync(
+                conversations,
+                notifier,
+                result.Conversation.ConversationId,
+                result.MemberUserIds,
+                cancellationToken);
         }
 
         if (result.RemovedUserId is not null)
@@ -181,6 +201,24 @@ public static class ConversationsEndpoints
         }
 
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// 按收件人视角推送 conv.updated（协议 §4.5）：每个成员只看到自己的 pinned / muted /
+    /// lastReadSeq / unread，不能把操作者视角的会话广播给其他成员。
+    /// </summary>
+    private static async Task PushConvUpdatedAsync(
+        ConversationService conversations,
+        ConversationRealtimeNotifier notifier,
+        string conversationId,
+        IReadOnlyList<string> memberUserIds,
+        CancellationToken cancellationToken)
+    {
+        var perRecipient = await conversations.BuildPerRecipientAsync(
+            conversationId,
+            memberUserIds,
+            cancellationToken);
+        notifier.PushUpdatedPerRecipient(perRecipient);
     }
 
     /// <summary>

@@ -20,39 +20,9 @@ public sealed class ConversationRealtimeNotifier
         _logger = logger;
     }
 
-    /// <summary>向会话成员的在线连接推送 conv.updated（不阻塞调用方）。</summary>
-    public void PushUpdated(IReadOnlyList<Conversation> conversations)
-    {
-        if (conversations.Count == 0)
-        {
-            return;
-        }
-
-        var frame = new ConvUpdatedFrame(conversations);
-        var memberUserIds = conversations
-            .SelectMany(conversation => conversation.Members)
-            .Select(member => member.UserId)
-            .Distinct(StringComparer.Ordinal);
-
-        var pushed = 0;
-        foreach (var userId in memberUserIds)
-        {
-            foreach (var connection in _connections.GetConnections(userId))
-            {
-                pushed++;
-                _ = SendSafeAsync(connection, frame);
-            }
-        }
-
-        _logger.LogInformation(
-            "conv.updated 推送：{ConversationCount} 个会话 → {ConnectionCount} 条在线连接",
-            conversations.Count,
-            pushed);
-    }
-
     /// <summary>
-    /// 按收件人视角推送 conv.updated（F-14 群资料变更）：每个成员收到的 Conversation 只反映自己的
-    /// pinned / muted / lastReadSeq，禁止把同一份会话广播给所有成员。不阻塞调用方。
+    /// 按收件人视角推送 conv.updated（F-14 群资料/成员变更）：每个成员收到的 Conversation 只反映自己的
+    /// pinned / muted / lastReadSeq / unread，禁止把同一份会话广播给所有成员。不阻塞调用方。
     /// </summary>
     public void PushUpdatedPerRecipient(IReadOnlyDictionary<string, Conversation> conversationsByUserId)
     {
