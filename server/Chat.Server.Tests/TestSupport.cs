@@ -4,6 +4,7 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Data.Entities;
 using Chat.Server.Modules.Auth;
+using Chat.Server.Modules.Blocks;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
@@ -132,11 +133,11 @@ public static class TestSupport
     };
 
     public static MessageService CreateMessageService(ChatDbContext db) =>
-        new(db, Options.Create(CreateAppOptions()));
+        new(db, new BlockService(db), Options.Create(CreateAppOptions()));
 
     /// <summary>F-17：好友业务（真实 FriendService，不接实时推送）。</summary>
     public static FriendService CreateFriendService(ChatDbContext db) =>
-        new(db, NullLogger<FriendService>.Instance);
+        new(db, new BlockService(db), NullLogger<FriendService>.Instance);
 
     /// <summary>F-17：好友变更推送器（不建立真实 WebSocket 连接，推送空跑）。</summary>
     public static FriendRealtimeNotifier CreateFriendRequestNotifier() =>
@@ -149,6 +150,7 @@ public static class TestSupport
     public static ConversationService CreateConversationService(ChatDbContext db, AppOptions? appOptions = null) =>
         new(
             db,
+            new BlockService(db),
             new SystemMessageWriter(db),
             Options.Create(appOptions ?? CreateAppOptions()),
             NullLogger<ConversationService>.Instance);

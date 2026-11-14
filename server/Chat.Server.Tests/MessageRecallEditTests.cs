@@ -5,6 +5,7 @@ using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Data.Entities;
+using Chat.Server.Modules.Blocks;
 using Chat.Server.Modules.Messages;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -429,6 +430,7 @@ public sealed class MessageRecallEditTests
     private static MessageService CreateService(ChatDbContext db, int recallWindowSeconds = 120, int editWindowSeconds = 900) =>
         new(
             db,
+            new BlockService(db),
             Options.Create(new AppOptions
             {
                 DataDirectory = ".",
