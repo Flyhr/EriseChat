@@ -60,6 +60,13 @@ const props = defineProps<{
   selecting?: boolean
   /** F-40：已选中的服务端消息 ID（回显勾选态）。 */
   selectedIds?: readonly string[]
+  /**
+   * 批次 B2：进入会话时的落点（首条可见消息 ID + 相对容器顶部的偏移）。
+   * 为空表示贴底；目标不在已加载消息里时退回贴底，由页面决定是否另给入口。
+   */
+  initialAnchor?: { messageId: string; offset: number } | null
+  /** 批次 B2：首条未读消息 ID，用于在时间线上插入「以下是未读消息」分隔。 */
+  unreadStartId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -93,9 +100,72 @@ const windowRange = ref<WindowRange>(initialWindowRange(props.messages.length, I
 const lastFirstMessageId = ref(props.messages[0]?.messageId ?? '')
 /** 向上拉取历史前的滚动位置，历史返回后用它补偿 scrollTop。 */
 const loadAnchor = ref<{ scrollTop: number; scrollHeight: number } | null>(null)
+/** 批次 B2：最近一次滚动后的可见锚点，图片解码撑高列表时用它把视口拉回原位。 */
+let lastVisibleAnchor: { messageId: string; offset: number } | null = null
 
 function totalMessages(): number {
   return props.messages.length
+}
+
+/** 首条可见消息及其相对容器顶部的偏移（前插历史、图片解码、会话切换共用同一口径）。 */
+function getVisibleAnchor(): { messageId: string; offset: number } | null {
+  const element = container.value
+  if (!element) return null
+  const containerTop = element.getBoundingClientRect().top
+  const rows = element.querySelectorAll<HTMLElement>('[data-message-id]')
+  for (const row of rows) {
+    const rect = row.getBoundingClientRect()
+    if (rect.bottom <= containerTop + 1) continue
+    const messageId = row.dataset.messageId
+    if (!messageId) continue
+    return { messageId, offset: Math.round(rect.top - containerTop) }
+  }
+  return null
+}
+
+/**
+ * 按锚点恢复滚动位置：把该消息行顶部对齐到记录的偏移。
+ * 会话已切换或该消息不在渲染窗口时返回 false，由调用方回退到高度差补偿或贴底。
+ */
+function restoreAnchor(anchor: { messageId: string; offset: number }, conversationId: string): boolean {
+  const element = container.value
+  if (!element) return false
+  if ((props.conversationId ?? '') !== conversationId) return false
+  const row = element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.messageId)}"]`)
+  if (!row) return false
+  const delta = row.getBoundingClientRect().top - element.getBoundingClientRect().top
+  element.scrollTop += delta - anchor.offset
+  // 程序化定位后同步记录锚点：后续图片解码仍按同一位置恢复。
+  lastVisibleAnchor = anchor
+  return true
+}
+
+/** 把目标消息纳入渲染窗口并定位到指定偏移（不在已加载消息里时返回 false）。 */
+function scrollToAnchor(anchor: { messageId: string; offset: number }): boolean {
+  const index = props.messages.findIndex((message) => message.messageId === anchor.messageId)
+  if (index < 0) return false
+  const range = currentRange()
+  if (index < range.start || index >= range.end) {
+    windowRange.value = clampWindow(
+      {
+        start: Math.max(0, index - 20),
+        end: Math.min(totalMessages(), index + INITIAL_WINDOW_SIZE),
+      },
+      totalMessages(),
+    )
+  }
+  stickToBottom.value = false
+  newMessageCount.value = 0
+  const conversationId = props.conversationId ?? ''
+  void nextTick(() => {
+    if (!restoreAnchor(anchor, conversationId)) {
+      scrollToBottom()
+      emitNearBottom(true)
+      return
+    }
+    emitNearBottom(false)
+  })
+  return true
 }
 
 function currentRange(): WindowRange {
@@ -263,6 +333,8 @@ function onLoadMoreClick(): void {
 function onScroll(): void {
   const element = container.value
   if (!element) return
+  // 记录可见锚点：图片解码、窗口收缩等非用户滚动引起的高度变化都按它恢复。
+  lastVisibleAnchor = getVisibleAnchor()
   const range = currentRange()
   const atTop = isNearTop(element.scrollTop)
 
@@ -316,10 +388,16 @@ function jumpToBottom(): void {
   })
 }
 
-/** 图片缩略图加载完成后：用户原本在底部则跟随滚到底，否则保持当前位置。 */
+/** 图片缩略图加载完成后：贴底时跟随滚到底，浏览历史时按可见锚点把视口拉回原位。 */
 function onImageLoaded(): void {
-  if (!stickToBottom.value) return
-  void nextTick(scrollToBottom)
+  if (stickToBottom.value) {
+    void nextTick(scrollToBottom)
+    return
+  }
+  const anchor = lastVisibleAnchor
+  if (!anchor) return
+  const conversationId = props.conversationId ?? ''
+  void nextTick(() => restoreAnchor(anchor, conversationId))
 }
 
 /** F-18：把气泡的操作菜单请求原样转发给会话页。 */
@@ -368,17 +446,21 @@ function setScrollTop(value: number): void {
   if (container.value) container.value.scrollTop = Math.max(0, value)
 }
 
-defineExpose({ scrollToMessage, scrollToBottom, getScrollTop, setScrollTop })
+defineExpose({ scrollToMessage, scrollToBottom, getScrollTop, setScrollTop, getVisibleAnchor })
 
-// 切换会话：窗口重置到末尾、重新贴底、清浮标并上报，父组件据此推进新会话的已读。
+// 切换会话：按页面给的落点恢复位置（指定消息 / 上次浏览 / 首条未读），没有落点才贴底。
+// 窗口重置到末尾；落点目标不在已加载消息里时退回贴底，并由页面决定是否给「查看未读起点」入口。
 watch(
   () => props.conversationId ?? '',
   () => {
     windowRange.value = initialWindowRange(totalMessages(), INITIAL_WINDOW_SIZE)
     lastFirstMessageId.value = firstMessageId()
     loadAnchor.value = null
-    stickToBottom.value = true
+    lastVisibleAnchor = null
     newMessageCount.value = 0
+    const anchor = props.initialAnchor
+    if (anchor && scrollToAnchor(anchor)) return
+    stickToBottom.value = true
     void nextTick(() => {
       scrollToBottom()
       emitNearBottom(true)
@@ -410,7 +492,10 @@ watch(
     lastFirstMessageId.value = firstMessageId()
 
     if (prepended) {
-      // 窗口内保持原有内容，把新拉到的历史加在窗口上方；用锚点恢复滚动位置。
+      // 渲染前读取可见锚点：历史插到上方后按「消息 ID + 偏移」还原，比纯高度差更稳；
+      // 目标行缺失时（例如同时发生窗口收缩）退回原有高度差补偿。
+      const visibleAnchor = getVisibleAnchor()
+      const conversationId = props.conversationId ?? ''
       windowRange.value = clampWindow(
         { start: windowRange.value.start, end: windowRange.value.end + delta },
         next,
@@ -420,7 +505,8 @@ watch(
       void nextTick(() => {
         const element = container.value
         if (!element) return
-        if (anchor) {
+        const restored = visibleAnchor ? restoreAnchor(visibleAnchor, conversationId) : false
+        if (!restored && anchor) {
           element.scrollTop = anchorScrollTop(
             anchor.scrollTop,
             anchor.scrollHeight,
@@ -467,6 +553,8 @@ watch(
 onMounted(() => {
   windowRange.value = initialWindowRange(totalMessages(), INITIAL_WINDOW_SIZE)
   lastFirstMessageId.value = firstMessageId()
+  const anchor = props.initialAnchor
+  if (anchor && scrollToAnchor(anchor)) return
   void nextTick(() => {
     scrollToBottom()
     emitNearBottom(true)
@@ -496,27 +584,37 @@ onMounted(() => {
         <div v-if="item.kind === 'separator'" class="message-list__date ec-enter">
           <span>{{ item.label }}</span>
         </div>
-        <MessageBubble
-          v-else
-          :message="item.message"
-          :data-message-id="item.message.messageId"
-          :self="item.message.senderId === selfUserId"
-          :show-sender="showSenderOf(item.message)"
-          :sender-name="senderNameOf(item.message)"
-          :sender-avatar-file-id="memberAvatarById.get(item.message.senderId)"
-          :reply-sender-name="replySenderNameOf(item.message)"
-          :is-group="isGroup"
-          :receipt="receiptOf(item.message)"
-          :mention-names="mentionNames ?? []"
-          :self-display-name="selfDisplayName ?? ''"
-          :selectable="selecting === true"
-          :selected="selectedIds?.includes(item.message.messageId) ?? false"
-          @image-loaded="onImageLoaded"
-          @preview-image="emit('preview-image', $event)"
-          @open-actions="forwardOpenActions"
-          @jump-to-message="emit('jump-to-message', $event)"
-          @toggle-select="emit('toggle-select', $event)"
-        />
+        <template v-else>
+          <!-- 批次 B2：首条未读分隔（只在进入会话的落点处出现，读到最新后由页面清除）。 -->
+          <div
+            v-if="unreadStartId && item.message.messageId === unreadStartId"
+            class="message-list__unread"
+            role="separator"
+            aria-label="未读消息起点"
+          >
+            <span>以下是未读消息</span>
+          </div>
+          <MessageBubble
+            :message="item.message"
+            :data-message-id="item.message.messageId"
+            :self="item.message.senderId === selfUserId"
+            :show-sender="showSenderOf(item.message)"
+            :sender-name="senderNameOf(item.message)"
+            :sender-avatar-file-id="memberAvatarById.get(item.message.senderId)"
+            :reply-sender-name="replySenderNameOf(item.message)"
+            :is-group="isGroup"
+            :receipt="receiptOf(item.message)"
+            :mention-names="mentionNames ?? []"
+            :self-display-name="selfDisplayName ?? ''"
+            :selectable="selecting === true"
+            :selected="selectedIds?.includes(item.message.messageId) ?? false"
+            @image-loaded="onImageLoaded"
+            @preview-image="emit('preview-image', $event)"
+            @open-actions="forwardOpenActions"
+            @jump-to-message="emit('jump-to-message', $event)"
+            @toggle-select="emit('toggle-select', $event)"
+          />
+        </template>
       </template>
 
       <MessageBubble
@@ -612,6 +710,32 @@ onMounted(() => {
   background: var(--ec-date-badge-bg);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-small);
+}
+
+/* 批次 B2：首条未读分隔——品牌色细线与胶囊文字，只在落点处出现一次。 */
+.message-list__unread {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  align-self: stretch;
+  margin: var(--ec-space-1) 0;
+  color: var(--ec-brand-700);
+  font-size: var(--ec-font-size-small);
+}
+
+.message-list__unread::before,
+.message-list__unread::after {
+  flex: 1;
+  height: 1px;
+  background: var(--ec-brand-100);
+  content: '';
+}
+
+.message-list__unread span {
+  flex: none;
+  padding: 2px var(--ec-space-2);
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-brand-050);
 }
 
 /* 「有新消息 ↓」浮标：绝对定位在列表底部（不遮挡输入区），品牌蓝实底。 */

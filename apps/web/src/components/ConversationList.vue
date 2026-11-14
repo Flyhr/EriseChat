@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Conversation } from '../types/frames'
 import { filterConversations, type ConversationFilter } from '../core/chatLayout'
 import { friendlyError } from '../core/errorMessages'
@@ -33,6 +33,30 @@ const emit = defineEmits<{
 
 const conversationsStore = useConversationsStore()
 
+// 批次 B2：离开列表（去设置/联系人）再回来时恢复滚动位置；手机单栏下列表只是隐藏，位置天然保留。
+// 用 sessionStorage：只服务于本次会话内的返回恢复，不跨浏览器重启。
+const LIST_SCROLL_KEY = 'erisechat.conversationListScroll'
+const listRef = ref<HTMLElement | null>(null)
+
+function readListScroll(): number {
+  try {
+    const value = Number(sessionStorage.getItem(LIST_SCROLL_KEY) ?? '0')
+    return Number.isFinite(value) && value > 0 ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+function saveListScroll(): void {
+  const element = listRef.value
+  if (!element) return
+  try {
+    sessionStorage.setItem(LIST_SCROLL_KEY, String(element.scrollTop))
+  } catch {
+    // 隐私模式/存储不可用：只影响返回恢复，不影响列表使用。
+  }
+}
+
 const filters: { key: ConversationFilter; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'unread', label: '未读' },
@@ -41,6 +65,22 @@ const filters: { key: ConversationFilter; label: string }[] = [
 
 const visible = computed(() =>
   filterConversations(props.conversations, props.filter, conversationsStore.unreadOf),
+)
+
+// 首次渲染出会话后恢复上次滚动位置（骨架/空态期间容器不存在，不能提前恢复）。
+let listScrollRestored = false
+watch(
+  () => visible.value.length,
+  (count) => {
+    if (listScrollRestored || count === 0) return
+    listScrollRestored = true
+    const value = readListScroll()
+    if (value === 0) return
+    void nextTick(() => {
+      if (listRef.value) listRef.value.scrollTop = value
+    })
+  },
+  { immediate: true },
 )
 
 const search = useSearchStore()
@@ -182,7 +222,12 @@ async function onUpdateSettings(payload: {
       </div>
     </div>
     <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
-    <nav v-else class="ec-conversation-list__items ec-fade">
+    <nav
+      v-else
+      ref="listRef"
+      class="ec-conversation-list__items ec-fade"
+      @scroll.passive="saveListScroll"
+    >
       <ConversationItem
         v-for="conversation in visible"
         :key="conversation.conversationId"

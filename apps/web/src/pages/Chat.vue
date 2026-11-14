@@ -22,7 +22,7 @@ import type { FileContent } from '../types/frames'
 import type { ConversationFilter } from '../core/chatLayout'
 import { getOrLoadBlobUrl } from '../core/blobCache'
 import { conversationTitle, otherMemberOf } from '../core/conversationTitle'
-import { MAX_TEXT_LENGTH } from '../core/config'
+import { MAX_TEXT_LENGTH, resolveServerOrigin } from '../core/config'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { friendlyError } from '../core/errorMessages'
 import { ApiError } from '../core/http'
@@ -32,6 +32,12 @@ import { enter, type MotionHandle } from '../core/motion'
 import type { MentionCandidateMember } from '../core/mentions'
 import type { MessageActionId } from '../core/messageActions'
 import { createPanelHistoryGuard } from '../core/historyGuard'
+import {
+  clearReadingAnchor,
+  readReadingAnchor,
+  readingPositionScope,
+  writeReadingAnchor,
+} from '../core/readingPosition'
 import { shouldAdvanceRead } from '../core/readReceipt'
 import { showToast } from '../core/toast'
 import { TypingThrottle } from '../core/typingThrottle'
@@ -180,9 +186,30 @@ function onWsStateChange(next: WsState): void {
   if (next !== 'authed') recovered.value = false
 }
 
-// 会话列表筛选（UI-02）：全部/未读/群聊。群聊由左导航「群聊」(?group=all) 驱动；
+// 会话列表筛选（UI-02）：全部/未读/群聊。群聊仍可由 /chat?group=all 直达；
 // 未读为本地筛选状态，不写入 URL；切换筛选只改展示，不产生任何请求。
-const listFilter = ref<ConversationFilter>(route.query.group === 'all' ? 'group' : 'all')
+// 批次 B2：筛选按会话存 sessionStorage，去设置/联系人再回来时恢复上次选择。
+const LIST_FILTER_KEY = 'erisechat.conversationFilter'
+
+function readStoredListFilter(): ConversationFilter {
+  if (route.query.group === 'all') return 'group'
+  try {
+    const value = sessionStorage.getItem(LIST_FILTER_KEY)
+    if (value === 'unread' || value === 'group') return value
+  } catch {
+    // 存储不可用：退回「全部」，不影响筛选交互。
+  }
+  return 'all'
+}
+
+const listFilter = ref<ConversationFilter>(readStoredListFilter())
+watch(listFilter, (filter) => {
+  try {
+    sessionStorage.setItem(LIST_FILTER_KEY, filter)
+  } catch {
+    // 仅影响返回恢复。
+  }
+})
 watch(
   () => route.query.group,
   (group) => {
@@ -286,6 +313,8 @@ const messageListRef = ref<{
   scrollToBottom: () => void
   getScrollTop?: () => number
   setScrollTop?: (value: number) => void
+  /** 批次 B2：首条可见消息与偏移，用于保存上次主动浏览的位置。 */
+  getVisibleAnchor?: () => { messageId: string; offset: number } | null
 } | null>(null)
 const JUMP_CONTEXT_BEFORE = 25
 const JUMP_CONTEXT_AFTER = 25
@@ -920,6 +949,91 @@ watch(activeId, () => {
 // 单聊展示对端已读状态，群聊 v1 无已读详情（协议 §4.6）。
 /** 消息列表是否停留在底部（由 MessageList 的 near-bottom-change 驱动）。 */
 const atBottom = ref(true)
+
+// 批次 B2：进入会话的落点（首条可见消息 + 相对偏移）；null 表示贴底最新。
+const initialAnchor = ref<{ messageId: string; offset: number } | null>(null)
+/** 首条未读消息 ID：时间线插入「以下是未读消息」分隔，读到最新后清除。 */
+const unreadStartId = ref<string | null>(null)
+/** 有未读但起点不在已加载消息里：页面给「查看未读起点」入口，值为起点 seq。 */
+const unreadJumpSeq = ref<number | null>(null)
+/** 阅读位置的存储作用域：账号 + 服务器，切换账号或服务器互不影响。 */
+const readingScope = computed(() =>
+  readingPositionScope(auth.user?.userId ?? '', resolveServerOrigin()),
+)
+/** 「查看未读起点」入口展示的未读条数（服务端 unread 口径）。 */
+const unreadJumpCount = computed(() =>
+  activeId.value ? conversations.unreadOf(activeId.value) : 0,
+)
+
+/** 离开会话时保存阅读位置：贴底说明没有待恢复的历史位置，直接清除该会话记录。 */
+function saveReadingAnchor(conversationId: string, atLatest: boolean): void {
+  const scope = readingScope.value
+  if (!conversationId || !scope) return
+  if (atLatest) {
+    clearReadingAnchor(scope, conversationId)
+    return
+  }
+  const anchor = messageListRef.value?.getVisibleAnchor?.() ?? null
+  if (!anchor) return
+  writeReadingAnchor(scope, conversationId, anchor)
+}
+
+/**
+ * 计算进入会话的落点，优先级：指定消息 → 上次主动浏览位置 → 首条未读 → 最新消息。
+ * 指定消息（深链接/搜索/引用跳转）由定位窗口处理，这里不抢；未读起点未加载时只给入口。
+ */
+function resolveLanding(conversationId: string): {
+  anchor: { messageId: string; offset: number } | null
+  unreadStartId: string | null
+  unreadJumpSeq: number | null
+} {
+  const none = { anchor: null, unreadStartId: null, unreadJumpSeq: null }
+  if (pendingJumpMessageId !== null || pendingJumpSeq !== null) return none
+  const loaded = messages.messagesOf(conversationId)
+  if (loaded.length === 0) return none
+
+  const saved = readReadingAnchor(readingScope.value, conversationId)
+  if (saved && loaded.some((message) => message.messageId === saved.messageId)) {
+    return { anchor: saved, unreadStartId: null, unreadJumpSeq: null }
+  }
+
+  const readSeq = conversations.readSeqOf(conversationId)
+  const firstUnread = loaded.find(
+    (message) => message.seq > readSeq && message.senderId !== selfUserId.value,
+  )
+  if (firstUnread) {
+    return {
+      anchor: { messageId: firstUnread.messageId, offset: 8 },
+      unreadStartId: firstUnread.messageId,
+      unreadJumpSeq: null,
+    }
+  }
+
+  // 有未读但起点不在已加载范围：先展示近期消息，另给「查看未读起点」入口。
+  if (conversations.unreadOf(conversationId) > 0) {
+    return { anchor: null, unreadStartId: null, unreadJumpSeq: readSeq + 1 }
+  }
+  return none
+}
+
+/** 「查看未读起点」：复用定位能力按 seq 取上下文窗口，不推进已读。 */
+async function jumpToUnreadStart(): Promise<void> {
+  const conversationId = activeId.value
+  const seq = unreadJumpSeq.value
+  if (!conversationId || seq === null) return
+  const located = await ensureMessageVisible(conversationId, { seq })
+  if (!located) {
+    pageNotice.value = '未读起点不在当前加载范围，可手动加载更早消息查看'
+    return
+  }
+  unreadJumpSeq.value = null
+  unreadStartId.value = null
+}
+
+// 读到最新后不再保留「以下是未读消息」分隔，避免历史分隔与已读状态矛盾。
+watch(atBottom, (value) => {
+  if (value) unreadStartId.value = null
+})
 /** 单聊对端用户 ID（群聊为空，不展示已读回执）。 */
 const peerUserId = computed(
   () => otherMemberOf(activeConversation.value, selfUserId.value)?.userId,
@@ -956,15 +1070,26 @@ const typingText = computed(() => {
 })
 
 // 切换会话：首次进入拉最新一页历史（M2-05）；已加载过直接用缓存，后续新消息由 message.new 合并。
+// 批次 B2：离开时保存阅读位置，进入时按「指定消息 → 上次浏览 → 首条未读 → 最新」决定落点。
 watch(
   activeId,
   (conversationId, previousId) => {
+    if (previousId && previousId !== conversationId) saveReadingAnchor(previousId, atBottom.value)
     activeDrawer.value = null
     exitLocateWindow()
+    initialAnchor.value = null
+    unreadStartId.value = null
+    unreadJumpSeq.value = null
     atBottom.value = true
     // 离开会话即清除其「输入中」状态（M3-09，避免残留旧会话提示）。
     if (previousId) typing.clearConversation(previousId)
     if (!conversationId) return
+    const landing = resolveLanding(conversationId)
+    initialAnchor.value = landing.anchor
+    unreadStartId.value = landing.unreadStartId
+    unreadJumpSeq.value = landing.unreadJumpSeq
+    // 落点不是最新消息时不贴底：首屏不推进已读，等用户真正回到底部再上报。
+    atBottom.value = !landing.anchor
     void messages.loadInitial(conversationId).then(() => {
       // 首次加载并滚到底后上报一次已读（M3-09）。
       void nextTick(markActiveConversationRead)
@@ -1052,6 +1177,8 @@ onBeforeUnmount(() => {
     recoveredTimer = null
   }
   document.removeEventListener('visibilitychange', markActiveConversationRead)
+  // 批次 B2：离开聊天页（去设置/退出登录）前保存当前会话的阅读位置。
+  if (activeId.value) saveReadingAnchor(activeId.value, atBottom.value)
   window.removeEventListener('dragover', onWindowDragOver)
   window.removeEventListener('drop', onWindowDrop)
   document.removeEventListener('mousedown', onEmojiOutsidePointer)
@@ -1827,6 +1954,11 @@ function onWindowDrop(event: DragEvent): void {
               <span>{{ locateLoading ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
               <button type="button" class="chat-page__locate-back" @click="backToLatest">回到最新</button>
             </div>
+            <!-- 批次 B2：未读起点不在已加载消息里时，先展示近期消息并给出入口。 -->
+            <div v-else-if="unreadJumpSeq !== null" class="chat-page__locate">
+              <span>有 {{ unreadJumpCount }} 条未读消息</span>
+              <button type="button" class="chat-page__locate-back" @click="jumpToUnreadStart">查看未读起点</button>
+            </div>
             <MessageList
               ref="messageListRef"
               :messages="displayMessages"
@@ -1844,6 +1976,8 @@ function onWindowDrop(event: DragEvent): void {
               :locate-mode="locateMode"
               :locate-has-older="locateWindow?.hasOlder ?? false"
               :locate-has-newer="locateWindow?.hasNewer ?? false"
+              :initial-anchor="initialAnchor"
+              :unread-start-id="unreadStartId"
               :selecting="selecting"
               :selected-ids="selectedMessageIds"
               @load-more="loadMoreMessages"
