@@ -8,7 +8,17 @@ namespace Chat.Protocol.Frames;
 /// <param name="Name">原始文件名。</param>
 /// <param name="Size">文件大小（字节）。</param>
 /// <param name="Mime">MIME 类型。</param>
-public sealed record FileContent(string FileId, string Name, long Size, string Mime);
+/// <param name="Width">图片像素宽（可选，C2a：客户端按此预留占位，避免加载时列表跳动；仅 image 消息使用）。</param>
+/// <param name="Height">图片像素高（可选，C2a，同上）。</param>
+/// <param name="AlbumId">相册批次标识（可选，C2a）：同一次确认发送的多张图片共享；旧客户端忽略该字段并逐图显示。</param>
+public sealed record FileContent(
+    string FileId,
+    string Name,
+    long Size,
+    string Mime,
+    int? Width = null,
+    int? Height = null,
+    string? AlbumId = null);
 
 /// <summary>语音消息内容（protocol/protocol.md §7，F-28）。二进制走 REST，WS 只传元数据。</summary>
 /// <param name="FileId">音频文件 ID（files.id；.webm / audio/webm）。</param>

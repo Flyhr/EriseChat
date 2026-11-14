@@ -17,7 +17,7 @@ import SendBox from '../components/SendBox.vue'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
 import { isImageFile, validateAttachment } from '../core/attachments'
-import { createUploadItem, type UploadItem } from '../core/uploadQueue'
+import { createUploadItem, type PendingImageItem, type UploadItem } from '../core/uploadQueue'
 import type { FileContent } from '../types/frames'
 import type { ConversationFilter } from '../core/chatLayout'
 import { getOrLoadBlobUrl } from '../core/blobCache'
@@ -26,7 +26,7 @@ import { MAX_TEXT_LENGTH, resolveServerOrigin } from '../core/config'
 import { MAX_SEND_FILES, filesOf, hasFiles, normalizeDroppedFile, truncateFiles } from '../core/fileDrop'
 import { friendlyError } from '../core/errorMessages'
 import { ApiError } from '../core/http'
-import { compressImageFile } from '../core/imageCompress'
+import { compressImageFile, measureImageSize } from '../core/imageCompress'
 import { imageItemsOf } from '../core/imageGallery'
 import { enter, type MotionHandle } from '../core/motion'
 import type { MentionCandidateMember } from '../core/mentions'
@@ -1292,6 +1292,7 @@ onBeforeUnmount(() => {
   // 离开聊天页（去设置/退出登录/切换账号或服务器）：中止上传并丢弃队列，
   // 晚到的压缩/上传结果因找不到队列项而不会再发送；仅聊天页内切换会话不触发卸载。
   cancelAllUploads()
+  clearPendingImages()
   clearSentCleanupTimers()
   uploadItems.value = []
   offWsState?.()
@@ -1600,6 +1601,7 @@ watch(selfUserId, () => {
   pageNotice.value = ''
   uploadError.value = null
   cancelAllUploads()
+  clearPendingImages()
   clearSentCleanupTimers()
   singleShotUploads.value.clear()
   uploadItems.value = []
@@ -1686,7 +1688,122 @@ function cancelAllUploads(): void {
   uploadControllers.clear()
 }
 
-/** 选择文件：只入队并固定当时的会话/账号/回复目标，实际上传由队列串行处理。 */
+/** 统一展示被忽略文件的提示（类型/大小/空文件等重试也不会成功的项）。 */
+function reportIgnoredFiles(ignored: Array<{ name: string; reason: string }>): void {
+  if (ignored.length === 1) {
+    showToast(`已忽略「${ignored[0].name}」：${ignored[0].reason}`, 'error')
+  } else if (ignored.length > 1) {
+    const names = ignored.slice(0, 2).map((entry) => entry.name).join('、')
+    showToast(`已忽略 ${ignored.length} 个文件（${names}${ignored.length > 2 ? ' 等' : ''}）`, 'error')
+  }
+}
+
+/** 非图片附件：按原 F-35 链路入队（固定当时会话/账号/回复目标，上传由队列串行处理）。 */
+function enqueueFiles(files: File[], conversationId: string, senderId: string): void {
+  const reply = replyTarget.value
+  const created = files.map((file) =>
+    createUploadItem(file, conversationId, senderId, {
+      replyTo: reply?.messageId,
+      replyPreview: reply?.preview,
+    }),
+  )
+  uploadItems.value = [...uploadItems.value, ...created]
+  void pumpUploads()
+}
+
+/** C2a：多图预览（尚未确认发送）；批次归属选择图片时的会话，切换会话即放弃预览。 */
+const pendingImages = ref<PendingImageItem[]>([])
+let pendingImagesConversationId = ''
+
+function clearPendingImages(): void {
+  for (const image of pendingImages.value) URL.revokeObjectURL(image.previewUrl)
+  pendingImages.value = []
+  pendingImagesConversationId = ''
+}
+
+function addPendingImages(files: File[], conversationId: string): void {
+  const room = MAX_SEND_FILES - pendingImages.value.length
+  if (room <= 0) {
+    uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 张图片`
+    return
+  }
+  const accepted: PendingImageItem[] = []
+  const ignored: Array<{ name: string; reason: string }> = []
+  for (const file of files.slice(0, room)) {
+    const validation = validateAttachment(file)
+    if (!validation.ok) {
+      ignored.push({ name: file.name, reason: validation.reason })
+      continue
+    }
+    accepted.push({
+      id: crypto.randomUUID(),
+      name: file.name || '未命名图片',
+      file,
+      previewUrl: URL.createObjectURL(file),
+    })
+  }
+  if (files.length > room) {
+    uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 张图片，已忽略多余的 ${files.length - room} 张`
+  }
+  reportIgnoredFiles(ignored)
+  if (accepted.length === 0) return
+  pendingImagesConversationId = conversationId
+  pendingImages.value = [...pendingImages.value, ...accepted]
+}
+
+function removePendingImage(id: string): void {
+  const image = pendingImages.value.find((entry) => entry.id === id)
+  if (image) URL.revokeObjectURL(image.previewUrl)
+  pendingImages.value = pendingImages.value.filter((entry) => entry.id !== id)
+  if (pendingImages.value.length === 0) pendingImagesConversationId = ''
+}
+
+function movePendingImage(payload: { id: string; step: number }): void {
+  const index = pendingImages.value.findIndex((entry) => entry.id === payload.id)
+  const target = index + payload.step
+  if (index < 0 || target < 0 || target >= pendingImages.value.length) return
+  const next = [...pendingImages.value]
+  const [item] = next.splice(index, 1)
+  if (!item) return
+  next.splice(target, 0, item)
+  pendingImages.value = next
+}
+
+/**
+ * C2a：确认发送预览中的全部图片。
+ * 整批共享同一 albumId（相册批次），每张图仍是独立消息（各自 clientMsgId/seq/发送状态）；
+ * 入队时固定会话与发送者，之后切换会话不影响已入队批次。
+ */
+function sendPendingImages(): void {
+  if (pendingImages.value.length === 0) return
+  const conversationId = pendingImagesConversationId
+  const senderId = selfUserId.value
+  if (!conversationId || !senderId) {
+    uploadError.value = '请先选择会话'
+    clearPendingImages()
+    return
+  }
+  const albumId = crypto.randomUUID()
+  const reply = replyTarget.value
+  const created = pendingImages.value.map((image) =>
+    createUploadItem(image.file, conversationId, senderId, {
+      replyTo: reply?.messageId,
+      replyPreview: reply?.preview,
+      albumId,
+    }),
+  )
+  uploadItems.value = [...uploadItems.value, ...created]
+  clearPendingImages()
+  if (reply?.messageId && replyTarget.value?.messageId === reply.messageId) replyTarget.value = null
+  void pumpUploads()
+}
+
+// 切换会话时放弃未确认的多图预览，避免把图片误发到另一个会话；已入队批次仍归属原会话。
+watch(activeId, () => {
+  if (pendingImages.value.length > 0) clearPendingImages()
+})
+
+/** 选择文件：图片先进入多图预览（C2a），非图片沿用原 F-35 即入队链路。 */
 function handleFileSelected(files: File[]): void {
   if (files.length === 0) return
   const conversationId = activeId.value
@@ -1702,33 +1819,26 @@ function handleFileSelected(files: File[]): void {
     uploadError.value = `一次最多发送 ${MAX_SEND_FILES} 个文件，已忽略多余的 ${rejectedCount} 个`
   }
 
-  // 入队前先做本地校验：不支持的类型/空文件/超限文件直接忽略并提示，
-  // 不生成「上传失败」队列项——这类项重试也不会成功，还会长期占住输入区。
-  const accepted: File[] = []
-  const ignored: Array<{ name: string; reason: string }> = []
-  for (const file of capped) {
-    const normalized = normalizeDroppedFile(file, Date.now())
-    const validation = validateAttachment(normalized)
-    if (validation.ok) accepted.push(normalized)
-    else ignored.push({ name: normalized.name, reason: validation.reason })
-  }
-  if (ignored.length === 1) {
-    showToast(`已忽略「${ignored[0].name}」：${ignored[0].reason}`, 'error')
-  } else if (ignored.length > 1) {
-    const names = ignored.slice(0, 2).map((entry) => entry.name).join('、')
-    showToast(`已忽略 ${ignored.length} 个文件（${names}${ignored.length > 2 ? ' 等' : ''}）`, 'error')
-  }
-  if (accepted.length === 0) return
+  const normalized = capped.map((file) => normalizeDroppedFile(file, Date.now()))
+  const images = normalized.filter((file) => isImageFile(file))
+  const others = normalized.filter((file) => !isImageFile(file))
 
-  const reply = replyTarget.value
-  const created = accepted.map((file) =>
-    createUploadItem(file, conversationId, senderId, {
-      replyTo: reply?.messageId,
-      replyPreview: reply?.preview,
-    }),
-  )
-  uploadItems.value = [...uploadItems.value, ...created]
-  void pumpUploads()
+  if (images.length > 0) {
+    addPendingImages(images, conversationId)
+  }
+  if (others.length > 0) {
+    // 入队前先做本地校验：不支持的类型/空文件/超限文件直接忽略并提示，
+    // 不生成「上传失败」队列项——这类项重试也不会成功，还会长期占住输入区。
+    const accepted: File[] = []
+    const ignored: Array<{ name: string; reason: string }> = []
+    for (const file of others) {
+      const validation = validateAttachment(file)
+      if (validation.ok) accepted.push(file)
+      else ignored.push({ name: file.name, reason: validation.reason })
+    }
+    reportIgnoredFiles(ignored)
+    if (accepted.length > 0) enqueueFiles(accepted, conversationId, senderId)
+  }
 }
 
 /**
@@ -1789,7 +1899,9 @@ async function processUploadItem(id: string): Promise<void> {
       patchUploadItem(id, { status: 'failed', error: recheck.reason })
       return
     }
-    // 压缩期间可能已离开聊天页/取消：丢弃结果，不再上传。
+    // C2a：图片压缩后测量像素尺寸，随消息内容下发；接收端据此在加载前预留占位。
+    const imageSize = isImageFile(payload) ? await measureImageSize(payload) : null
+    // 压缩/测量期间可能已离开聊天页/取消：丢弃结果，不再上传。
     if (findUploadItem(id)?.status !== 'uploading') return
 
     const uploaded = await filesApi.uploadWithProgress(payload, {
@@ -1806,6 +1918,8 @@ async function processUploadItem(id: string): Promise<void> {
       name: uploaded.name,
       size: uploaded.size,
       mime: uploaded.mime,
+      ...(imageSize ? { width: imageSize.width, height: imageSize.height } : {}),
+      ...(msgType === 'image' && item.albumId ? { albumId: item.albumId } : {}),
     }
     const clientMsgId = crypto.randomUUID()
     const sent = messages.sendFileMessage(
@@ -2171,12 +2285,17 @@ function onWindowDrop(event: DragEvent): void {
                 :uploading="singleShotBusy || visibleQueueBusy"
                 :upload-error="uploadError"
                 :upload-items="visibleUploadItems"
+                :pending-images="pendingImages"
                 :emoji-open="activeDrawer === 'emoji'"
                 :reply-to="replyTarget?.preview ?? null"
                 :mention-candidates="mentionCandidates"
                 @send="sendMessage"
                 @draft-change="onDraftChange"
                 @file-selected="handleFileSelected"
+                @remove-pending-image="removePendingImage"
+                @move-pending-image="movePendingImage"
+                @send-pending-images="sendPendingImages"
+                @cancel-pending-images="clearPendingImages"
                 @cancel-upload="cancelUpload"
                 @retry-upload="retryUpload"
                 @dismiss-upload="dismissUpload"

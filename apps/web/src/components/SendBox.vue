@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { MAX_TEXT_LENGTH } from '../core/config'
 import { ALLOWED_EXTENSIONS, formatFileSize } from '../core/attachments'
-import { uploadStatusText, type UploadItem } from '../core/uploadQueue'
+import { uploadStatusText, type PendingImageItem, type UploadItem } from '../core/uploadQueue'
 import { insertAtCursor } from '../core/emoji'
 import { filterMentionCandidates, findMentionToken, insertMention } from '../core/mentions'
 import type { MentionCandidateMember, MentionToken } from '../core/mentions'
@@ -40,6 +40,14 @@ const emit = defineEmits<{
   'retry-upload': [id: string]
   /** F-35：附件上传队列——移出等待项。 */
   'dismiss-upload': [id: string]
+  /** C2a：多图预览——移除一张待发送图片。 */
+  'remove-pending-image': [id: string]
+  /** C2a：多图预览——前移（step=-1）/后移（step=1）。 */
+  'move-pending-image': [payload: { id: string; step: number }]
+  /** C2a：确认发送预览中的全部图片，由父组件生成相册批次并入队。 */
+  'send-pending-images': []
+  /** C2a：放弃当前预览。 */
+  'cancel-pending-images': []
 }>()
 
 const props = withDefaults(
@@ -60,6 +68,8 @@ const props = withDefaults(
     mentionCandidates?: MentionCandidateMember[]
     /** F-35：附件上传队列（等待/上传中/已发送/失败/已取消逐项展示）。 */
     uploadItems?: UploadItem[]
+    /** C2a：已选择但尚未确认发送的图片（预览/排序/移除后确认）。 */
+    pendingImages?: PendingImageItem[]
   }>(),
   {
     uploading: false,
@@ -70,6 +80,7 @@ const props = withDefaults(
     replyTo: null,
     mentionCandidates: () => [],
     uploadItems: () => [],
+    pendingImages: () => [],
   },
 )
 
@@ -449,6 +460,55 @@ function onInput(): void {
 <template>
   <form class="send-box" @submit.prevent="submit">
     <div ref="field" class="send-box__field" :class="{ 'send-box__field--error': Boolean(uploadError) }">
+      <!-- C2a：多图预览条；确认前可调整顺序或移除，确认后整批进入上传队列。 -->
+      <div v-if="pendingImages.length > 0" class="send-box__pending" role="list" aria-label="待发送图片">
+        <div
+          v-for="(image, index) in pendingImages"
+          :key="image.id"
+          class="send-box__pending-item"
+          role="listitem"
+        >
+          <img :src="image.previewUrl" :alt="image.name" class="send-box__pending-thumb" />
+          <div class="send-box__pending-tools">
+            <button
+              class="send-box__pending-tool"
+              type="button"
+              title="前移"
+              aria-label="前移"
+              :disabled="index === 0"
+              @click="emit('move-pending-image', { id: image.id, step: -1 })"
+            >
+              <AppIcon name="back" :size="13" />
+            </button>
+            <button
+              class="send-box__pending-tool"
+              type="button"
+              title="后移"
+              aria-label="后移"
+              :disabled="index === pendingImages.length - 1"
+              @click="emit('move-pending-image', { id: image.id, step: 1 })"
+            >
+              <AppIcon name="back" :size="13" class="send-box__pending-arrow-next" />
+            </button>
+            <button
+              class="send-box__pending-tool"
+              type="button"
+              title="移除"
+              aria-label="移除"
+              @click="emit('remove-pending-image', image.id)"
+            >
+              <AppIcon name="close" :size="13" />
+            </button>
+          </div>
+        </div>
+        <div class="send-box__pending-bar">
+          <span class="send-box__pending-count">{{ pendingImages.length }} 张图片</span>
+          <button class="send-box__pending-cancel" type="button" @click="emit('cancel-pending-images')">
+            取消
+          </button>
+          <button class="send-box__pending-send" type="button" @click="emit('send-pending-images')">发送</button>
+        </div>
+      </div>
       <!-- F-35：附件上传队列；逐项真实进度，等待可移除、上传中可取消、失败可单项重试。 -->
       <div v-if="uploadItems.length > 0" class="send-box__uploads" role="list" aria-label="附件上传队列">
         <div
@@ -623,6 +683,7 @@ function onInput(): void {
           class="send-box__file"
           type="file"
           :accept="accept"
+          multiple
           :disabled="uploading"
           @change="onFileChange"
         />
@@ -1059,6 +1120,102 @@ function onInput(): void {
   .send-box__recording-dot {
     animation: none;
   }
+}
+
+/* C2a：多图预览条（确认前调整顺序/移除）。缩略图固定 56px，跨断点不跳。 */
+.send-box__pending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ec-space-2);
+  align-items: center;
+  margin-bottom: var(--ec-space-2);
+  padding-bottom: var(--ec-space-2);
+  border-bottom: 1px solid var(--ec-border);
+}
+
+.send-box__pending-item {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.send-box__pending-thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--ec-radius-sm);
+  object-fit: cover;
+  background: var(--ec-bg-canvas);
+}
+
+.send-box__pending-tools {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: flex;
+  gap: 2px;
+}
+
+.send-box__pending-tool {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: color-mix(in srgb, var(--ec-surface) 82%, transparent);
+  color: var(--ec-text-secondary);
+  cursor: pointer;
+}
+
+.send-box__pending-tool:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.send-box__pending-arrow-next {
+  transform: scaleX(-1);
+}
+
+.send-box__pending-bar {
+  display: flex;
+  gap: var(--ec-space-2);
+  align-items: center;
+  margin-left: auto;
+}
+
+.send-box__pending-count {
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+}
+
+.send-box__pending-cancel,
+.send-box__pending-send {
+  padding: 4px 12px;
+  border-radius: var(--ec-radius-input);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+}
+
+.send-box__pending-cancel {
+  border: 1px solid var(--ec-border);
+  background: transparent;
+  color: var(--ec-text-secondary);
+}
+
+.send-box__pending-send {
+  border: 1px solid transparent;
+  background: var(--ec-brand-600);
+  color: var(--ec-text-inverse);
+}
+
+.send-box__pending-cancel:focus-visible,
+.send-box__pending-send:focus-visible,
+.send-box__pending-tool:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
 }
 
 /* F-35：附件上传队列（逐项状态 + 真实进度条）。 */

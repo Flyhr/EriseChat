@@ -107,6 +107,9 @@ public sealed class MessageService
     /// <summary>Reply 摘要文本上限（protocol/protocol.md §4.3：前 120 字符，超出追加省略号）。</summary>
     public const int ReplyTextMaxLength = 120;
 
+    /// <summary>图片宽高上限（C2a）：仅用于校验客户端上报的占位尺寸，避免异常值进入消息内容。</summary>
+    public const int MaxImageDimension = 20000;
+
     private readonly ChatDbContext _db;
     private readonly BlockService _blocks;
     private readonly AppOptions _appOptions;
@@ -1265,7 +1268,21 @@ public sealed class MessageService
                         StatusCodes.Status400BadRequest);
                 }
 
-                var normalizedFile = new FileContent(storedFile.Id, storedFile.OriginalName, storedFile.Size, storedFile.Mime);
+                // C2a：图片可带尺寸与相册批次，服务端只做范围/格式校验后原样下发。
+                // 旧客户端不传这些字段、旧服务端会忽略未知字段，均按逐图显示处理。
+                var isImage = request.MsgType == MessageType.Image;
+                var width = isImage ? NormalizeImageDimension(content.Width, "width") : null;
+                var height = isImage ? NormalizeImageDimension(content.Height, "height") : null;
+                var albumId = isImage ? NormalizeAlbumId(content.AlbumId) : null;
+
+                var normalizedFile = new FileContent(
+                    storedFile.Id,
+                    storedFile.OriginalName,
+                    storedFile.Size,
+                    storedFile.Mime,
+                    width,
+                    height,
+                    albumId);
                 return new NormalizedSendContent(
                     MessageContent.FromObject(normalizedFile),
                     storedFile.Id,
@@ -1336,6 +1353,40 @@ public sealed class MessageService
         }
 
         return trimmed;
+    }
+
+    /// <summary>图片像素尺寸（C2a）：可选；提供时必须在 1~20000 之间，避免写入异常值导致前端占位失真。</summary>
+    private static int? NormalizeImageDimension(int? value, string fieldName)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        if (value is < 1 or > MaxImageDimension)
+        {
+            throw ApiException.ValidationFailed($"{fieldName} 必须在 1~{MaxImageDimension} 之间");
+        }
+
+        return value;
+    }
+
+    /// <summary>相册批次标识（C2a）：可选；提供时必须是 8~64 位 base64url 字符，不接受任意文本。</summary>
+    private static string? NormalizeAlbumId(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
+
+        var valid = value.Length is >= 8 and <= 64 &&
+                    value.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_');
+        if (!valid)
+        {
+            throw ApiException.ValidationFailed("albumId 格式不合法（8~64 位字母、数字、-、_）");
+        }
+
+        return value;
     }
 
     /// <summary>校验会话存在且当前用户是成员；返回跟踪实体用于更新 last_message_id。</summary>

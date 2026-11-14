@@ -83,6 +83,19 @@ export async function compressImageFile(file: File, options: CompressOptions = {
   }
 }
 
+/** 读取图片像素尺寸（C2a）：用于发送时把 width/height 写进消息内容，接收端按此预留占位。 */
+export async function measureImageSize(file: File): Promise<{ width: number; height: number } | null> {
+  try {
+    const image = await loadImage(file)
+    const { width, height } = { width: image.naturalWidth, height: image.naturalHeight }
+    if (width <= 0 || height <= 0) return null
+    return { width, height }
+  } catch (error) {
+    console.warn('[image] 读取图片尺寸失败，占位尺寸留空', error)
+    return null
+  }
+}
+
 function isImageExtension(fileName: string): boolean {
   const extension = extensionOf(fileName)
   return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(extension)

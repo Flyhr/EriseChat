@@ -632,6 +632,9 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | `name` | string | 是 | 原始文件名 |
 | `size` | integer | 是 | 文件大小（字节） |
 | `mime` | string | 是 | MIME 类型 |
+| `width` | integer | 否 | 图片像素宽（仅 `image`，C2a；1~20000，客户端按此预留占位，省略时按加载后尺寸显示） |
+| `height` | integer | 否 | 图片像素高（仅 `image`，C2a，同上） |
+| `albumId` | string | 否 | 相册批次标识（仅 `image`，C2a；8~64 位字母/数字/`-`/`_`，同一次确认发送的多张图共享；旧端忽略并逐图显示） |
 
 3. **下载**：`GET /api/files/{fileId}`，需登录且请求者必须是引用该文件的会话成员；流式返回，不暴露磁盘路径。只认**未撤回**的引用消息作为会话成员访问依据（F-38 收尾）；上传者本人、个人/群头像等独立授权仍按原规则放行。
 4. **图片**：客户端发送前压缩（最长边 1280px、约 ≤300KB）；图片消息与文件消息共用 FileContent。
@@ -811,3 +814,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C1b 拉黑与私聊权限） | 2026-11-14 | 新增 `blocks` 表（有方向单向行：`blocker_user_id` → `blocked_user_id`，复合主键 + `idx_blocks_blocked`，`protocol/schema.sql` 与 EF 迁移同步）与 REST `GET /api/blocks`、`PUT/DELETE /api/blocks/{userId}`（均幂等）；新增错误码 `BLOCKED`（403）：任一方拉黑期间，好友申请、拉黑后接受旧申请、新建单聊、建群选人、邀请成员、单聊发送、转发到单聊均拒绝，已落库消息的幂等重试不受影响；拉黑不改变好友关系，共同群消息与历史读取照常；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
 | v1（C1c 群邀请链接） | 2026-11-14 | 新增 `group_invite_links` 表（`token` 主键、`conversation_id`、`created_by`、`expires_at`、`revoked_at`、`created_at`、`idx_group_invite_links_conversation`，`protocol/schema.sql` 与 EF 迁移同步）与 5 个 REST 接口（创建/列出/撤销、预览、兑换加入）；新增错误码 `INVITE_REVOKED`（410）；令牌为 32 字节 base64url 随机串、不含邮箱、日志不记录，默认 7 天有效；兑换时校验撤销/有效期/发起人当前权限/拉黑关系/群容量，成员插入与系统消息同事务且重复/并发兑换幂等；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
 | v1（C1 会话成员邮箱收敛） | 2026-11-14 | 会话对象 `members[]` 的 `email` 字段不再下发（字段省略）：`GET/POST /api/conversations`、成员变更响应、WS `conv.list`/`conv.updated` 使用同一投影，均受影响；好友对象 `Friend.email` 与本人 `/api/me` 不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（C2a 多图发送） | 2026-11-14 | FileContent 追加三个**可选**字段：`width` / `height`（image 消息的像素尺寸，1~20000，客户端用于预留占位，服务端只做范围校验）与 `albumId`（相册批次标识，8~64 位字母/数字/`-`/`_`，同一次确认发送的多张图片共享，服务端只做格式校验）；`file` 消息忽略这三个字段；旧客户端不传字段照常发送并逐图显示，旧服务端忽略未知字段；多图仍是多条独立 `message.send`（各自 `clientMsgId`、`seq` 与发送状态），服务端不合并、不改 `messages` 表结构、`messages.file_id` 语义不变；重连补拉按 `seq` 逐条还原，`albumId` 相同的相邻图片可还原为同一批次；单张失败只重试该条（复用已上传 `fileId` 与原 `clientMsgId`，不产生重复消息）；无新帧（`type` 仍 23 个） |

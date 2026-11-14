@@ -82,6 +82,12 @@ export interface FileContent {
   name: string
   size: number
   mime: string
+  /** 图片像素宽（C2a，仅 image 消息）：用于加载前预留占位，避免列表跳动。 */
+  width?: number
+  /** 图片像素高（C2a，同上）。 */
+  height?: number
+  /** 相册批次标识（C2a）：同一次确认发送的多张图片共享；旧端忽略并逐图显示。 */
+  albumId?: string
 }
 
 /** 语音消息内容（F-28，protocol.md §7 第 9 条）：只传元数据，音频走 REST。 */

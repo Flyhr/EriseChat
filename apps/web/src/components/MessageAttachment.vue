@@ -38,6 +38,22 @@ const imageState = ref<'loading' | 'ready' | 'error'>('loading')
 const fileState = ref<'idle' | 'downloading' | 'error'>('idle')
 let disposed = false
 
+/** C2a：按消息里的像素尺寸与缩略图上限（240px）等比换算占位尺寸；加载前后同尺寸，列表不跳动。 */
+const reservedSize = computed<{ width: number; height: number } | null>(() => {
+  const file = content.value
+  const width = file?.width
+  const height = file?.height
+  if (!width || !height || width <= 0 || height <= 0) return null
+  const max = 240
+  const scale = Math.min(1, max / width, max / height)
+  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
+})
+const reservedStyle = computed(() =>
+  reservedSize.value
+    ? { width: `${reservedSize.value.width}px`, height: `${reservedSize.value.height}px` }
+    : undefined,
+)
+
 /** 图片缩略图：按 fileId 走鉴权下载 + blob 缓存，失败显示「图片不可用」并允许重试。 */
 async function loadImage(): Promise<void> {
   const file = content.value
@@ -110,6 +126,7 @@ async function download(): Promise<void> {
           :src="blobUrl"
           :alt="content.name"
           class="message-attachment__image"
+          :style="reservedStyle"
           loading="lazy"
           decoding="async"
           @load="emit('loaded')"
@@ -119,7 +136,7 @@ async function download(): Promise<void> {
         <span>图片不可用</span>
         <button type="button" class="message-attachment__retry" @click="loadImage">重试</button>
       </div>
-      <div v-else class="message-attachment__skeleton" role="img" aria-label="图片正在加载" />
+      <div v-else class="message-attachment__skeleton" :style="reservedStyle" role="img" aria-label="图片正在加载" />
     </template>
 
     <!-- 文件：类型图标 + 名称 + 大小，下载入口用矢量图标；不套气泡。 -->

@@ -24,6 +24,11 @@ export interface UploadItem {
   clientMsgId?: string
   msgType?: 'image' | 'file'
   content?: FileContent
+  /** C2a：图片尺寸（压缩后测量），写入 FileContent 供接收端预留占位。 */
+  width?: number
+  height?: number
+  /** C2a：相册批次标识；同一次确认发送的多张图片共享。 */
+  albumId?: string
   error?: string
   replyTo?: string
   replyPreview?: ReplyPreviewLike
@@ -32,6 +37,17 @@ export interface UploadItem {
 export interface CreateUploadItemOptions {
   replyTo?: string
   replyPreview?: ReplyPreviewLike
+  /** C2a：同批确认发送的多张图片共享同一相册标识。 */
+  albumId?: string
+}
+
+/** C2a：多图预览项（尚未确认发送，只存在于前端内存；previewUrl 为本地 object URL）。 */
+export interface PendingImageItem {
+  id: string
+  name: string
+  /** 原始文件：确认发送时据此入上传队列。 */
+  file: File
+  previewUrl: string
 }
 
 /** 入队：捕获当时会话/账号/回复目标，后续不再随当前页面状态变化。 */
@@ -52,6 +68,7 @@ export function createUploadItem(
     progress: 0,
     ...(options.replyTo ? { replyTo: options.replyTo } : {}),
     ...(options.replyPreview ? { replyPreview: options.replyPreview } : {}),
+    ...(options.albumId ? { albumId: options.albumId } : {}),
   }
 }
 
