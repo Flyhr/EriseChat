@@ -396,6 +396,7 @@ public static class ConversationsEndpoints
         ClaimsPrincipal principal,
         string conversationId,
         long? beforeSeq,
+        int? beforeOffset,
         int? limit,
         ConversationFilesService files,
         CancellationToken cancellationToken)
@@ -405,6 +406,7 @@ public static class ConversationsEndpoints
             userId,
             conversationId,
             beforeSeq,
+            beforeOffset,
             limit,
             cancellationToken);
         return Results.Json(page);

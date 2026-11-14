@@ -18,6 +18,13 @@ import {
   mergeSharedFiles,
   mergeSharedLinks,
 } from '../core/sharedFiles'
+import {
+  rememberSharedPanelScroll,
+  rememberSharedPanelTab,
+  sharedPanelStateOf,
+  type SharedPanelTab,
+} from '../core/sharedPanelState'
+import { chatWs } from '../core/ws'
 import AppIcon from './AppIcon.vue'
 import EmptyState from './EmptyState.vue'
 import ImagePreview from './ImagePreview.vue'
@@ -30,7 +37,7 @@ const emit = defineEmits<{
   'locate-message': [messageId: string]
 }>()
 
-type FileTab = 'image' | 'link' | 'file'
+type FileTab = SharedPanelTab
 
 const TABS: { id: FileTab; label: string }[] = [
   { id: 'image', label: '媒体' },
@@ -50,26 +57,27 @@ const emptyDescription = computed(() =>
     : '会话中发送的图片和文件会显示在这里。',
 )
 
-interface PanelState {
-  tab: FileTab
-  scroll: Record<FileTab, number>
-}
-
-/** 面板被明细面板关闭或页签切换重建后，按会话恢复原筛选与滚动位置（仅内存）。 */
-const panelState = new Map<string, PanelState>()
-
 const rootRef = ref<HTMLElement | null>(null)
 const activeTab = ref<FileTab>('image')
 const itemsByTab = ref<Record<'image' | 'file', SharedFileItem[]>>({ image: [], file: [] })
-const hasMoreByTab = ref<Record<'image' | 'file', boolean>>({ image: true, file: true })
+const hasMoreByTab = ref<Record<'image' | 'file', boolean>>({ image: false, file: false })
+const loadedTabs = ref<Record<FileTab, boolean>>({ image: false, link: false, file: false })
 const links = ref<SharedLinkItem[]>([])
-const linksHasMore = ref(true)
-const loading = ref(false)
-const loadingMore = ref(false)
+const linksHasMore = ref(false)
+const linksCursor = ref<{ seq: number | null; offset: number | null }>({ seq: null, offset: null })
+const loadingTab = ref<FileTab | null>(null)
+const loadingMoreTab = ref<FileTab | null>(null)
 const errorMessage = ref('')
 const urls = ref<Record<string, string>>({})
 const failedIds = ref<Set<string>>(new Set())
-const requestSeq = ref(0)
+const requestSeqs: Record<FileTab, number> = { image: 0, link: 0, file: 0 }
+/** 会话切换或组件卸载时递增，用于丢弃上一个会话的在途响应。 */
+let loadEpoch = 0
+let unsubscribeRecall: (() => void) | null = null
+
+/** 首屏加载按页签区分：一个页签在加载时不阻塞其它页签切换。 */
+const loading = computed(() => loadingTab.value === activeTab.value)
+const loadingMore = computed(() => loadingMoreTab.value === activeTab.value)
 
 /** 按月分组的三个页签数据（C2c）。 */
 const imageGroups = computed(() => groupByMonth(itemsByTab.value.image))
@@ -99,88 +107,104 @@ function scrollParent(): HTMLElement | null {
   return rootRef.value?.parentElement ?? null
 }
 
-function stateOf(conversationId: string): PanelState {
-  let state = panelState.get(conversationId)
-  if (!state) {
-    state = { tab: 'image', scroll: { image: 0, link: 0, file: 0 } }
-    panelState.set(conversationId, state)
-  }
-  return state
-}
-
+/** 页签与滚动位置存在模块作用域：明细面板关闭会卸载本组件，组件内状态会丢。 */
 function rememberScroll(): void {
-  if (!props.conversationId) return
-  const state = stateOf(props.conversationId)
-  state.tab = activeTab.value
   const parent = scrollParent()
-  if (parent) state.scroll[activeTab.value] = parent.scrollTop
+  if (!parent) return
+  rememberSharedPanelScroll(props.conversationId, activeTab.value, parent.scrollTop)
 }
 
 function restoreScroll(): void {
-  if (!props.conversationId) return
-  const state = panelState.get(props.conversationId)
   const parent = scrollParent()
-  if (!state || !parent) return
-  parent.scrollTop = state.scroll[activeTab.value] ?? 0
+  if (!parent) return
+  parent.scrollTop = sharedPanelStateOf(props.conversationId).scroll[activeTab.value] ?? 0
 }
 
 function switchTab(tab: FileTab): void {
   if (activeTab.value === tab) return
   rememberScroll()
   activeTab.value = tab
-  const loaded = tab === 'link' ? links.value.length > 0 : itemsByTab.value[tab].length > 0
-  if (!loaded && !loading.value) {
-    void load(tab, true)
-  }
+  rememberSharedPanelTab(props.conversationId, tab)
+  // 加载跟随当前页签：其它页签的在途请求不阻塞本次切换。
+  if (!loadedTabs.value[tab] && loadingTab.value !== tab) void load(tab, true)
   if (tab === 'image') void loadThumbnails()
   void nextTick(restoreScroll)
 }
 
 async function load(tab: FileTab, reset: boolean): Promise<void> {
-  if (!props.conversationId) return
-  const seq = ++requestSeq.value
+  const conversationId = props.conversationId
+  if (!conversationId) return
+  const epoch = loadEpoch
+  const seq = ++requestSeqs[tab]
   if (reset) {
-    loading.value = true
+    loadingTab.value = tab
     errorMessage.value = ''
   } else {
-    loadingMore.value = true
+    loadingMoreTab.value = tab
   }
   try {
     if (tab === 'link') {
-      const beforeSeq = reset ? undefined : links.value[links.value.length - 1]?.messageSeq
-      const page = await conversationsApi.listLinks(props.conversationId, {
-        beforeSeq,
+      const cursor = reset
+        ? { seq: undefined, offset: undefined }
+        : {
+            seq: linksCursor.value.seq ?? undefined,
+            offset: linksCursor.value.offset ?? undefined,
+          }
+      let page = await conversationsApi.listLinks(conversationId, {
+        beforeSeq: cursor.seq,
+        beforeOffset: cursor.offset,
         limit: SHARED_FILES_PAGE_SIZE,
       })
-      if (seq !== requestSeq.value) return
+      // 链接稀疏时服务端可能返回空页但仍有游标：继续取下一页（最多 3 跳），避免空页卡住翻页。
+      let hops = 0
+      while (
+        page.items.length === 0 &&
+        page.hasMore &&
+        (page.nextBeforeSeq ?? null) !== null &&
+        hops < 3
+      ) {
+        hops += 1
+        page = await conversationsApi.listLinks(conversationId, {
+          beforeSeq: page.nextBeforeSeq ?? undefined,
+          beforeOffset: page.nextBeforeOffset ?? 0,
+          limit: SHARED_FILES_PAGE_SIZE,
+        })
+      }
+      if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
       links.value = reset ? page.items : mergeSharedLinks(links.value, page.items)
       linksHasMore.value = page.hasMore
+      linksCursor.value = {
+        seq: page.nextBeforeSeq ?? null,
+        offset: page.nextBeforeOffset ?? null,
+      }
+      loadedTabs.value = { ...loadedTabs.value, link: true }
     } else {
       const beforeSeq = reset ? undefined : lastSeqOf(itemsByTab.value[tab])
-      const page = await conversationsApi.listFiles(props.conversationId, {
+      const page = await conversationsApi.listFiles(conversationId, {
         type: tab,
         beforeSeq,
         limit: SHARED_FILES_PAGE_SIZE,
       })
-      if (seq !== requestSeq.value) return
+      if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
       itemsByTab.value = {
         ...itemsByTab.value,
         [tab]: reset ? page.items : mergeSharedFiles(itemsByTab.value[tab], page.items),
       }
       hasMoreByTab.value = { ...hasMoreByTab.value, [tab]: page.hasMore }
+      loadedTabs.value = { ...loadedTabs.value, [tab]: true }
     }
     if (tab === 'image') void loadThumbnails()
   } catch (error) {
-    if (seq !== requestSeq.value) return
+    if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
     errorMessage.value = friendlyError(error)
   } finally {
-    if (seq === requestSeq.value) {
-      loading.value = false
-      loadingMore.value = false
+    if (seq === requestSeqs[tab]) {
+      if (loadingTab.value === tab) loadingTab.value = null
+      if (loadingMoreTab.value === tab) loadingMoreTab.value = null
     }
   }
-  // 首屏数据落地后再还原滚动位置（重建面板/切换页签时）。
-  if (reset && seq === requestSeq.value) {
+  // 首屏数据落地后再还原滚动位置（重建面板/切换页签时），不为了找回旧位置额外翻页。
+  if (reset && epoch === loadEpoch && activeTab.value === tab) {
     await nextTick()
     restoreScroll()
   }
@@ -191,8 +215,10 @@ function lastSeqOf(items: SharedFileItem[]): number | undefined {
 }
 
 function loadMore(): void {
-  if (loading.value || loadingMore.value || !hasMore.value) return
-  void load(activeTab.value, false)
+  const tab = activeTab.value
+  if (!loadedTabs.value[tab] || loadingTab.value === tab || loadingMoreTab.value === tab) return
+  if (!hasMore.value) return
+  void load(tab, false)
 }
 
 /** 图片缩略图统一走 blobCache：同一 fileId 只请求一次，失败后显示占位；切会话后旧响应不得写回。 */
@@ -255,18 +281,51 @@ function locateCurrentPreview(): void {
   if (current?.messageId) locateMessage(current.messageId)
 }
 
+/**
+ * 已打开的共享面板随撤回事件失效：删掉对应消息的图片/文件/链接条目，预览列表自动收敛。
+ * 撤回后的下载仍由文件接口鉴权拒绝（服务端校验消息未撤回），这里只处理展示。
+ */
+function removeRecalledMessage(messageId: string): void {
+  if (!messageId) return
+  if (links.value.some((link) => link.messageId === messageId)) {
+    links.value = links.value.filter((link) => link.messageId !== messageId)
+  }
+  const images = itemsByTab.value.image
+  const files = itemsByTab.value.file
+  const nextImages = images.filter((item) => item.messageId !== messageId)
+  const nextFiles = files.filter((item) => item.messageId !== messageId)
+  if (nextImages.length !== images.length || nextFiles.length !== files.length) {
+    itemsByTab.value = { image: nextImages, file: nextFiles }
+  }
+  if (previewOpen.value) {
+    if (previewItems.value.length === 0) {
+      previewOpen.value = false
+    } else if (previewIndex.value >= previewItems.value.length) {
+      previewIndex.value = previewItems.value.length - 1
+    }
+  }
+}
+
 watch(
   () => props.conversationId,
   (conversationId) => {
-    if (!conversationId) return
+    loadEpoch += 1
+    requestSeqs.image = 0
+    requestSeqs.link = 0
+    requestSeqs.file = 0
     itemsByTab.value = { image: [], file: [] }
-    hasMoreByTab.value = { image: true, file: true }
+    hasMoreByTab.value = { image: false, file: false }
+    loadedTabs.value = { image: false, link: false, file: false }
     links.value = []
-    linksHasMore.value = true
+    linksHasMore.value = false
+    linksCursor.value = { seq: null, offset: null }
     urls.value = {}
     failedIds.value = new Set()
     errorMessage.value = ''
-    activeTab.value = panelState.get(conversationId)?.tab ?? 'image'
+    loadingTab.value = null
+    loadingMoreTab.value = null
+    if (!conversationId) return
+    activeTab.value = sharedPanelStateOf(conversationId).tab
     void load(activeTab.value, true)
     if (activeTab.value === 'image') void loadThumbnails()
   },
@@ -274,12 +333,20 @@ watch(
 )
 
 onMounted(() => {
+  // 复用既有撤回事件：面板保持打开时，其它端的撤回立即反映到当前列表与预览。
+  unsubscribeRecall = chatWs.on('frame', (frame) => {
+    if (frame.type !== 'message.recalled') return
+    if (frame.conversationId !== props.conversationId) return
+    removeRecalledMessage(frame.messageId)
+  })
   void nextTick(restoreScroll)
 })
 
 onBeforeUnmount(() => {
   rememberScroll()
-  requestSeq.value += 1
+  unsubscribeRecall?.()
+  unsubscribeRecall = null
+  loadEpoch += 1
 })
 </script>
 

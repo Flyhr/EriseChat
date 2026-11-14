@@ -31,8 +31,16 @@ public sealed record ConversationLinkItem(
     string SenderId,
     long CreatedAt);
 
-/// <summary>共享链接分页（items 按 messageSeq 降序；hasMore 表示还有更早的链接）。</summary>
-public sealed record ConversationLinksPage(IReadOnlyList<ConversationLinkItem> Items, bool HasMore);
+/// <summary>
+/// 共享链接分页（items 按 messageSeq 降序）。
+/// <see cref="NextBeforeSeq"/> / <see cref="NextBeforeOffset"/> 为下一页游标：只在 seq 等于该值的消息内
+/// 从 beforeOffset 继续取，因此同一条消息里的多个链接可以分页取完；两者为 null 表示没有更多。
+/// </summary>
+public sealed record ConversationLinksPage(
+    IReadOnlyList<ConversationLinkItem> Items,
+    bool HasMore,
+    long? NextBeforeSeq = null,
+    int? NextBeforeOffset = null);
 
 /// <summary>
 /// 会话共享文件汇总（F-15）：只统计 messages.file_id 非空的 image/file 消息，
@@ -48,6 +56,9 @@ public sealed class ConversationFilesService
     private const int FileIdLogPrefixLength = 6;
     /// <summary>链接汇总单页最多扫描的消息数，避免链接稀疏时全表扫描。</summary>
     private const int MaxLinkScanWindow = 400;
+
+    /// <summary>链接汇总单次请求累计最多扫描的消息数（跨多个扫描窗口，用于跳过没有有效链接的区间）。</summary>
+    private const int MaxLinkScanMessages = 2_000;
 
     /// <summary>HTTP/HTTPS URL 识别（与消息搜索 linkOnly 的识别规则一致）。</summary>
     private static readonly Regex HttpUrlPattern = new(
@@ -148,12 +159,15 @@ public sealed class ConversationFilesService
 
     /// <summary>
     /// 分页查询会话内共享链接（C2c）：从 text 消息里提取 HTTP(S) 链接，按消息 seq 倒序。
-    /// 会话不存在 404、非成员 403、非法 beforeSeq/limit 400；单页最多扫描 <see cref="MaxLinkScanWindow"/> 条候选消息。
+    /// 会话不存在 404、非成员 403、非法 beforeSeq/beforeOffset/limit 400。
+    /// 游标由 (beforeSeq, beforeOffset) 组成：只在 seq 等于 beforeSeq 的消息内从 beforeOffset 继续取，
+    /// 因此同一条消息里的多个链接可以分页取完；单次请求最多扫描 <see cref="MaxLinkScanMessages"/> 条候选消息。
     /// </summary>
     public async Task<ConversationLinksPage> GetSharedLinksAsync(
         string userId,
         string conversationId,
         long? beforeSeq,
+        int? beforeOffset,
         int? limit,
         CancellationToken cancellationToken)
     {
@@ -164,54 +178,124 @@ public sealed class ConversationFilesService
             throw ApiException.ValidationFailed("beforeSeq 必须是正整数");
         }
 
+        if (beforeOffset is < 0)
+        {
+            throw ApiException.ValidationFailed("beforeOffset 必须是非负整数");
+        }
+
+        // 旧客户端只传 beforeSeq：保持「seq < beforeSeq」语义，游标所在消息整体跳过。
+        long? cursorSeq = beforeSeq;
+        var cursorOffset = beforeOffset ?? (cursorSeq is null ? 0 : int.MaxValue);
+
         var scanWindow = Math.Max(pageSize, Math.Min(pageSize * 4, MaxLinkScanWindow));
-        var query = _db.Messages.AsNoTracking()
-            .Where(message => message.ConversationId == id && message.MsgType == MessageType.Text &&
-                              message.DeletedAt == null && message.ContentJson.Contains("http"));
-        if (beforeSeq is not null)
-        {
-            query = query.Where(message => message.Seq < beforeSeq.Value);
-        }
-
-        var rows = await query
-            .OrderByDescending(message => message.Seq)
-            .Take(scanWindow + 1)
-            .ToListAsync(cancellationToken);
-        var truncated = rows.Count > scanWindow;
-        if (truncated)
-        {
-            rows.RemoveAt(rows.Count - 1);
-        }
-
         var items = new List<ConversationLinkItem>(pageSize);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var scanned = 0;
         var hasMore = false;
-        foreach (var message in rows)
+
+        while (items.Count < pageSize)
         {
-            foreach (var url in ExtractHttpUrls(message.ContentJson))
+            var query = _db.Messages.AsNoTracking()
+                .Where(message => message.ConversationId == id && message.MsgType == MessageType.Text &&
+                                  message.DeletedAt == null && message.ContentJson.Contains("http"));
+            if (cursorSeq is not null)
             {
-                if (!seen.Add(url))
+                query = query.Where(message => message.Seq <= cursorSeq.Value);
+            }
+
+            var rows = await query
+                .OrderByDescending(message => message.Seq)
+                .Take(scanWindow + 1)
+                .ToListAsync(cancellationToken);
+            var truncated = rows.Count > scanWindow;
+            if (truncated)
+            {
+                rows.RemoveAt(rows.Count - 1);
+            }
+
+            if (rows.Count == 0)
+            {
+                break;
+            }
+
+            scanned += rows.Count;
+            var pageFull = false;
+            for (var rowIndex = 0; rowIndex < rows.Count; rowIndex++)
+            {
+                var message = rows[rowIndex];
+                var urls = ExtractHttpUrls(message.ContentJson).ToList();
+                var start = cursorSeq is not null && message.Seq == cursorSeq.Value
+                    ? Math.Min(cursorOffset, urls.Count)
+                    : 0;
+
+                for (var index = start; index < urls.Count; index++)
                 {
-                    continue;
+                    if (items.Count >= pageSize)
+                    {
+                        // 游标停在第一条未返回的链接上，下一页从同一条消息继续。
+                        cursorSeq = message.Seq;
+                        cursorOffset = index;
+                        hasMore = true;
+                        pageFull = true;
+                        break;
+                    }
+
+                    if (seen.Add(urls[index]))
+                    {
+                        items.Add(new ConversationLinkItem(
+                            urls[index],
+                            message.Id,
+                            message.Seq,
+                            message.SenderId,
+                            message.CreatedAt));
+                    }
                 }
 
-                if (items.Count >= pageSize)
+                if (pageFull)
                 {
-                    hasMore = true;
                     break;
                 }
 
-                items.Add(new ConversationLinkItem(url, message.Id, message.Seq, message.SenderId, message.CreatedAt));
+                cursorSeq = message.Seq;
+                // 本条消息已取完；offset 等于链接数，下一页从更早的消息继续。
+                cursorOffset = urls.Count;
+                if (items.Count >= pageSize)
+                {
+                    // 刚好装满分页：只有后面还有消息或本窗口被截断时才需要继续翻页。
+                    hasMore = truncated || rowIndex < rows.Count - 1;
+                    pageFull = true;
+                    break;
+                }
             }
 
-            if (hasMore)
+            if (pageFull)
             {
+                break;
+            }
+
+            if (!truncated)
+            {
+                // 已扫描到会话最早的可检索消息，后面没有更多了。
+                cursorSeq = null;
+                cursorOffset = 0;
+                hasMore = false;
+                break;
+            }
+
+            if (scanned >= MaxLinkScanMessages)
+            {
+                hasMore = true;
                 break;
             }
         }
 
-        // 没有条目时不回报 hasMore：客户端没有下一页游标，空页 + hasMore 会陷入重复请求。
-        return new ConversationLinksPage(items, (hasMore || truncated) && items.Count > 0);
+        if (!hasMore)
+        {
+            cursorSeq = null;
+            cursorOffset = 0;
+        }
+
+        return new ConversationLinksPage(items, hasMore, hasMore ? cursorSeq : null, hasMore ? cursorOffset : null);
     }
 
     /// <summary>校验会话存在且当前用户是成员，返回 trim 后的会话 ID（共享文件/链接共用）。</summary>

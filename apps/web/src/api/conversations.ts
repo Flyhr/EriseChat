@@ -51,10 +51,16 @@ export interface SharedLinkItem {
   createdAt: number
 }
 
-/** 共享链接分页（C2c）：items 按 messageSeq 降序；beforeSeq 为排他游标。 */
+/**
+ * 共享链接分页（C2c）：items 按 messageSeq 降序。
+ * nextBeforeSeq / nextBeforeOffset 为下一页游标（同一条消息里的多个链接可分页取完）；
+ * 没有更多时服务端返回 null（REST 序列化会省略 null 字段，读取时按 ?? null 归一）。
+ */
 export interface SharedLinksPage {
   items: SharedLinkItem[]
   hasMore: boolean
+  nextBeforeSeq?: number | null
+  nextBeforeOffset?: number | null
 }
 
 /** 共享文件条目（F-15）：每个文件取其在会话中最新引用的消息（messageSeq 最大）。 */
@@ -162,15 +168,17 @@ export const conversationsApi = {
   },
 
   /**
-   * 会话共享链接分页（C2c）：需登录且为会话成员；limit 1~100（默认 50），
-   * beforeSeq 为排他游标（传上一页最后一项的 messageSeq 继续向前翻）。
+   * 会话共享链接分页（C2c）：需登录且为会话成员；limit 1~100（默认 50）。
+   * 游标由 (beforeSeq, beforeOffset) 组成：只在 seq 等于 beforeSeq 的消息内从 beforeOffset 继续取，
+   * 因此同一条消息里的多个链接也能分页取完；翻页时直接传上一页返回的 nextBeforeSeq / nextBeforeOffset。
    */
   listLinks: (
     conversationId: string,
-    options: { beforeSeq?: number; limit?: number } = {},
+    options: { beforeSeq?: number; beforeOffset?: number; limit?: number } = {},
   ) => {
     const params = new URLSearchParams()
     if (options.beforeSeq !== undefined) params.set('beforeSeq', String(options.beforeSeq))
+    if (options.beforeOffset !== undefined) params.set('beforeOffset', String(options.beforeOffset))
     if (options.limit !== undefined) params.set('limit', String(options.limit))
     const query = params.toString()
     return http.get<SharedLinksPage>(

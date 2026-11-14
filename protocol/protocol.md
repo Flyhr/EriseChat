@@ -733,9 +733,9 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 17. **会话共享媒体与链接（REST，v1，C2c）**：会话详情的「媒体／文件／链接」复用既有共享文件接口，并新增共享链接汇总；两者都只返回**未撤回**消息的附件/链接（撤回后立即从列表消失，下载仍由文件接口的撤回校验拒绝）。
 
     - `GET /api/conversations/{conversationId}/files?type=image|file&beforeSeq&limit`（既有 F-15，本次起过滤 `deleted_at` 非空的消息）：返回 `{ "items": [ { "fileId", "name", "size", "mime", "messageId", "messageSeq", "senderId", "createdAt" } ], "hasMore" }`，同一 `fileId` 只保留最新引用的消息。
-    - `GET /api/conversations/{conversationId}/links?beforeSeq&limit`：从 text 消息中提取 HTTP(S) 链接，按消息 `seq` 倒序分页；返回 `{ "items": [ { "url", "messageId", "messageSeq", "senderId", "createdAt" } ], "hasMore" }`。
-    - 分页：`beforeSeq` 为排他游标（传上一页最后一项的 `messageSeq`）；`limit` 为 1~100，缺省 50；会话不存在 `NOT_FOUND`（404）、非成员 `NOT_MEMBER`（403）、游标非法 `VALIDATION_FAILED`（400）。
-    - 链接规则：只扫描 text 消息，单页最多扫描 200 条含 `http` 的候选消息（硬上限 400），页内按 URL 去重；URL 去掉尾部标点；没有条目时不返回 `hasMore`（避免空页无法前进）。
+    - `GET /api/conversations/{conversationId}/links?beforeSeq&beforeOffset&limit`：从 text 消息中提取 HTTP(S) 链接，按消息 `seq` 倒序分页；返回 `{ "items": [ { "url", "messageId", "messageSeq", "senderId", "createdAt" } ], "hasMore", "nextBeforeSeq", "nextBeforeOffset" }`，页内按 URL 去重。
+    - 分页：`beforeSeq` / `beforeOffset` 组成游标——只在 `seq` 等于 `beforeSeq` 的消息内从第 `beforeOffset` 个链接继续取，因此同一条消息里的多个链接也能分页取完；`nextBeforeSeq` / `nextBeforeOffset` 为下一页游标（与 `hasMore` 同时返回，均为 `null` 或省略表示没有更多），翻页时原样回传。没有有效链接的区间由服务端在同一个请求内继续扫描（单次最多 2000 条含 `http` 的候选消息）。`limit` 为 1~100，缺省 50；会话不存在 `NOT_FOUND`（404）、非成员 `NOT_MEMBER`（403）、游标非法 `VALIDATION_FAILED`（400）。只传 `beforeSeq` 的旧客户端按「`seq` 小于 `beforeSeq`」处理（游标所在消息整体跳过）。
+    - 链接规则：只扫描 text 消息，单个扫描窗口最多 200 条含 `http` 的候选消息（硬上限 400），页内按 URL 去重；URL 去掉尾部标点；`hasMore` 为 true 时按 `nextBeforeSeq` / `nextBeforeOffset` 继续翻页，没有有效链接的区间由同一个请求跨窗口继续扫描（单次最多 2000 条候选消息）。
     - 前端只负责展示与分页，不新增帧、不改库表；撤回、成员被移除后旧结果由既有消息与文件鉴权拦截。
 
 ## 8. 版本与兼容规则
@@ -824,3 +824,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C1 会话成员邮箱收敛） | 2026-11-14 | 会话对象 `members[]` 的 `email` 字段不再下发（字段省略）：`GET/POST /api/conversations`、成员变更响应、WS `conv.list`/`conv.updated` 使用同一投影，均受影响；好友对象 `Friend.email` 与本人 `/api/me` 不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C2a 多图发送） | 2026-11-14 | FileContent 追加三个**可选**字段：`width` / `height`（image 消息的像素尺寸，1~20000，客户端用于预留占位，服务端只做范围校验）与 `albumId`（相册批次标识，8~64 位字母/数字/`-`/`_`，同一次确认发送的多张图片共享，服务端只做格式校验）；`file` 消息忽略这三个字段；旧客户端不传字段照常发送并逐图显示，旧服务端忽略未知字段；多图仍是多条独立 `message.send`（各自 `clientMsgId`、`seq` 与发送状态），服务端不合并、不改 `messages` 表结构、`messages.file_id` 语义不变；重连补拉按 `seq` 逐条还原，`albumId` 相同的相邻图片可还原为同一批次；单张失败只重试该条（复用已上传 `fileId` 与原 `clientMsgId`，不产生重复消息）；无新帧（`type` 仍 23 个） |
 | v1（C2c 会话共享媒体） | 2026-11-14 | 新增 REST `GET /api/conversations/{conversationId}/links`（从 text 消息提取 HTTP(S) 链接、按 `seq` 倒序分页，返回 `{ items: [{ url, messageId, messageSeq, senderId, createdAt }], hasMore }`，单页最多扫描 200 条含 `http` 的候选消息、页内按 URL 去重）；既有 `GET .../files` 起过滤已撤回消息（`deleted_at` 非空的行不再出现，下载仍被文件接口拒绝）；分页游标 `beforeSeq` 排他、`limit` 1~100 默认 50；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（C2c 修订：共享链接游标） | 2026-11-14 | `GET /api/conversations/{conversationId}/links` 改为 `(beforeSeq, beforeOffset)` 组合游标，响应新增 `nextBeforeSeq` / `nextBeforeOffset`：只在 `seq` 等于 `beforeSeq` 的消息内从第 `beforeOffset` 个链接继续取，同一条消息里的多个链接可分页取完；没有有效链接的区间由服务端在同一请求内继续跨过（单次最多扫描 2000 条含 `http` 的候选消息）；只传 `beforeSeq` 的旧客户端保持「`seq` 小于 `beforeSeq`」语义；`files` 接口与撤回过滤不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
