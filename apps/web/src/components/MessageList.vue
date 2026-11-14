@@ -540,10 +540,16 @@ watch(
       // 目标行缺失时（例如同时发生窗口收缩）退回原有高度差补偿。
       const visibleAnchor = getVisibleAnchor()
       const conversationId = props.conversationId ?? ''
-      windowRange.value = clampWindow(
+      // 前插同样受渲染上限约束：窗口已满时裁掉视口下方的旧条目，别让历史把窗口撑过
+      // MAX_RENDERED_MESSAGES（clampWindow 只收索引范围，不负责条数上限）。
+      const expanded = clampWindow(
         { start: windowRange.value.start, end: windowRange.value.end + delta },
         next,
       )
+      windowRange.value =
+        expanded.end - expanded.start > MAX_RENDERED_MESSAGES
+          ? { start: expanded.start, end: expanded.start + MAX_RENDERED_MESSAGES }
+          : expanded
       const anchor = loadAnchor.value
       loadAnchor.value = null
       void nextTick(() => {
@@ -570,8 +576,10 @@ watch(
     }
 
     // 用户停留在窗口底部但未贴底：把新消息纳入窗口，便于继续下滑查看。
-    if (currentRange().end === previous) {
-      windowRange.value = clampWindow({ start: currentRange().start, end: next }, next)
+    // 但不能突破渲染上限——窗口已满时只累计浮标，由「有新消息」提示带回最新。
+    const range = currentRange()
+    if (range.end === previous && range.end - range.start + delta <= MAX_RENDERED_MESSAGES) {
+      windowRange.value = clampWindow({ start: range.start, end: next }, next)
       return
     }
 
