@@ -290,7 +290,9 @@ const locateRequestingCount = ref(0)
 let locateRequestScope = 0
 const locateRequesting = computed(() => locateRequestingCount.value > 0)
 const locateMode = computed(() => locateWindow.value !== null)
-const displayMessages = computed(() => locateWindow.value?.messages ?? activeMessages.value)
+const displayMessages = computed(() =>
+  locateWindow.value?.messages.map(messages.withLatestReactions) ?? activeMessages.value,
+)
 const displayPending = computed(() => (locateMode.value ? [] : activePending.value))
 const displayHasMore = computed(() => (locateMode.value ? false : activeHasMore.value))
 
@@ -392,14 +394,18 @@ function onToggleReaction(messageId: string, emoji: string): void {
 
 /**
  * C3：提交回应。只以服务端返回的权威摘要为准，失败时保留最后一次确认状态并提示；
- * 切会话/切账号或在途期间收到更新的推送时丢弃迟到的响应。
+ * 切换会话或登录态后丢弃响应，其余响应由 store 按服务端修订号合并。
  */
 async function submitReaction(message: Message, emoji: string): Promise<void> {
   const conversationId = activeId.value
   if (!conversationId || reactionBusyIds.value.includes(message.messageId)) return
   if (typeof message.deletedAt === 'number') return
-  const userId = selfUserId.value
-  const version = messages.reactionVersionOf(conversationId, message.messageId)
+  const accessToken = auth.accessToken
+  const serverOrigin = resolveServerOrigin()
+  const isCurrent = () =>
+    activeId.value === conversationId &&
+    auth.accessToken === accessToken &&
+    resolveServerOrigin() === serverOrigin
   const mine = myReactionOf(message.reactions)
   reactionBusyIds.value = [...reactionBusyIds.value, message.messageId]
   try {
@@ -407,11 +413,10 @@ async function submitReaction(message: Message, emoji: string): Promise<void> {
       mine === emoji
         ? await messagesApi.removeReaction(conversationId, message.messageId)
         : await messagesApi.setReaction(conversationId, message.messageId, emoji)
-    if (activeId.value !== conversationId || selfUserId.value !== userId) return
-    if (messages.reactionVersionOf(conversationId, message.messageId) !== version) return
-    messages.applyReactionSummary(conversationId, message.messageId, result.reactions)
+    if (!isCurrent()) return
+    messages.applyReactionSummary(conversationId, message.messageId, result)
   } catch (cause) {
-    if (activeId.value === conversationId) showToast(friendlyError(cause), 'error')
+    if (isCurrent()) showToast(friendlyError(cause), 'error')
   } finally {
     reactionBusyIds.value = reactionBusyIds.value.filter((id) => id !== message.messageId)
   }
@@ -741,6 +746,11 @@ async function ensureMessageVisible(
       page.messages.find((message) => message.seq === target.seq)?.messageId
     if (!targetId || !page.messages.some((message) => message.messageId === targetId)) {
       return false
+    }
+    for (const message of page.messages) {
+      if (message.deletedAt == null && message.reactions !== undefined) {
+        messages.applyReactionSummary(conversationId, message.messageId, message)
+      }
     }
     locateWindowVersion.value += 1
     const appliedVersion = locateWindowVersion.value

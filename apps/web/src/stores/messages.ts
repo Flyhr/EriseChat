@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, shallowReactive } from 'vue'
 import { defineStore } from 'pinia'
 import type {
   FileContent,
@@ -6,7 +6,6 @@ import type {
   MessageAckFrame,
   MessageEditFrame,
   MessageEditedFrame,
-  MessageReactionsFrame,
   MessageRecallFrame,
   MessageRecalledFrame,
   MessageSendFrame,
@@ -21,7 +20,6 @@ import {
   type GapCheckResult,
   buildSyncCursors,
   detectGap,
-  keepNewerReactions,
   mergeMessages,
 } from '../core/sync'
 import { messagesApi, type MessageContextPage } from '../api/messages'
@@ -76,6 +74,8 @@ const SYNC_MAX_ROUNDS = 20
 const SYNC_GAP_RETRIES = 1
 
 export type PendingStatus = 'sending' | 'failed'
+
+type ReactionSnapshot = Pick<Message, 'reactions' | 'reactionRevision'>
 
 /** 本地乐观消息：尚未收到 message.ack，只用于 UI 展示，不属于服务端事实源。 */
 export interface PendingMessage {
@@ -178,24 +178,20 @@ export const useMessagesStore = defineStore('messages', () => {
    * F-34：把 sync.response 的 updates 覆盖到已缓存消息（仅按 messageId 定位，不新增/重排）。
    * 未缓存的消息（更早历史或已被淘汰）忽略，等用户加载历史时自然拿到最新状态。
    */
-  function applySyncUpdates(conversationId: string, updates: readonly Message[], requestEpoch?: number): void {
+  function applySyncUpdates(conversationId: string, updates: readonly Message[]): void {
     if (updates.length === 0) return
+    const byId = new Map(updates.map((message) => [message.messageId, reconcileReactions(message)]))
     const list = messagesOf(conversationId)
     if (list.length === 0) return
-    const byId = new Map(updates.map((message) => [message.messageId, message]))
     const changed: Message[] = []
     const next = list.map((message) => {
       const fresh = byId.get(message.messageId)
       if (!fresh) return message
-      // C3：请求发起后收到过更新的实时回应帧时，保留本地摘要，防止旧补拉回退界面。
-      const skipReactions =
-        requestEpoch !== undefined &&
-        realtimeReactionEpochOf(conversationId, message.messageId) > requestEpoch
       if (
         fresh.deletedAt === message.deletedAt &&
         fresh.editedAt === message.editedAt &&
         fresh.content === message.content &&
-        (skipReactions || isSameReactions(fresh.reactions, message.reactions))
+        isSameReactionSnapshot(fresh, message)
       ) {
         return message
       }
@@ -204,12 +200,8 @@ export const useMessagesStore = defineStore('messages', () => {
       else updated.deletedAt = fresh.deletedAt
       if (fresh.editedAt === undefined) delete updated.editedAt
       else updated.editedAt = fresh.editedAt
-      if (!skipReactions) {
-        const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
-        if (fresh.reactions === undefined) delete updated.reactions
-        else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
-        if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
-      }
+      updated.reactions = fresh.reactions
+      updated.reactionRevision = fresh.reactionRevision
       changed.push(updated)
       return updated
     })
@@ -230,7 +222,7 @@ export const useMessagesStore = defineStore('messages', () => {
   function patchStoredMessage(
     conversationId: string,
     messageId: string,
-    patch: Partial<Pick<Message, 'content' | 'deletedAt' | 'editedAt' | 'reactions'>>,
+    patch: Partial<Message>,
   ): void {
     const list = messagesOf(conversationId)
     const index = list.findIndex((message) => message.messageId === messageId)
@@ -242,89 +234,61 @@ export const useMessagesStore = defineStore('messages', () => {
     persistMessages([updated])
   }
 
-  /**
-   * C3：每条消息当前回应摘要的本地版本号。实时帧/补拉/历史刷新都会推进它，
-   * 界面发出 REST 请求后可用 {@link reactionVersionOf} 判断响应是否已过期。
-   */
-  const reactionVersionByMessage = new Map<string, number>()
+  // 缓存尚未加载的消息收到的摘要，历史分页和定位窗口共用；失权或登出时清除。
+  const reactionSnapshots = shallowReactive(new Map<string, Map<string, ReactionSnapshot>>())
 
-  /**
-   * C3：本端收到实时回应帧的单调序号。历史/补拉请求发起时记录当时序号，
-   * 响应回来时若该消息已有更新的实时帧，则保留本地摘要，避免迟到的旧响应把界面回退。
-   */
-  let realtimeReactionEpoch = 0
-  const realtimeReactionEpochByMessage = new Map<string, number>()
-
-  function realtimeReactionEpochOf(conversationId: string, messageId: string): number {
-    return realtimeReactionEpochByMessage.get(`${conversationId}:${messageId}`) ?? 0
-  }
-
-  /** 标记某条消息刚收到实时回应帧，推进其新旧判断水位。 */
-  function markRealtimeReaction(conversationId: string, messageId: string): void {
-    realtimeReactionEpoch += 1
-    realtimeReactionEpochByMessage.set(`${conversationId}:${messageId}`, realtimeReactionEpoch)
-  }
-
-  /** C3：请求发起时的实时回应序号，供响应合并时做新旧判断。 */
-  function reactionRequestEpoch(): number {
-    return realtimeReactionEpoch
-  }
-
-  /**
-   * C3：合并历史/补拉响应前，若某条消息在请求发起后收到过实时回应帧，
-   * 用它保留本地较新的摘要，避免旧响应覆盖实时状态。
-   */
-  function keepNewerLocalReactions(
-    conversationId: string,
-    incoming: readonly Message[],
-    requestEpoch: number,
-  ): readonly Message[] {
-    const localById = new Map(messagesOf(conversationId).map((message) => [message.messageId, message]))
-    return keepNewerReactions(
-      incoming,
-      localById,
-      (messageId) => realtimeReactionEpochOf(conversationId, messageId) > requestEpoch,
-    )
-  }
-
-  function bumpReactionVersion(
+  function rememberReactionSnapshot(
     conversationId: string,
     messageId: string,
-    reactions: readonly ReactionSummary[] | undefined,
-  ): void {
-    const key = `${conversationId}:${messageId}`
-    reactionVersionByMessage.set(key, (reactionVersionByMessage.get(key) ?? 0) + 1)
-    // F-37：定位窗口等临时视图靠原始帧补丁更新，不能依赖消息是否已在缓存中。
-    lastMessagePatch.value = {
-      conversationId,
-      messageId,
-      patch: { reactions: reactions === undefined ? undefined : reactions.map((item) => ({ ...item })) },
+    snapshot: ReactionSnapshot,
+  ): boolean {
+    if (snapshot.reactions === undefined) return false
+    let byMessage = reactionSnapshots.get(conversationId)
+    const known = byMessage?.get(messageId)
+    if (known) {
+      const revision = snapshot.reactionRevision ?? 0
+      const knownRevision = known.reactionRevision ?? 0
+      if (revision < knownRevision || (revision > 0 && revision === knownRevision)) return false
     }
+    if (!byMessage) {
+      byMessage = shallowReactive(new Map<string, ReactionSnapshot>())
+      reactionSnapshots.set(conversationId, byMessage)
+    }
+    byMessage.set(messageId, { reactions: snapshot.reactions, reactionRevision: snapshot.reactionRevision })
+    return true
   }
 
-  /** C3：当前消息回应摘要的版本号（0 表示本端还没收到过服务端摘要）。 */
-  function reactionVersionOf(conversationId: string, messageId: string): number {
-    return reactionVersionByMessage.get(`${conversationId}:${messageId}`) ?? 0
+  function withLatestReactions(message: Message): Message {
+    if (message.deletedAt != null) return message
+    const known = reactionSnapshots.get(message.conversationId)?.get(message.messageId)
+    if (!known || (known.reactionRevision ?? 0) < (message.reactionRevision ?? 0)) return message
+    return isSameReactionSnapshot(message, known) ? message : { ...message, ...known }
   }
 
-  /** C3：应用服务端权威回应摘要（实时帧/补拉/历史刷新），并推进本地版本号。 */
+  function reconcileReactions(message: Message): Message {
+    if (message.deletedAt != null) return { ...message, reactions: undefined, reactionRevision: undefined }
+    rememberReactionSnapshot(message.conversationId, message.messageId, message)
+    return withLatestReactions(message)
+  }
+
+  /** REST 和 WebSocket 使用同一条修订号合并规则。 */
   function applyReactionSummary(
     conversationId: string,
     messageId: string,
-    reactions: readonly ReactionSummary[],
+    snapshot: ReactionSnapshot,
   ): void {
-    const normalized = reactions.map((item) => ({ ...item }))
-    bumpReactionVersion(conversationId, messageId, normalized)
-    patchStoredMessage(conversationId, messageId, { reactions: normalized })
+    if (messagesOf(conversationId).find((message) => message.messageId === messageId)?.deletedAt != null) return
+    const { reactions, reactionRevision } = snapshot
+    if (rememberReactionSnapshot(conversationId, messageId, snapshot)) {
+      patchStoredMessage(conversationId, messageId, { reactions, reactionRevision })
+    }
   }
 
   /** C3：回应摘要是否等价（避免无变化时重渲染与落库）。 */
-  function isSameReactions(
-    left: readonly ReactionSummary[] | undefined,
-    right: readonly ReactionSummary[] | undefined,
-  ): boolean {
-    const a = left ?? []
-    const b = right ?? []
+  function isSameReactionSnapshot(left: ReactionSnapshot, right: ReactionSnapshot): boolean {
+    if (left.reactionRevision !== right.reactionRevision) return false
+    const a = left.reactions ?? []
+    const b = right.reactions ?? []
     if (a.length !== b.length) return false
     return a.every(
       (item, index) =>
@@ -341,7 +305,8 @@ export const useMessagesStore = defineStore('messages', () => {
 
   function handleRecalled(frame: MessageRecalledFrame): void {
     // 撤回后内容为空文本、不再带文件信息；deletedAt 非空即视为已撤回。
-    const patch = { content: '', deletedAt: frame.deletedAt }
+    const patch = { content: '', deletedAt: frame.deletedAt, reactions: undefined, reactionRevision: undefined }
+    reactionSnapshots.get(frame.conversationId)?.delete(frame.messageId)
     // F-37：定位窗口等临时视图要靠原始帧补丁更新，不能依赖消息是否已在缓存中。
     lastMessagePatch.value = { conversationId: frame.conversationId, messageId: frame.messageId, patch }
     patchStoredMessage(frame.conversationId, frame.messageId, patch)
@@ -355,7 +320,7 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /** 合并服务端事实消息：去重 + 按 seq 升序，并持久化消息与游标。 */
-  function merge(conversationId: string, incoming: readonly Message[], requestEpoch?: number): GapCheckResult {
+  function merge(conversationId: string, incoming: readonly Message[]): GapCheckResult {
     // F-03：「服务端已落库但 ack 丢失」时，补拉/历史里会出现同一 clientMsgId 的消息；
     // 命中后清掉本地待发消息（含重试定时器与缓存记录），避免重复展示。
     const pendingRecords = pendingOf(conversationId).map(toPendingRecord)
@@ -370,11 +335,7 @@ export const useMessagesStore = defineStore('messages', () => {
     }
 
     const result = detectGap(lastSeqOf(conversationId), incoming)
-    // C3：历史/补拉响应可能早于本端已收到的实时回应帧，合并时保留更新的本地摘要。
-    const guarded =
-      requestEpoch === undefined
-        ? incoming
-        : keepNewerLocalReactions(conversationId, incoming, requestEpoch)
+    const guarded = incoming.map(reconcileReactions)
     const merged = mergeMessages(messagesOf(conversationId), guarded)
     byConversation.value = { ...byConversation.value, [conversationId]: merged }
     setLastSeq(conversationId, result.lastSeq)
@@ -427,7 +388,7 @@ export const useMessagesStore = defineStore('messages', () => {
         const cached = await getMessagesByConversation(conversation.conversationId)
         if (cached.length === 0) continue
         // 与内存中已有消息合并（不覆盖已拉到的新消息），再按 seq 去重排序（M3-00 N4）。
-        const merged = mergeMessages(messagesOf(conversation.conversationId), cached)
+        const merged = mergeMessages(messagesOf(conversation.conversationId), cached.map(reconcileReactions))
         byConversation.value = { ...byConversation.value, [conversation.conversationId]: merged }
         loadedConversations.value = {
           ...loadedConversations.value,
@@ -540,10 +501,9 @@ export const useMessagesStore = defineStore('messages', () => {
       [conversationId]: true,
     }
     try {
-      const requestEpoch = reactionRequestEpoch()
       const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
       const before = lastSeqOf(conversationId)
-      const result = merge(conversationId, page.messages, requestEpoch)
+      const result = merge(conversationId, page.messages)
       const pageMaxSeq = page.messages.reduce((max, item) => Math.max(max, item.seq), before)
       // 首屏基线（本地无游标）直接以本页最大 seq 为游标；已有游标且检测到缺口时保持游标不动，
       // 交给 syncAll 从缺口处补拉，避免把缺口吞掉（M3-00 N1）。
@@ -574,9 +534,8 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     try {
       const beforeSeq = list[0].seq
-      const requestEpoch = reactionRequestEpoch()
       const page = await messagesApi.history(conversationId, beforeSeq, PAGE_SIZE)
-      merge(conversationId, page.messages, requestEpoch)
+      merge(conversationId, page.messages)
       hasMoreByConversation.value = {
         ...hasMoreByConversation.value,
         [conversationId]: page.hasMore,
@@ -614,21 +573,18 @@ export const useMessagesStore = defineStore('messages', () => {
    * 已知限制：离线期间最近 50 条以外的撤回/编辑不会自动回放（需手动加载历史或刷新）。
    */
   async function refreshRecent(conversationId: string): Promise<void> {
-    // C3：记录发起时的实时回应序号；响应若早于期间收到的实时帧，保留较新的本地摘要。
-    const requestEpoch = realtimeReactionEpoch
     try {
       const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
-      const freshById = new Map(page.messages.map((message) => [message.messageId, message]))
+      const freshById = new Map(page.messages.map((message) => [message.messageId, reconcileReactions(message)]))
       const changed: Message[] = []
       const next = messagesOf(conversationId).map((message) => {
         const fresh = freshById.get(message.messageId)
         if (!fresh) return message
-        const skipReactions = realtimeReactionEpochOf(conversationId, message.messageId) > requestEpoch
         if (
           fresh.deletedAt === message.deletedAt &&
           fresh.editedAt === message.editedAt &&
           isSameContent(fresh.content, message.content) &&
-          (skipReactions || isSameReactions(fresh.reactions, message.reactions))
+          isSameReactionSnapshot(fresh, message)
         ) {
           return message
         }
@@ -638,12 +594,8 @@ export const useMessagesStore = defineStore('messages', () => {
         if (fresh.editedAt === undefined) delete updated.editedAt
         else updated.editedAt = fresh.editedAt
         if (fresh.reply) updated.reply = fresh.reply
-        if (!skipReactions) {
-          const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
-          if (fresh.reactions === undefined) delete updated.reactions
-          else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
-          if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
-        }
+        updated.reactions = fresh.reactions
+        updated.reactionRevision = fresh.reactionRevision
         changed.push(updated)
         return updated
       })
@@ -694,8 +646,6 @@ export const useMessagesStore = defineStore('messages', () => {
 
         const sentSeq = new Map(cursors.map((cursor) => [cursor.conversationId, cursor.lastSeq]))
         const frame: SyncRequestFrame = { type: 'sync.request', cursors }
-        // C3：记录发起时的实时回应序号，补拉响应合并时不能覆盖期间到达的实时摘要。
-        const requestEpoch = reactionRequestEpoch()
         let response: SyncResponseFrame
         try {
           response = await chatWs.request<SyncResponseFrame>(frame)
@@ -714,10 +664,10 @@ export const useMessagesStore = defineStore('messages', () => {
           const cursor = sentSeq.get(conversationId) ?? lastSeqOf(conversationId)
           const gap = messages.length > 0 ? detectGap(cursor, messages) : { hasGap: false, lastSeq: cursor }
           if (messages.length > 0) {
-            merge(conversationId, messages, requestEpoch)
+            merge(conversationId, messages)
             conversations.applyMessage(conversationId, messages[messages.length - 1])
           }
-          applySyncUpdates(conversationId, updates, requestEpoch)
+          applySyncUpdates(conversationId, updates)
 
           if (batch.updatedThrough !== undefined) {
             stateSyncedAtByConversation.value = {
@@ -1170,9 +1120,7 @@ export const useMessagesStore = defineStore('messages', () => {
         handleEdited(frame)
         break
       case 'message.reactions':
-        // C3：先登记实时序号，再套用摘要；之后到达的历史/补拉响应会据此保留新状态。
-        markRealtimeReaction(frame.conversationId, frame.messageId)
-        applyReactionSummary(frame.conversationId, frame.messageId, frame.reactions)
+        applyReactionSummary(frame.conversationId, frame.messageId, frame)
         break
       case 'error': {
         const match = /^msg-(.+)$/.exec(frame.reqId ?? '')
@@ -1266,6 +1214,7 @@ export const useMessagesStore = defineStore('messages', () => {
    * 事实源在服务端；若以后重新入群，会重新拉取，不会丢数据。
    */
   function removeConversation(conversationId: string): void {
+    reactionSnapshots.delete(conversationId)
     for (const pending of pendingByConversation.value[conversationId] ?? []) {
       clearTimers(pending.clientMsgId)
       // F-03：会话被移出/退出时，一并删除其待发消息缓存（避免下次恢复出已不存在的会话）。
@@ -1309,6 +1258,7 @@ export const useMessagesStore = defineStore('messages', () => {
   function clear(): void {
     clearAllTimers()
     disposeRealtime()
+    reactionSnapshots.clear()
     // F-03：登出/切账号清空待发消息缓存，避免把上一个账号的发送中消息带到下一个账号。
     void clearPending()
     byConversation.value = {}
@@ -1355,7 +1305,7 @@ export const useMessagesStore = defineStore('messages', () => {
     sendEdit,
     refreshRecent,
     applyReactionSummary,
-    reactionVersionOf,
+    withLatestReactions,
     retrySend,
     removeConversation,
     subscribeRealtime,

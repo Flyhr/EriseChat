@@ -49,8 +49,8 @@ public sealed class Message
     public long? EditedAt { get; set; }
 
     /// <summary>
-    /// 回应最近变更时间（UTC 毫秒；无常驻回应变化为 NULL；C3）。
-    /// 仅用于 sync 增量补拉判断「断线期间回应新增/替换/取消」；不参与排序与未读统计。
+    /// 回应最近变更水位（以 UTC 毫秒递增；从未变更为 NULL）。用于增量补拉和比较回应摘要，
+    /// 不参与会话排序与未读统计。
     /// </summary>
     public long? ReactionsUpdatedAt { get; set; }
 }

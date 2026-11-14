@@ -104,11 +104,13 @@ public sealed record MessageEditedFrame(
 /// <param name="MessageId">被回应消息 ID。</param>
 /// <param name="Seq">被回应消息的会话内序号。</param>
 /// <param name="Reactions">最新回应摘要；空数组表示该消息已无任何回应。mine 按接收账号计算。</param>
+/// <param name="ReactionRevision">服务端按消息递增的回应修订号。</param>
 public sealed record MessageReactionsFrame(
     string ConversationId,
     string MessageId,
     long Seq,
-    IReadOnlyList<ReactionSummary> Reactions) : FrameEnvelope
+    IReadOnlyList<ReactionSummary> Reactions,
+    long? ReactionRevision = null) : FrameEnvelope
 {
     /// <inheritdoc />
     public override string Type => FrameTypes.MessageReactions;

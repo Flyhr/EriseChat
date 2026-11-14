@@ -30,6 +30,7 @@ export interface MessageContextPage {
 /** C3：设置/移除回应后服务端返回该消息的最新摘要（mine 按当前账号计算）。 */
 export interface MessageReactionsResponse {
   reactions: ReactionSummary[]
+  reactionRevision?: number
 }
 
 export interface MessageSearchOptions {

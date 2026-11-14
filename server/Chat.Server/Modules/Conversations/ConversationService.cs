@@ -1198,7 +1198,8 @@ public sealed class ConversationService
     public static Message ToProtocolMessage(
         MessageEntity message,
         MessageReply? reply = null,
-        IReadOnlyList<ReactionSummary>? reactions = null)
+        IReadOnlyList<ReactionSummary>? reactions = null,
+        long? reactionRevision = null)
     {
         using var document = JsonDocument.Parse(message.ContentJson);
         return new Message(
@@ -1214,7 +1215,8 @@ public sealed class ConversationService
             message.DeletedAt,
             reply,
             message.EditedAt,
-            message.DeletedAt is null ? reactions : null);
+            message.DeletedAt is null ? reactions : null,
+            message.DeletedAt is null ? reactionRevision : null);
     }
 
     /// <summary>

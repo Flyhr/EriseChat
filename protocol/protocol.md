@@ -185,6 +185,7 @@
 | `deletedAt` | integer | 否 | 撤回时间（UTC 毫秒）；非空表示已撤回，此时 `content` 为空文本、不再返回 `fileId` 等文件信息（F-18） |
 | `editedAt` | integer | 否 | 最近一次编辑时间（UTC 毫秒）；未编辑过则缺省（F-18） |
 | `reactions` | array | 否 | 表情回应摘要（C3）：`[{ "emoji", "count", "mine" }]`，`mine` 按请求账号计算；无回应或已撤回消息缺省（F-18 撤回后不再返回） |
+| `reactionRevision` | integer | 否 | `reactions` 对应的服务端修订号，按消息严格递增；未发生过回应变化或已撤回时省略 |
 
 **Reply 对象（回复引用摘要，`Message.reply` / `message.ack.reply`，均可选）**：
 
@@ -280,6 +281,7 @@
 | `messageId` | string | 是 | 被回应消息 ID |
 | `seq` | integer | 是 | 被回应消息的会话内序号（回应不改变 `seq`） |
 | `reactions` | array | 是 | 最新摘要 `[{ "emoji", "count", "mine" }]`；空数组表示该消息已没有任何回应 |
+| `reactionRevision` | integer | 否 | 本次摘要的服务端修订号，与消息读取和修改回应的 REST 响应使用同一序列 |
 
 规则：
 
@@ -289,6 +291,7 @@
 4. 回应不是消息：不产生 `message.new`、不推进 `seq` / 已读 / 未读、不改会话排序、不触发 Web/Windows/Android 推送通知。
 5. 广播：变化成功后向该会话**全部在线连接（含操作者连接）**下发 `message.reactions`；摘要共享、`mine` 按接收账号计算，因此不同连接收到的帧内容可以不同。离线成员重连后由历史/同步补齐。
 6. 历史分页、搜索、定位上下文与 `sync.response` 的 Message 对象带 `reactions`（本人视角）；已撤回消息不返回 `reactions`，也不能再修改。`sync.response` 的 `updates` 也覆盖回应变化，见 §4.4。
+7. 实际新增、替换或删除回应时，在同一事务中将 `reactions_updated_at` 更新为当前服务器 UTC 毫秒值和上一修订号加一中的较大值，并用作 `reactionRevision`。摘要与修订号取自同一数据库快照。客户端保留较高修订号对应的摘要，清空的 `[]` 同样带修订号。幂等调用不推进修订号。旧端可以忽略该可选字段。
 7. 失去成员资格后不能读取或修改该会话的回应；缓存与已打开界面由既有会话失权清理路径处理。
 
 
@@ -764,7 +767,7 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 
 18. **消息表情回应（REST，v1，C3）**：每个账号对每条消息至多一个回应；界面上的「切换」由客户端转换成显式设置（PUT）或移除（DELETE），两者均幂等。回应不产生消息、不推进 `seq` / 已读 / 未读、不改会话排序、不触发系统通知；转发得到的是新消息，回应从空开始。
 
-    - `PUT /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`：请求体 `{ "reaction": "thumbs_up" }`；设置或替换我的回应，返回 `{ "reactions": [ { "emoji", "count", "mine" } ] }`（本人视角最新摘要）。
+    - `PUT /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`：请求体 `{ "reaction": "thumbs_up" }`；设置或替换我的回应，返回 `{ "reactions": [ { "emoji", "count", "mine" } ], "reactionRevision": 1760000000000 }`（本人视角摘要与可选修订号）。
     - `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`：移除我的回应；没有回应时幂等返回当前摘要（`200`）。
     - 稳定表情标识（服务端白名单）：`thumbs_up`、`heart`、`joy`、`wow`、`sad`、`tada`；显示字形由客户端映射，协议不传 emoji 字形。
     - 校验：表情不在白名单 → `VALIDATION_FAILED`（400）；消息不存在、不属于该会话或已撤回 → `NOT_FOUND`（404）；`system` 消息 → `VALIDATION_FAILED`（400）；非会话成员 → `NOT_MEMBER`（403）。

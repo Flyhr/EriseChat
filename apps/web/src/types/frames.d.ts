@@ -142,6 +142,7 @@ export interface Message {
    * 最后一个回应被移除时服务端返回空数组，客户端据此清空旧摘要。
    */
   reactions?: ReactionSummary[]
+  reactionRevision?: number
 }
 
 /** C3 表情回应摘要（protocol.md §4.3） */
@@ -293,6 +294,7 @@ export interface MessageReactionsFrame extends FrameBase {
   messageId: string
   seq: number
   reactions: ReactionSummary[]
+  reactionRevision?: number
 }
 
 export interface SyncCursor {

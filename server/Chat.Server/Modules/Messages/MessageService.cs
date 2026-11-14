@@ -43,8 +43,8 @@ public sealed record MessageReactionResult(
     string ConversationId,
     string MessageId,
     long Seq,
+    long? ReactionRevision,
     bool Changed,
-    IReadOnlyList<string> MemberUserIds,
     IReadOnlyDictionary<string, IReadOnlyList<ReactionSummary>> SummariesByUser);
 
 /// <summary>sync.request 补拉结果（reqId 由 Realtime 层回填）。</summary>
@@ -647,11 +647,11 @@ public sealed class MessageService
         var batches = pages
             .Select(page => new SyncBatch(
                 page.ConversationId,
-                page.Rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), ReactionsOf(row, reactions))).ToList(),
+                page.Rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), reactions.GetValueOrDefault(row.Id))).ToList(),
                 page.Updates.Count == 0
                     ? null
                     : page.Updates
-                        .Select(row => ToProtocolMessage(row, ReplyOf(row, replies), ReactionsOf(row, reactions)))
+                        .Select(row => ToProtocolMessage(row, ReplyOf(row, replies), reactions.GetValueOrDefault(row.Id)))
                         .ToList(),
                 page.UpdatedThrough))
             .ToList();
@@ -711,7 +711,7 @@ public sealed class MessageService
         var replies = await LoadRepliesAsync(rows, cancellationToken);
         var reactions = await LoadReactionsAsync(rows, userId, cancellationToken);
         return new MessageHistoryPage(
-            rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), ReactionsOf(row, reactions))).ToList(),
+            rows.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), reactions.GetValueOrDefault(row.Id))).ToList(),
             hasMore);
     }
 
@@ -786,7 +786,7 @@ public sealed class MessageService
         var replies = await LoadRepliesAsync(window, cancellationToken);
         var reactions = await LoadReactionsAsync(window, userId, cancellationToken);
         return new MessageContextResult(
-            window.Select(m => ToProtocolMessage(m, ReplyOf(m, replies), ReactionsOf(m, reactions))).ToList(),
+            window.Select(m => ToProtocolMessage(m, ReplyOf(m, replies), reactions.GetValueOrDefault(m.Id))).ToList(),
             hasOlder,
             hasNewer);
     }
@@ -989,7 +989,7 @@ public sealed class MessageService
         var replies = await LoadRepliesAsync(messages, cancellationToken);
         var reactions = await LoadReactionsAsync(messages, userId, cancellationToken);
         return new MessageSearchPage(
-            messages.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), ReactionsOf(row, reactions))).ToList(),
+            messages.Select(row => ToProtocolMessage(row, ReplyOf(row, replies), reactions.GetValueOrDefault(row.Id))).ToList(),
             hasMore,
             nextCursor);
     }
@@ -1486,7 +1486,7 @@ public sealed class MessageService
         if (changed)
         {
             // 仅记录回应变化时间，供 sync 增量补拉；不推进 seq、不改会话排序与未读。
-            message.ReactionsUpdatedAt = now;
+            message.ReactionsUpdatedAt = NextReactionRevision(message, now);
             await _db.SaveChangesAsync(cancellationToken);
         }
 
@@ -1517,12 +1517,15 @@ public sealed class MessageService
         }
 
         _db.MessageReactions.Remove(existing);
-        message.ReactionsUpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        message.ReactionsUpdatedAt = NextReactionRevision(message, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         await _db.SaveChangesAsync(cancellationToken);
         var removed = await BuildReactionResultAsync(message, true, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return removed;
     }
+
+    private static long NextReactionRevision(MessageEntity message, long now) =>
+        Math.Max(now, (message.ReactionsUpdatedAt ?? 0) + 1);
 
     /// <summary>校验成员资格与消息可回应状态：存在、未撤回、非 system（消息归属会话同时校验）。</summary>
     private async Task<(MessageEntity Message, string Id)> EnsureReactableAsync(
@@ -1562,8 +1565,8 @@ public sealed class MessageService
             message.ConversationId,
             message.Id,
             message.Seq,
+            message.ReactionsUpdatedAt,
             changed,
-            memberUserIds,
             summariesByUser);
     }
 
@@ -1595,11 +1598,10 @@ public sealed class MessageService
         return result;
     }
 
-    /// <summary>
-    /// 批量加载一页/一批消息的回应摘要（一次 IN 查询，mine 按请求账号计算）。
-    /// 已撤回消息不加载（历史/上下文/搜索/补拉都不展示回应）。
-    /// </summary>
-    private async Task<Dictionary<string, IReadOnlyList<ReactionSummary>>> LoadReactionsAsync(
+    private sealed record ReactionSnapshot(long Revision, IReadOnlyList<ReactionSummary> Reactions);
+
+    /// <summary>在同一次查询中读取回应行与消息修订号，保证摘要和修订号来自同一快照。</summary>
+    private async Task<Dictionary<string, ReactionSnapshot>> LoadReactionsAsync(
         IEnumerable<MessageEntity> rows,
         string userId,
         CancellationToken cancellationToken)
@@ -1611,61 +1613,38 @@ public sealed class MessageService
             .ToList();
         if (ids.Count == 0)
         {
-            return new Dictionary<string, IReadOnlyList<ReactionSummary>>(StringComparer.Ordinal);
+            return new Dictionary<string, ReactionSnapshot>(StringComparer.Ordinal);
         }
 
-        var reactionRows = await _db.MessageReactions.AsNoTracking()
-            .Where(reaction => ids.Contains(reaction.MessageId))
+        var reactionRows = await (
+                from message in _db.Messages.AsNoTracking()
+                where ids.Contains(message.Id) && message.DeletedAt == null && message.ReactionsUpdatedAt != null
+                join reaction in _db.MessageReactions.AsNoTracking() on message.Id equals reaction.MessageId into reactions
+                from reaction in reactions.DefaultIfEmpty()
+                select new { message.Id, Revision = message.ReactionsUpdatedAt!.Value, reaction.Emoji, reaction.UserId })
             .ToListAsync(cancellationToken);
-        var grouped = reactionRows
-            .GroupBy(reaction => reaction.MessageId, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.Ordinal);
-        var result = new Dictionary<string, IReadOnlyList<ReactionSummary>>(StringComparer.Ordinal);
-        foreach (var (messageId, items) in grouped)
+        var result = new Dictionary<string, ReactionSnapshot>(StringComparer.Ordinal);
+        foreach (var group in reactionRows.GroupBy(row => new { row.Id, row.Revision }))
         {
-            var mine = items.FirstOrDefault(reaction => reaction.UserId == userId)?.Emoji;
+            var mine = group.FirstOrDefault(row => row.UserId == userId)?.Emoji;
             var summaries = ReactionEmoji.All
                 .Select(code => new ReactionSummary(
                     code,
-                    items.Count(reaction => string.Equals(reaction.Emoji, code, StringComparison.Ordinal)),
+                    group.Count(row => string.Equals(row.Emoji, code, StringComparison.Ordinal)),
                     string.Equals(code, mine, StringComparison.Ordinal)))
                 .Where(summary => summary.Count > 0)
                 .ToList();
-            if (summaries.Count > 0)
-            {
-                result[messageId] = summaries;
-            }
+            result[group.Key.Id] = new ReactionSnapshot(group.Key.Revision, summaries);
         }
 
         return result;
     }
 
-    private static IReadOnlyList<ReactionSummary>? ReactionsOf(
-        MessageEntity message,
-        IReadOnlyDictionary<string, IReadOnlyList<ReactionSummary>> reactions)
-    {
-        if (message.DeletedAt is not null)
-        {
-            return null;
-        }
-
-        if (reactions.TryGetValue(message.Id, out var summary))
-        {
-            return summary;
-        }
-
-        // 曾经有过回应、随后被全部移除的消息返回空数组，客户端据此清掉本地缓存（C3）。
-        return message.ReactionsUpdatedAt is null ? null : Array.Empty<ReactionSummary>();
-    }
-
-    private static ProtocolMessage ToProtocolMessage(MessageEntity message) =>
-        ConversationService.ToProtocolMessage(message);
-
     private static ProtocolMessage ToProtocolMessage(
         MessageEntity message,
-        MessageReply? reply,
-        IReadOnlyList<ReactionSummary>? reactions = null) =>
-        ConversationService.ToProtocolMessage(message, reply, reactions);
+        MessageReply? reply = null,
+        ReactionSnapshot? reactions = null) =>
+        ConversationService.ToProtocolMessage(message, reply, reactions?.Reactions, reactions?.Revision);
 
     private static MessageReply? ToOptionalReply(MessageEntity? reply) =>
         reply is null ? null : ToReply(reply);

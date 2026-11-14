@@ -62,7 +62,7 @@ public static class MessageEndpoints
     public sealed record SetReactionRequest(string? Reaction);
 
     /// <summary>C3：当前账号视角的消息回应摘要（空数组表示该消息没有任何回应）。</summary>
-    public sealed record MessageReactionsResponse(IReadOnlyList<ReactionSummary> Reactions);
+    public sealed record MessageReactionsResponse(IReadOnlyList<ReactionSummary> Reactions, long? ReactionRevision);
 
     private static async Task<IResult> SetReactionAsync(
         string conversationId,
@@ -85,7 +85,7 @@ public static class MessageEndpoints
             await hub.BroadcastReactionsAsync(result);
         }
 
-        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId]));
+        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId], result.ReactionRevision));
     }
 
     private static async Task<IResult> RemoveReactionAsync(
@@ -103,7 +103,7 @@ public static class MessageEndpoints
             await hub.BroadcastReactionsAsync(result);
         }
 
-        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId]));
+        return Results.Json(new MessageReactionsResponse(result.SummariesByUser[userId], result.ReactionRevision));
     }
 
     private static async Task<IResult> GetHistoryAsync(

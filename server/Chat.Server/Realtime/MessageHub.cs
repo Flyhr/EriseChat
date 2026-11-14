@@ -349,7 +349,7 @@ public sealed class MessageHub
     {
         foreach (var (userId, reactions) in result.SummariesByUser)
         {
-            var frame = new MessageReactionsFrame(result.ConversationId, result.MessageId, result.Seq, reactions);
+            var frame = new MessageReactionsFrame(result.ConversationId, result.MessageId, result.Seq, reactions, result.ReactionRevision);
             foreach (var connection in _connections.GetConnections(userId))
             {
                 await TrySendAsync(connection, frame);
