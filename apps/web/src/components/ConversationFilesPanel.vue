@@ -44,6 +44,7 @@ const TABS: { id: FileTab; label: string }[] = [
   { id: 'link', label: '链接' },
   { id: 'file', label: '文件' },
 ]
+const TAB_ORDER: FileTab[] = ['image', 'link', 'file']
 
 const emptyIcon = computed(() =>
   activeTab.value === 'image' ? 'image' : activeTab.value === 'link' ? 'link' : 'file',
@@ -65,9 +66,9 @@ const loadedTabs = ref<Record<FileTab, boolean>>({ image: false, link: false, fi
 const links = ref<SharedLinkItem[]>([])
 const linksHasMore = ref(false)
 const linksCursor = ref<{ seq: number | null; offset: number | null }>({ seq: null, offset: null })
-const loadingTab = ref<FileTab | null>(null)
-const loadingMoreTab = ref<FileTab | null>(null)
-const errorMessage = ref('')
+const loadingByTab = ref<Record<FileTab, boolean>>({ image: false, link: false, file: false })
+const loadingMoreByTab = ref<Record<FileTab, boolean>>({ image: false, link: false, file: false })
+const errorByTab = ref<Record<FileTab, string>>({ image: '', link: '', file: '' })
 const urls = ref<Record<string, string>>({})
 const failedIds = ref<Set<string>>(new Set())
 const requestSeqs: Record<FileTab, number> = { image: 0, link: 0, file: 0 }
@@ -75,9 +76,16 @@ const requestSeqs: Record<FileTab, number> = { image: 0, link: 0, file: 0 }
 let loadEpoch = 0
 let unsubscribeRecall: (() => void) | null = null
 
-/** 首屏加载按页签区分：一个页签在加载时不阻塞其它页签切换。 */
-const loading = computed(() => loadingTab.value === activeTab.value)
-const loadingMore = computed(() => loadingMoreTab.value === activeTab.value)
+/** 加载与错误状态按页签索引：后台页签的请求既不会阻塞也不会覆盖当前页签的提示。 */
+const loading = computed(() => loadingByTab.value[activeTab.value])
+const loadingMore = computed(() => loadingMoreByTab.value[activeTab.value])
+/** 当前页签的列表错误（下载等操作错误也写进当前页签）。 */
+const errorMessage = computed({
+  get: () => errorByTab.value[activeTab.value],
+  set: (value: string) => {
+    errorByTab.value = { ...errorByTab.value, [activeTab.value]: value }
+  },
+})
 
 /** 按月分组的三个页签数据（C2c）。 */
 const imageGroups = computed(() => groupByMonth(itemsByTab.value.image))
@@ -125,8 +133,8 @@ function switchTab(tab: FileTab): void {
   rememberScroll()
   activeTab.value = tab
   rememberSharedPanelTab(props.conversationId, tab)
-  // 加载跟随当前页签：其它页签的在途请求不阻塞本次切换。
-  if (!loadedTabs.value[tab] && loadingTab.value !== tab) void load(tab, true)
+  // 加载跟随当前页签：其它页签的在途请求不阻塞本次切换；同一页签已在加载时复用该请求。
+  if (!loadedTabs.value[tab] && !loadingByTab.value[tab]) void load(tab, true)
   if (tab === 'image') void loadThumbnails()
   void nextTick(restoreScroll)
 }
@@ -134,13 +142,15 @@ function switchTab(tab: FileTab): void {
 async function load(tab: FileTab, reset: boolean): Promise<void> {
   const conversationId = props.conversationId
   if (!conversationId) return
+  // 快速来回切页签时同一页签可能已有在途请求：直接复用，不再重复发起。
+  if (reset ? loadingByTab.value[tab] : loadingMoreByTab.value[tab]) return
   const epoch = loadEpoch
   const seq = ++requestSeqs[tab]
   if (reset) {
-    loadingTab.value = tab
-    errorMessage.value = ''
+    loadingByTab.value = { ...loadingByTab.value, [tab]: true }
+    errorByTab.value = { ...errorByTab.value, [tab]: '' }
   } else {
-    loadingMoreTab.value = tab
+    loadingMoreByTab.value = { ...loadingMoreByTab.value, [tab]: true }
   }
   try {
     if (tab === 'link') {
@@ -150,26 +160,11 @@ async function load(tab: FileTab, reset: boolean): Promise<void> {
             seq: linksCursor.value.seq ?? undefined,
             offset: linksCursor.value.offset ?? undefined,
           }
-      let page = await conversationsApi.listLinks(conversationId, {
+      const page = await conversationsApi.listLinks(conversationId, {
         beforeSeq: cursor.seq,
         beforeOffset: cursor.offset,
         limit: SHARED_FILES_PAGE_SIZE,
       })
-      // 链接稀疏时服务端可能返回空页但仍有游标：继续取下一页（最多 3 跳），避免空页卡住翻页。
-      let hops = 0
-      while (
-        page.items.length === 0 &&
-        page.hasMore &&
-        (page.nextBeforeSeq ?? null) !== null &&
-        hops < 3
-      ) {
-        hops += 1
-        page = await conversationsApi.listLinks(conversationId, {
-          beforeSeq: page.nextBeforeSeq ?? undefined,
-          beforeOffset: page.nextBeforeOffset ?? 0,
-          limit: SHARED_FILES_PAGE_SIZE,
-        })
-      }
       if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
       links.value = reset ? page.items : mergeSharedLinks(links.value, page.items)
       linksHasMore.value = page.hasMore
@@ -196,11 +191,15 @@ async function load(tab: FileTab, reset: boolean): Promise<void> {
     if (tab === 'image') void loadThumbnails()
   } catch (error) {
     if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
-    errorMessage.value = friendlyError(error)
+    errorByTab.value = { ...errorByTab.value, [tab]: friendlyError(error) }
   } finally {
     if (seq === requestSeqs[tab]) {
-      if (loadingTab.value === tab) loadingTab.value = null
-      if (loadingMoreTab.value === tab) loadingMoreTab.value = null
+      if (loadingByTab.value[tab]) {
+        loadingByTab.value = { ...loadingByTab.value, [tab]: false }
+      }
+      if (loadingMoreByTab.value[tab]) {
+        loadingMoreByTab.value = { ...loadingMoreByTab.value, [tab]: false }
+      }
     }
   }
   // 首屏数据落地后再还原滚动位置（重建面板/切换页签时），不为了找回旧位置额外翻页。
@@ -216,7 +215,7 @@ function lastSeqOf(items: SharedFileItem[]): number | undefined {
 
 function loadMore(): void {
   const tab = activeTab.value
-  if (!loadedTabs.value[tab] || loadingTab.value === tab || loadingMoreTab.value === tab) return
+  if (loadingByTab.value[tab] || loadingMoreByTab.value[tab]) return
   if (!hasMore.value) return
   void load(tab, false)
 }
@@ -281,10 +280,37 @@ function locateCurrentPreview(): void {
   if (current?.messageId) locateMessage(current.messageId)
 }
 
+/** 让所有页签的在途列表响应失效（撤回可能发生在响应生成之后）。 */
+function invalidateListRequests(): void {
+  for (const tab of TAB_ORDER) {
+    requestSeqs[tab] += 1
+    if (loadingByTab.value[tab]) {
+      loadingByTab.value = { ...loadingByTab.value, [tab]: false }
+    }
+    if (loadingMoreByTab.value[tab]) {
+      loadingMoreByTab.value = { ...loadingMoreByTab.value, [tab]: false }
+    }
+  }
+}
+
 /**
  * 已打开的共享面板随撤回事件失效：删掉对应消息的图片/文件/链接条目，预览列表自动收敛。
- * 撤回后的下载仍由文件接口鉴权拒绝（服务端校验消息未撤回），这里只处理展示。
+ * 撤回帧可能早于「撤回前生成」的列表响应到达，因此同时让在途结果失效并重取当前页签，
+ * 避免迟到响应把撤回内容合并回来；撤回后的下载仍由文件接口鉴权拒绝，这里只处理展示。
  */
+function handleRecalledMessage(messageId: string): void {
+  invalidateListRequests()
+  removeRecalledMessage(messageId)
+  for (const tab of TAB_ORDER) {
+    if (tab !== activeTab.value && loadedTabs.value[tab]) {
+      // 其它页签下次切回时重新取第一页即可。
+      loadedTabs.value = { ...loadedTabs.value, [tab]: false }
+    }
+  }
+  void load(activeTab.value, true)
+}
+
+/** 从当前列表与预览中移除已撤回消息的条目。 */
 function removeRecalledMessage(messageId: string): void {
   if (!messageId) return
   if (links.value.some((link) => link.messageId === messageId)) {
@@ -321,9 +347,9 @@ watch(
     linksCursor.value = { seq: null, offset: null }
     urls.value = {}
     failedIds.value = new Set()
-    errorMessage.value = ''
-    loadingTab.value = null
-    loadingMoreTab.value = null
+    errorByTab.value = { image: '', link: '', file: '' }
+    loadingByTab.value = { image: false, link: false, file: false }
+    loadingMoreByTab.value = { image: false, link: false, file: false }
     if (!conversationId) return
     activeTab.value = sharedPanelStateOf(conversationId).tab
     void load(activeTab.value, true)
@@ -337,7 +363,7 @@ onMounted(() => {
   unsubscribeRecall = chatWs.on('frame', (frame) => {
     if (frame.type !== 'message.recalled') return
     if (frame.conversationId !== props.conversationId) return
-    removeRecalledMessage(frame.messageId)
+    handleRecalledMessage(frame.messageId)
   })
   void nextTick(restoreScroll)
 })
@@ -373,7 +399,7 @@ onBeforeUnmount(() => {
     </div>
 
     <EmptyState
-      v-else-if="currentCount === 0"
+      v-else-if="currentCount === 0 && !hasMore"
       :icon="emptyIcon"
       :title="emptyTitle"
       :description="emptyDescription"
@@ -463,17 +489,18 @@ onBeforeUnmount(() => {
         </section>
       </template>
 
-      <button
-        v-if="hasMore"
-        type="button"
-        class="files-panel__more"
-        :disabled="loadingMore"
-        @click="loadMore"
-      >
-        <LoadingDots v-if="loadingMore" />
-        <template v-else>加载更多</template>
-      </button>
     </template>
+
+    <button
+      v-if="hasMore"
+      type="button"
+      class="files-panel__more"
+      :disabled="loadingMore"
+      @click="loadMore"
+    >
+      <LoadingDots v-if="loadingMore" />
+      <template v-else>加载更多</template>
+    </button>
 
     <ImagePreview
       :open="previewOpen"
