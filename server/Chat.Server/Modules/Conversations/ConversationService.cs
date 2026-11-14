@@ -990,6 +990,23 @@ public sealed class ConversationService
     }
 
     /// <summary>
+    /// 按收件人视角逐成员构建会话 DTO（成员 ID 版本）：成员变更类推送（如邀请链接兑换）只有会话 ID，
+    /// 先加载实体再委托上面的重载，避免把操作者视角的会话广播给其他成员。
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, Conversation>> BuildPerRecipientAsync(
+        string conversationId,
+        IReadOnlyList<string> memberUserIds,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await _db.Conversations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == conversationId, cancellationToken)
+            ?? throw ApiException.NotFound("会话不存在");
+
+        return await BuildPerRecipientAsync(conversation, memberUserIds, cancellationToken);
+    }
+
+    /// <summary>
     /// 群公告（F-14）：CRLF/CR 统一为 \n、去首尾空白；空串=清空（返回 null）；≤500 字符；
     /// 除换行外的控制字符一律拒绝。
     /// </summary>

@@ -88,16 +88,23 @@ public static class InviteLinkEndpoints
         ClaimsPrincipal principal,
         string token,
         GroupInviteService invites,
+        ConversationService conversations,
         ConversationRealtimeNotifier notifier,
         CancellationToken cancellationToken)
     {
         var result = await invites.JoinAsync(principal.UserId(), token, cancellationToken);
 
-        // 有变更才推送：message.new（系统消息）先于 conv.updated（含全体成员的最新会话）。
+        // 有变更才推送：message.new（系统消息）先于 conv.updated。每个成员只应看到自己的
+        // pinned / muted / lastReadSeq / unread，因此按收件人视角逐连接构建（协议 §4.5），
+        // 不能把兑换者视角的会话广播给其他成员。
         if (result.SystemMessage is not null)
         {
             notifier.PushNewMessage(result.SystemMessage, result.MemberUserIds);
-            notifier.PushUpdated(new[] { result.Conversation });
+            var perRecipient = await conversations.BuildPerRecipientAsync(
+                result.Conversation.ConversationId,
+                result.MemberUserIds,
+                cancellationToken);
+            notifier.PushUpdatedPerRecipient(perRecipient);
         }
 
         return Results.Json(result.Conversation);
