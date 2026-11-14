@@ -6,6 +6,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { blocksApi } from '../api/blocks'
 import { usersApi, type UserProfile } from '../api/users'
 import type { Conversation } from '../types/frames'
 import type { Friend, FriendRequest } from '../types/frames'
@@ -55,6 +56,10 @@ const searchError = ref('')
 const selectedUser = ref<ContactUser | null>(null)
 const busyUserId = ref('')
 const newGroupOpen = ref(false)
+
+// 拉黑（C1b）：拉黑是有方向的关系，页面只维护「被我拉黑」的用户 ID 集合。
+const blockedUserIds = ref<string[]>([])
+const blockBusyUserId = ref('')
 
 // 好友加载 / 编辑
 const friendLoadError = ref('')
@@ -330,6 +335,40 @@ async function confirmRemoveFriend(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 拉黑（C1b）
+// ---------------------------------------------------------------------------
+
+async function ensureBlocksLoaded(): Promise<void> {
+  try {
+    const result = await blocksApi.list()
+    blockedUserIds.value = result.blocks.map((item) => item.userId)
+  } catch {
+    // 拉黑列表加载失败不阻塞联系人页：资料卡按未拉黑展示，真正操作时服务端仍会校验。
+  }
+}
+
+async function toggleBlock(user: ContactUser): Promise<void> {
+  if (blockBusyUserId.value) return
+  const blocked = blockedUserIds.value.includes(user.userId)
+  blockBusyUserId.value = user.userId
+  try {
+    if (blocked) {
+      await blocksApi.unblock(user.userId)
+      blockedUserIds.value = blockedUserIds.value.filter((userId) => userId !== user.userId)
+      showToast('已解除拉黑', 'success')
+    } else {
+      await blocksApi.block(user.userId)
+      blockedUserIds.value = [...blockedUserIds.value, user.userId]
+      showToast('已拉黑：双方不能私聊、申请好友或邀请入群', 'success')
+    }
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    blockBusyUserId.value = ''
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 会话与建群
 // ---------------------------------------------------------------------------
 
@@ -351,6 +390,7 @@ async function onGroupCreated(conversation: Conversation): Promise<void> {
 }
 
 void ensureFriendsLoaded()
+void ensureBlocksLoaded()
 
 onBeforeUnmount(() => {
   if (searchTimer) {
@@ -610,10 +650,13 @@ onBeforeUnmount(() => {
         :removing="Boolean(
           removingFriendBusy && removingFriend && selectedFriend && removingFriend.userId === selectedFriend.userId,
         )"
+        :blocked="Boolean(selectedUser && blockedUserIds.includes(selectedUser.userId))"
+        :block-busy="blockBusyUserId === selectedUser?.userId"
         @start-chat="startDirectChat"
         @send-request="askRequest"
         @update-friend="saveFriend"
         @remove-friend="askRemoveFriend"
+        @toggle-block="toggleBlock"
       />
     </section>
 

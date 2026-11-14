@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { authApi } from '../api/auth'
+import { blocksApi, type BlockedUser } from '../api/blocks'
 import { filesApi } from '../api/files'
 import { sessionsApi, type SessionInfo } from '../api/sessions'
 import { usersApi } from '../api/users'
@@ -80,7 +81,7 @@ const densityOptions = [
   { value: 'compact', label: '紧凑' },
 ] as const
 
-type SectionId = 'profile' | 'account' | 'notifications' | 'appearance' | 'connection'
+type SectionId = 'profile' | 'account' | 'blocked' | 'notifications' | 'appearance' | 'connection'
 
 interface SettingsSection {
   id: SectionId
@@ -101,6 +102,12 @@ const SECTIONS: SettingsSection[] = [
     id: 'account',
     label: '账号与安全',
     title: '账号与安全',
+    icon: 'shield',
+  },
+  {
+    id: 'blocked',
+    label: '拉黑名单',
+    title: '拉黑名单',
     icon: 'shield',
   },
   {
@@ -179,6 +186,8 @@ function sectionSummaryOf(id: SectionId): string {
       return `桌面通知${settings.desktopNotificationsEnabled ? '开' : '关'} · 提示音${settings.soundEnabled ? '开' : '关'}`
     case 'appearance':
       return '浅色主题'
+    case 'blocked':
+      return blockedUsers.value.length === 0 ? '未拉黑任何用户' : `已拉黑 ${blockedUsers.value.length} 人`
     case 'connection':
       return savedServerUrl.value || '与页面同源'
   }
@@ -186,6 +195,46 @@ function sectionSummaryOf(id: SectionId): string {
 
 // 桌面通知开关请求进行中（防止重复点击/重复申请权限）。
 const notificationBusy = ref(false)
+
+// C1b：拉黑名单（设置里的解除拉黑入口；拉黑操作在联系人资料卡）。
+const blockedUsers = ref<BlockedUser[]>([])
+const blockedLoading = ref(false)
+const blockedError = ref('')
+const unblockingId = ref('')
+
+async function loadBlocked(force = false): Promise<void> {
+  if (blockedLoading.value) return
+  if (!force && blockedUsers.value.length > 0) return
+  blockedLoading.value = true
+  blockedError.value = ''
+  try {
+    const result = await blocksApi.list()
+    blockedUsers.value = result.blocks
+  } catch (error) {
+    blockedError.value = friendlyError(error)
+  } finally {
+    blockedLoading.value = false
+  }
+}
+
+async function unblockUser(item: BlockedUser): Promise<void> {
+  unblockingId.value = item.userId
+  blockedError.value = ''
+  try {
+    await blocksApi.unblock(item.userId)
+    blockedUsers.value = blockedUsers.value.filter((user) => user.userId !== item.userId)
+    showToast('已解除拉黑', 'success')
+  } catch (error) {
+    blockedError.value = friendlyError(error)
+  } finally {
+    unblockingId.value = ''
+  }
+}
+
+// 打开分节时才拉取拉黑列表（与其它分节的按需加载一致）。
+watch(activeSectionId, (next) => {
+  if (next === 'blocked') void loadBlocked()
+})
 // Android 前台服务后台消息提醒：仅原生壳内可用。
 const backgroundBusy = ref(false)
 
@@ -695,6 +744,8 @@ function retryBackgroundStatus(): void {
 }
 
 onMounted(() => {
+  // 拉黑名单在移动端分类列表里要显示摘要，进入设置时先拉一次。
+  void loadBlocked()
   if (androidBackgroundAvailable) {
     void loadBackgroundStatus()
     backgroundStatusUnsubscribe = subscribeBackgroundStateChange(applyBackgroundStatus)
@@ -1066,6 +1117,30 @@ async function saveProfile(): Promise<void> {
               </button>
             </SettingsRow>
           </SettingsGroup>
+        </div>
+
+        <!-- 拉黑名单（C1b）：拉黑在联系人资料卡操作，这里只提供解除入口 -->
+        <div v-else-if="activeSectionId === 'blocked'" class="settings-content__body">
+          <SettingsGroup
+            title="拉黑名单"
+            description="拉黑后双方不能私聊、申请好友或邀请入群；共同群聊与历史消息不受影响。"
+          >
+            <SettingsRow v-if="blockedLoading && blockedUsers.length === 0" label="加载中…" />
+            <SettingsRow v-else-if="blockedUsers.length === 0" label="暂无拉黑用户" />
+            <template v-else>
+              <SettingsRow v-for="item in blockedUsers" :key="item.userId" :label="item.displayName">
+                <button
+                  type="button"
+                  class="settings-text-btn"
+                  :disabled="unblockingId === item.userId"
+                  @click="unblockUser(item)"
+                >
+                  {{ unblockingId === item.userId ? '解除中…' : '解除拉黑' }}
+                </button>
+              </SettingsRow>
+            </template>
+          </SettingsGroup>
+          <p v-if="blockedError" class="settings-inline-error" role="alert">{{ blockedError }}</p>
         </div>
 
         <!-- 通知与提醒 -->
@@ -1624,6 +1699,19 @@ async function saveProfile(): Promise<void> {
 .settings-text-btn:focus-visible {
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
+}
+
+.settings-text-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 分节内的行内错误（如拉黑名单加载/解除失败）。 */
+.settings-inline-error {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--ec-danger);
+  font-size: var(--ec-font-size-small);
 }
 
 .settings-avatar-input {

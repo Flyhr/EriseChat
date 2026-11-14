@@ -1,5 +1,6 @@
-// 联系人资料卡（UI-03 批次2，F-17 批次5）：展示昵称、在线状态、邮箱与操作入口。
+// 联系人资料卡（UI-03 批次2，F-17 批次5，C1b 拉黑）：展示昵称、在线状态、邮箱与操作入口。
 // - 未选人：空态；陌生人：发送消息 / 加为好友；好友：发送消息 + 备注与分组（保存）+ 删除好友。
+// - 任意联系人可拉黑/解除拉黑（拉黑后双方不能私聊、申请好友或邀请入群，服务端为准）。
 // 纯展示组件：不直接调用接口，动作通过 emits 交给 Contacts 页处理。
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
@@ -30,6 +31,10 @@ const props = defineProps<{
   saving?: boolean
   /** 删除好友中。 */
   removing?: boolean
+  /** 当前用户已被我拉黑（按钮切换为「解除拉黑」）。 */
+  blocked?: boolean
+  /** 拉黑/解除拉黑请求进行中。 */
+  blockBusy?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +42,7 @@ const emit = defineEmits<{
   'send-request': [user: ContactUser]
   'update-friend': [payload: { userId: string; remark?: string; groupName?: string }]
   'remove-friend': [friend: Friend]
+  'toggle-block': [user: ContactUser]
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.presence))
@@ -164,6 +170,17 @@ function saveFriend(): void {
       >
         {{ removing ? '正在删除…' : '删除好友' }}
       </button>
+
+      <button
+        v-if="user"
+        type="button"
+        class="contact-profile__remove contact-profile__remove--block"
+        :disabled="blockBusy"
+        @click="emit('toggle-block', user)"
+      >
+        {{ blockBusy ? '处理中…' : blocked ? '解除拉黑' : '拉黑' }}
+      </button>
+      <p v-if="blocked" class="contact-profile__hint">已拉黑：双方不能私聊、申请好友或邀请入群</p>
     </div>
     <EmptyState
       v-else
@@ -333,6 +350,13 @@ function saveFriend(): void {
 .contact-profile__remove:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* 拉黑是中性操作，与「删除好友」区分：不抢主色，也不做成危险色。 */
+.contact-profile__remove--block {
+  margin-top: var(--ec-space-2);
+  border-color: var(--ec-border);
+  color: var(--ec-text-secondary);
 }
 
 /* 悬停效果仅在鼠标精确指针设备生效，触屏不产生粘滞 hover。 */
