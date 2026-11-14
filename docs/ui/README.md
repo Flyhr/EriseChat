@@ -39,6 +39,7 @@
 | 导航 hover 反馈 | 2026-11-12 | 左侧主导航原 hover 底色与导航底仅 1.016:1、几乎不可辨；新增导航专用 `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text` 并在两套主题分别定义，hover 时底色与文字/图标色同时变化，不引入位移 |
 | 动效规则固化 | 2026-11-12（**仅规则与文档**） | `AGENTS.md` §14.6 阈值翻倍至 200 / 520 KB，新增 §14.9 固化加载反馈与动效规范；批次 4 主线定为 `motion`，不做清单收窄；不改代码，目视 / 多端验收暂缓至代码修改完成后 |
 | 动效批次 4 落地 | 2026-11-12 | 引入 `motion`（走 `motion/mini` 入口，MIT，gzip +5.2 KB）；新增 `core/motion.ts` 与 `LoadingDots.vue`；补齐 `--ec-ease-in` / `--ec-ease-in-out` / `--ec-motion-stagger(-max)`；首屏骨架受控入场、三处三点加载反馈、深色首屏预置底色（详见 §5「批次 4」） |
+| 批次 B 三屏与阅读路径 | `58155e5`、`4a900d3`、`8bcb485`、`3759aea`、`77e1fac`、`c7f22df` | 主题收敛为中性表面（去聊天渐变/光晕/气泡投影）、双主题对比度重定；会话行状态区分与草稿/失败摘要；一级导航收为四项；群资料/成员/文件收进 `ChatDetailsPanel`，顶栏「更多」接通搜索/文件/免打扰/群资料；进入会话落点与阅读锚点（`core/readingPosition.ts`）、未读分隔与「查看未读起点」；输入区 1/2 行起、5 行封顶与软键盘锚点；消息菜单方向键（详见 §5「批次 B」） |
 
 ## 3. 当前 UI 基线
 
@@ -51,13 +52,13 @@
 
 ### 3.2 设计 token 与主题
 
-- `styles/variables.css` 集中全部 `--ec-*`：品牌色（`#2563eb`）、聊天区三段渐变与光晕、文本三级对比、边框、媒体卡 `--ec-media-*`、Inter / YaHei 字体栈、4px 基数间距 `--ec-space-1..8`、圆角（气泡 14px + 尾角 6px）、阴影、`--ec-transition-fast/base/slow`（120 / 160 / 200ms）、四档布局宽、`--ec-safe-top/bottom`；文件末尾保留旧 `--color-*` 兼容别名。
+- `styles/variables.css` 集中全部 `--ec-*`：品牌色（`#2563eb`）、**中性表面（批次 B：聊天底单色、无渐变/光晕）**、文本三级对比、边框（`--ec-border` 装饰分隔 / `--ec-border-strong` 必要控件轮廓）、媒体卡 `--ec-media-*`、Inter / YaHei 字体栈、4px 基数间距 `--ec-space-1..8`、圆角（气泡 14px + 尾角 6px）、阴影（**只用于菜单与浮层**）、`--ec-transition-fast/base/slow`（120 / 160 / 200ms）、四档布局宽、`--ec-safe-top/bottom`；文件末尾保留旧 `--color-*` 兼容别名。
 - **动效 token（批次 4）**：`--ec-ease`（入场，强缓出）、`--ec-ease-in`（退出）、`--ec-ease-in-out`（页面内位移 / 展开收起）、`--ec-motion-stagger`（60ms）、`--ec-motion-stagger-max`（200ms）。CSS 过渡直接引用；JS 动效经 `core/motion.ts` 读取同一组 token（不另立数值），`prefers-reduced-motion` 由 `global.css` 全局降级 + 封装层二次兜底。
 - U-04 后新增语义色与尺寸 token（聚焦外圈、拖拽遮罩、日期胶囊底、浮标投影、主题预览渐变、断线横幅橙系、蓝色气泡叠加色、气泡内边距与移动端圆角、命中高亮底、半透明胶囊底、`--ec-vvh` 回退基线），颜色类在 `styles/themes/azure.css` 双写；组件内不再写裸色值（`Avatar.vue` 的 JS 哈希色板与 `core/imageCompress.ts` 的 canvas 填充色属数据资产例外）。
 - `styles/themes/azure.css` + `data-ec-theme="azure"` 提供「澄蓝」浅色主题，`core/theme.ts` 映射 Naive UI `themeOverrides`。
 - **深色主题已实现（2026-11-12）**：新增 `styles/themes/dark.css` 覆写全部语义 token；设置页提供浅色 / 深色两个可点击入口，主题存本机 `localStorage`（`erisechat.settings.theme`），`index.html` 首屏预置避免闪烁，`App.vue` 写 `data-ec-theme` 并切换 Naive UI overrides。不做系统主题自动跟随。实施规格见 §9，约束见 `AGENTS.md` §14.2。
-- 左侧主导航 hover 使用专用 token `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text`（浅色 `#dbeafe` / `#1d4ed8`，深色 `#24395c` / `#bfdbfe`），不再复用 `--ec-surface-hover`；图标为 Phosphor `currentColor`，随文字色一起变化。
-- **已知层级差异**：选中态底色 `--ec-brand-050` 与导航底仍只有 1.004:1，靠左侧 3px 品牌竖条、主色文字与加粗识别；hover 底色现在比选中底略深。若需要「选中 > hover」的严格底色层级，需一并调整选中态底色，本次未改。
+- 左侧主导航 hover 使用专用 token `--ec-nav-item-hover-bg` / `--ec-nav-item-hover-text`（浅色 `#e4e9f2` / `#1d4ed8`，深色 `#24395c` / `#bfdbfe`），不再复用 `--ec-surface-hover`；图标为 Phosphor `currentColor`，随文字色一起变化。
+- **选中与 hover 的区分（批次 B）**：导航与会话行都以「品牌竖条 + 主色/加粗文字 + 选中底色」标识选中，hover 只改中性底与文字色；两者底色明度接近（会话行选中 `#e4eefe` vs hover `#f1f5f9`），不靠底色深浅单独区分，避免触屏或强光下误判。
 - `AppIcon.vue` 统一 Phosphor 线性图标；禁止用 emoji 充当结构图标、禁止位图图标。
 
 ### 3.3 响应式与多端
@@ -66,11 +67,11 @@
 
 ### 3.4 无障碍
 
-178 处 `aria-`、79 处 `role`、40 处 `:focus-visible`；`AppDialog` / `DrawerShell` / `MessageActionMenu` / `AccountCard` 具备 Esc、焦点 trap 与归还；`prefers-reduced-motion` 降级；hover 仅在精确指针下生效。
+178 处 `aria-`、79 处 `role`、40 处 `:focus-visible`（2026-11-12 基线，批次 B 后未重新统计）；`AppDialog` / `DrawerShell` / `MessageActionMenu` / `AccountCard` 具备 Esc、焦点 trap 与归还；`prefers-reduced-motion` 降级；hover 仅在精确指针下生效。
 
 ### 3.5 体积阈值
 
-入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至批次 4 动效落地实测 **92.8 KB / 263.2 KB**（引入 `motion` 后入口 +7.6 KB，其中 `motion/mini` 库体 gzip 5.2 KB；全站 +5.3 KB）。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
+入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至批次 B 实测 **93.31 KB / 266.83 KB**（入口为 Vite 输出；全站为 `dist/web` 全部 js+css 的 zlib gzip 实测，Vite 逐文件 gzip 合计为 275.37 KB；两套产物数值一致，`dist/file` 入口 89.91 KB / 266.82 KB）。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
 
 ### 3.6 已具备的交互能力
 
@@ -152,6 +153,19 @@
 
 > 校验：`npm run build`（含 `vue-tsc --noEmit`）通过；入口 chunk gzip **92.8 KB**、全站 JS+CSS gzip **263.2 KB**（≤200 / ≤520）；token 审计无未定义引用。**未运行测试（§11.2）**；目视 / 多端验收仍按裁决暂缓，待按 §11.4 申请。
 
+### 批次 B 已落地（2026-11-14）
+
+| 项 | 落地内容 |
+|---|---|
+| B1 主题收敛 | 聊天底由三段渐变 + 品牌光晕改为单一中性表面；顶栏实色、气泡/媒体卡/输入区去投影（阴影只留菜单与浮层）；双主题重定文本三级与边框：浅色正文 17.7:1 / 次级 7.7:1 / 元信息 5.0:1，深色 16.6:1 / 9.7:1 / 6.5:1；新增 `--ec-border-strong`（浅 3.4:1、深 4.9:1）承载必要控件轮廓，`--ec-border` 只作分隔线 |
+| B1 会话行 | 选中改纯色底 + 品牌竖条 + 加粗标题，hover 用中性浅底；摘要第二层按「发送失败 → 草稿 → 最近消息」显示；会话行、⋯ 按钮、筛选页签与发起聊天补键盘焦点环；桌面行高统一 72 / 56（去掉 64 中间档） |
+| B1 导航 | 一级入口收为消息 / 联系人 / 收藏 / 设置，群聊改为「消息」页内筛选（`/chat?group=all` 仍有效并高亮「消息」）；好友申请计数在桌面与手机都归「联系人」 |
+| B2 详情容器 | 新增 `ChatDetailsPanel.vue`：群资料与成员、共享文件统一容器，负责页签、关闭与焦点归还；≥1200 侧栏 / 801~1199 覆盖层（宽 260 + 遮罩）/ ≤800 全屏；顶栏「更多」接通搜索、文件、免打扰与群资料，删除不可操作的占位；Esc 统一为「先关表情与详情，再退出会话」 |
+| B2 阅读路径 | 新增 `core/readingPosition.ts`（按账号 + 服务器作用域、最近 40 条裁剪）；进入会话按「指定消息 → 上次浏览 → 首条未读 → 最新」落点；未读起点未加载时给「查看未读起点」，已加载时插入「以下是未读消息」分隔；`MessageList` 用首条可见消息 ID + 偏移恢复（前插、图片解码、会话切换），高度差补偿保留为退路；列表筛选与滚动位置返回恢复 |
+| B3 输入与键盘 | 输入框手机 1 行 / 桌面 2 行起、5 行封顶后框内滚动，断点与软键盘变化时重算；消息区尺寸变化时贴底保持贴底、历史位置按锚点恢复；输入法组合与 compositionend 后的补发 Enter 不发送；消息操作菜单补 ↑/↓/Home/End |
+
+> 校验：`npm run build` 与 `npm run build:file` 顺序通过（含 `vue-tsc --noEmit`）；`dist/web` 用 `/assets/*`、`dist/file` 用 `./assets/*`；入口 gzip **93.31 KB**、全站 js+css **266.83 KB**（zlib 实测）；token 审计无未定义引用。**未运行 Vitest / E2E / 真机**；四档宽度、缩放、软键盘与阅读锚点漂移的目视/实测待执行，见 §6 与 `docs/web.md` §7 第 50~53 项。
+
 ### 范围外（不因对标而建议）
 
 音视频通话、E2EE、iPhone 客户端、系统级离线推送、管理员页（`AGENTS.md` §2 / §5 / §10 明确排除或移出）。Reaction 若需要属协议增量，是功能决策而非 UI 债。
@@ -169,6 +183,7 @@
 - [ ] 动效专项验收。确认首屏加载、切会话和切主题无闪白，骨架过渡无跳动，长列表滚动无明显掉帧，减少动态效果模式无循环与位移动画，卸载时取消在途动画。复核发送、补拉、贴底和已读行为
 - [ ] 每次 UI 改动后 `cd apps/web && npm run build`（含 `vue-tsc --noEmit`），复核体积阈值
 - [ ] 深色主题：静态对比度、token 审计与构建已通过；四档宽度 / 缩放 / Android 安全区与切换后草稿、连接状态的目视验收仍待执行
+- [ ] 批次 B 目视与实测：390 / 900 / 1200 / 1440px、800 / 801px 边界、浅深色、100% / 125% 缩放与系统大字体；同一组合成会话核对长昵称、未读、免打扰、草稿、发送失败与群聊；前插历史、新消息与图片解码后的锚点漂移 ≤8 CSS px；缓存命中切会话至首屏可读 P95 ≤250ms、本地发送回显 P95 ≤100ms；软键盘弹出后输入框与发送按钮可见、贴底与历史位置均不跳
 
 > 按 `AGENTS.md` §11.2 默认不运行测试；需要执行时按 §11.4 先申请范围与耗时。
 
