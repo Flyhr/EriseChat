@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { inviteLinksApi, type GroupInvitePreview } from '../api/inviteLinks'
 import { friendlyError } from '../core/errorMessages'
@@ -13,37 +13,53 @@ const route = useRoute()
 const router = useRouter()
 const conversations = useConversationsStore()
 
-const token = typeof route.params.token === 'string' ? route.params.token : ''
+// 令牌跟随当前路由：同一应用内从 /join/A 切到 /join/B 会复用本组件，不能只在挂载时读一次。
+const token = computed(() => (typeof route.params.token === 'string' ? route.params.token : ''))
 const loading = ref(true)
 const joining = ref(false)
 const preview = ref<GroupInvitePreview | null>(null)
 const errorMessage = ref('')
+// 预览请求序号：切换链接后旧请求返回时直接丢弃，不能覆盖新链接的加载态与预览。
+let previewRequest = 0
 
-onMounted(loadPreview)
+watch(token, () => void loadPreview(), { immediate: true })
 
 async function loadPreview(): Promise<void> {
-  if (!isInviteTokenLike(token)) {
+  const currentToken = token.value
+  const request = ++previewRequest
+  preview.value = null
+  errorMessage.value = ''
+  loading.value = true
+  if (!isInviteTokenLike(currentToken)) {
     errorMessage.value = '邀请链接无效'
     loading.value = false
     return
   }
   try {
-    preview.value = await inviteLinksApi.preview(token)
+    const result = await inviteLinksApi.preview(currentToken)
+    if (request !== previewRequest) return
+    preview.value = result
   } catch (error) {
+    if (request !== previewRequest) return
     errorMessage.value = friendlyError(error)
   } finally {
-    loading.value = false
+    if (request === previewRequest) loading.value = false
   }
 }
 
 async function join(): Promise<void> {
   if (joining.value) return
+  // 兑换绑定点击时的令牌：地址已切到别的链接时不得沿用旧预览的令牌。
+  const currentToken = token.value
+  if (!isInviteTokenLike(currentToken)) return
   joining.value = true
   try {
-    const conversation = await inviteLinksApi.join(token)
+    const conversation = await inviteLinksApi.join(currentToken)
     conversations.upsert([conversation])
     showToast('已加入群聊', 'success')
-    await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
+    if (currentToken === token.value) {
+      await router.push({ name: 'chat', params: { conversationId: conversation.conversationId } })
+    }
   } catch (error) {
     showToast(friendlyError(error), 'error')
   } finally {
