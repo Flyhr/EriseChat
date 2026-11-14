@@ -11,7 +11,8 @@ import { useFriendsStore } from '../stores/friends'
 
 // 一级导航（UI-01，计划 §2.1 / §5.1 / §16.5）：
 // ≥1200：172px 图标+文字；801~1199：72px 图标栏（hover/focus 有 title 提示）；≤800 隐藏（移动端导航 UI-04）。
-// 群聊入口（UI-02）：/chat?group=all 进入会话列表的「群聊」筛选；高亮时群聊优先于消息。
+// 批次 B1：一级入口收为消息 / 联系人 / 收藏 / 设置——群聊是会话筛选，归「消息」页内的「群聊」页签，
+// 不再单独占一级入口；旧链接 /chat?group=all 仍由 Chat.vue 解析为群聊筛选并高亮「消息」。
 // 顶部账号入口（头像 + 昵称，点击开账号信息浮窗）、工作空间分组、独立设置区；
 // 原「EriseChat」品牌区、底部账号卡与「服务器已连接」状态行已按用户要求移除（连接状态由 App.vue 断线横幅承担）。
 interface NavItem {
@@ -24,7 +25,6 @@ interface NavItem {
 const mainItems: NavItem[] = [
   { key: 'chat', label: '消息', icon: 'chat', to: '/chat' },
   { key: 'contacts', label: '联系人', icon: 'contacts', to: '/contacts' },
-  { key: 'groups', label: '群聊', icon: 'groups', to: '/chat?group=all' },
   { key: 'favorites', label: '收藏', icon: 'star', to: '/favorites' },
 ]
 const settingsItem: NavItem = { key: 'settings', label: '设置', icon: 'settings', to: '/settings' }
@@ -58,14 +58,12 @@ function ariaLabelOf(item: NavItem): string {
   return item.label
 }
 
-/** 当前一级导航高亮：按路由前缀 + 聊天页群聊筛选（?group=all）判断。 */
+/** 当前一级导航高亮：按路由前缀判断；群聊筛选（?group=all）仍属「消息」。 */
 const activeKey = computed(() => {
   if (route.path.startsWith('/contacts')) return 'contacts'
   if (route.path.startsWith('/favorites')) return 'favorites'
   if (route.path.startsWith('/settings')) return 'settings'
-  if (route.path.startsWith('/chat')) {
-    return route.query.group === 'all' ? 'groups' : 'chat'
-  }
+  if (route.path.startsWith('/chat')) return 'chat'
   return ''
 })
 
