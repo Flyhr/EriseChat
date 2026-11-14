@@ -281,9 +281,10 @@ const locateWindow = ref<{ messages: Message[]; hasOlder: boolean; hasNewer: boo
 const locateAnchor = ref<{ conversationId: string; messageId?: string; seq?: number } | null>(null)
 /** 定位窗口代数：每次打开/替换/关闭窗口 +1；迟到的刷新响应据此校验是否仍属同一个窗口。 */
 const locateWindowVersion = ref(0)
-const locateLoading = ref(false)
 /** F-37：定位请求进行中（从发起定位到上下文接口返回），期间同样不能上报已读。 */
 const locateRequestingCount = ref(0)
+/** 离开会话或定位窗口后，旧请求不再影响新窗口或请求计数。 */
+let locateRequestScope = 0
 const locateRequesting = computed(() => locateRequestingCount.value > 0)
 const locateMode = computed(() => locateWindow.value !== null)
 const displayMessages = computed(() => locateWindow.value?.messages ?? activeMessages.value)
@@ -291,10 +292,11 @@ const displayPending = computed(() => (locateMode.value ? [] : activePending.val
 const displayHasMore = computed(() => (locateMode.value ? false : activeHasMore.value))
 
 function exitLocateWindow(): void {
+  locateRequestScope += 1
+  locateRequestingCount.value = 0
   locateWindowVersion.value += 1
   locateWindow.value = null
   locateAnchor.value = null
-  locateLoading.value = false
 }
 
 /** 回到最新：退出定位窗口并让列表切到最后一页，滚动到位后由列表上报贴底。 */
@@ -660,6 +662,7 @@ async function ensureMessageVisible(
     pickFrom?: (messages: Message[]) => Message | undefined
   } = {},
 ): Promise<boolean> {
+  if (activeId.value !== conversationId || options.guard?.() === false) return false
   const findLoadedId = (): string | undefined =>
     target.messageId ??
     activeMessages.value.find((message) => message.seq === target.seq)?.messageId
@@ -669,8 +672,8 @@ async function ensureMessageVisible(
   if (existingId && messageListRef.value?.scrollToMessage(existingId)) return true
 
   // 需要请求上下文窗口时才算「定位请求进行中」；期间所有已读上报都要暂停。
+  const requestScope = locateRequestScope
   locateRequestingCount.value += 1
-  locateLoading.value = true
   try {
     // F-37：按目标取前后窗口，只用于定位展示；不合并进会话缓存、不推进同步水位或历史分页。
     const page = await messages.loadContextAround(conversationId, {
@@ -680,7 +683,7 @@ async function ensureMessageVisible(
       after: JUMP_CONTEXT_AFTER,
     })
     await nextTick()
-    if (activeId.value !== conversationId) return false
+    if (requestScope !== locateRequestScope || activeId.value !== conversationId) return false
     if (options.guard && !options.guard()) return false
     const picked = options.pickFrom?.(page.messages)
     const targetId =
@@ -691,6 +694,7 @@ async function ensureMessageVisible(
       return false
     }
     locateWindowVersion.value += 1
+    const appliedVersion = locateWindowVersion.value
     locateWindow.value = {
       messages: page.messages,
       hasOlder: page.hasOlder,
@@ -700,13 +704,13 @@ async function ensureMessageVisible(
       ? { conversationId, messageId: target.messageId }
       : { conversationId, seq: target.seq }
     await nextTick()
+    if (activeId.value !== conversationId || locateWindowVersion.value !== appliedVersion) return false
     if (options.scroll === false) return true
     return messageListRef.value?.scrollToMessage(targetId) ?? false
   } catch {
     return false
   } finally {
-    locateLoading.value = false
-    locateRequestingCount.value = Math.max(0, locateRequestingCount.value - 1)
+    if (requestScope === locateRequestScope) locateRequestingCount.value -= 1
   }
 }
 
@@ -994,10 +998,21 @@ type Landing = {
   unreadJumpSeq: number | null
 }
 
+/** 边界到目标之间必须连续，否则无法确定中间是否有更早的未读。 */
+function findFirstUnread(list: readonly Message[], startSeq: number): Message | undefined {
+  let expectedSeq = startSeq
+  for (const message of list) {
+    if (message.seq < startSeq) continue
+    if (message.seq !== expectedSeq) return undefined
+    if (message.senderId !== selfUserId.value) return message
+    expectedSeq += 1
+  }
+}
+
 /**
  * 计算进入会话的落点，优先级：指定消息 → 上次主动浏览位置 → 首条未读 → 最新消息。
- * 指定消息（深链接/搜索/引用跳转）由定位窗口处理，这里不抢；未读起点未加载时只给入口。
- * 返回 null 表示首屏数据（缓存与历史）还没到位、无法判定，应由 confirmLanding 在数据就绪后重算。
+ * 指定消息由定位窗口处理；未读起点未加载时给定位入口。
+ * 返回 null 表示首屏数据尚未就绪，由 confirmLanding 重算。
  */
 function resolveLanding(conversationId: string): Landing | null {
   const none: Landing = { anchor: null, unreadStartId: null, unreadJumpSeq: null }
@@ -1011,13 +1026,7 @@ function resolveLanding(conversationId: string): Landing | null {
   }
 
   const readSeq = conversations.readSeqOf(conversationId)
-  // 首屏只拉最近一页，已读水位与窗口起点之间可能还隔着未加载的消息：
-  // 只有窗口起点紧接已读水位时，窗口里的第一条未读才是真正的首条未读，否则只能给入口。
-  const windowStartSeq = loaded[0]?.seq ?? Number.POSITIVE_INFINITY
-  const coversUnreadStart = windowStartSeq <= readSeq + 1
-  const firstUnread = coversUnreadStart
-    ? loaded.find((message) => message.seq > readSeq && message.senderId !== selfUserId.value)
-    : undefined
+  const firstUnread = findFirstUnread(loaded, readSeq + 1)
   if (firstUnread) {
     return {
       anchor: { messageId: firstUnread.messageId, offset: 8 },
@@ -1079,17 +1088,27 @@ watch(activeLoaded, (loaded) => {
 async function jumpToUnreadStart(): Promise<void> {
   const conversationId = activeId.value
   const seq = unreadJumpSeq.value
-  if (!conversationId || seq === null) return
-  // 入口给的是「已读边界 + 1」，可能正好是自己发的消息：落点取其后第一条他人消息。
-  const firstUnreadOf = (list: Message[]): Message | undefined =>
-    list.find((message) => message.seq >= seq && message.senderId !== selfUserId.value)
+  if (!conversationId || seq === null || locateRequesting.value) return
+  const requestScope = locateRequestScope
+  const windowVersion = locateWindowVersion.value
+  const isCurrent = () =>
+    requestScope === locateRequestScope &&
+    activeId.value === conversationId &&
+    unreadJumpSeq.value === seq
+  const firstUnreadOf = (list: Message[]) => findFirstUnread(list, seq)
   const cached = firstUnreadOf(activeMessages.value)
   const located = await ensureMessageVisible(
     conversationId,
     cached ? { messageId: cached.messageId } : { seq },
-    { pickFrom: firstUnreadOf },
+    {
+      forceContext: !cached,
+      pickFrom: firstUnreadOf,
+      guard: () => isCurrent() && locateWindowVersion.value === windowVersion,
+    },
   )
+  if (!isCurrent()) return
   if (!located) {
+    if (locateWindowVersion.value !== windowVersion) return
     pageNotice.value = '未读起点不在当前加载范围，可手动加载更早消息查看'
     return
   }
@@ -1268,6 +1287,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  exitLocateWindow()
   if (slowLoadingTimer !== null) window.clearTimeout(slowLoadingTimer)
   // 离开聊天页（去设置/退出登录/切换账号或服务器）：中止上传并丢弃队列，
   // 晚到的压缩/上传结果因找不到队列项而不会再发送；仅聊天页内切换会话不触发卸载。
@@ -2070,13 +2090,20 @@ function onWindowDrop(event: DragEvent): void {
             </div>
             <p v-if="activeId" class="chat-page__typing" aria-live="polite">{{ typingText }}</p>
             <div v-if="locateMode" class="chat-page__locate">
-              <span>{{ locateLoading ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
+              <span>{{ locateRequesting ? '正在定位历史消息…' : '正在查看历史位置（不是最新消息）' }}</span>
               <button type="button" class="chat-page__inline-action" @click="backToLatest">回到最新</button>
             </div>
             <!-- 批次 B2：未读起点不在已加载消息里时，先展示近期消息并给出入口。 -->
             <div v-else-if="unreadJumpSeq !== null" class="chat-page__locate">
               <span>有 {{ unreadJumpCount }} 条未读消息</span>
-              <button type="button" class="chat-page__inline-action" @click="jumpToUnreadStart">查看未读起点</button>
+              <button
+                type="button"
+                class="chat-page__inline-action"
+                :disabled="locateRequesting"
+                @click="jumpToUnreadStart"
+              >
+                查看未读起点
+              </button>
             </div>
             <MessageList
               ref="messageListRef"
