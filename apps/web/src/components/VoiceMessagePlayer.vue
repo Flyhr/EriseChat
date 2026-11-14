@@ -106,8 +106,10 @@ function applySeek(ms: number): void {
   progressMs.value = target
   pendingSeekMs = target
   userSeeked = true
-  // 以最新拖动位置覆盖暂停时缓存的位置，避免下次播放被旧位置盖掉。
+  // 以最新拖动位置覆盖暂停时缓存的位置，避免下次播放被旧位置盖掉；
+  // 拖回起点时同步清除记录，避免离开会话再回来从旧位置续播。
   if (target > 0 && target < totalMs.value) rememberVoicePosition(props.fileId, target)
+  else clearVoicePosition(props.fileId)
   if (!audio) return
   if (target >= totalMs.value && totalMs.value > 0) {
     // 拖到最右端：按播放结束处理（复位）

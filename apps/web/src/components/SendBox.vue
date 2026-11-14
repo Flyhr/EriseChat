@@ -106,6 +106,8 @@ const accept = ALLOWED_EXTENSIONS.join(',')
 // F-28：录音状态。点击麦克风开始，输入区切换为录音条（计时/取消/发送）；Esc 取消。
 const recording = ref<VoiceRecorderHandle | null>(null)
 const recordingElapsed = ref(0)
+/** 等待麦克风授权/设备启动期间为 true：避免连续点击创建多个录音句柄。 */
+const recordingStarting = ref(false)
 const recordingStopping = ref(false)
 const recordingActive = computed(() => recording.value !== null)
 /** 浏览器是否具备录音能力（无麦克风权限时点击仍会提示，由 recorder 映射错误文案）。 */
@@ -123,6 +125,7 @@ let voiceSession = 0
 /** 让所有在途的录音启动/停止失效（切会话、卸载、取消后调用）。 */
 function invalidateVoiceSession(): void {
   voiceSession += 1
+  recordingStarting.value = false
   recordingStopping.value = false
 }
 
@@ -225,13 +228,15 @@ watch(previewActive, (active) => {
 })
 
 async function startRecording(): Promise<void> {
-  if (recording.value || props.uploading || recordingStopping.value) return
+  if (recording.value || props.uploading || recordingStopping.value || recordingStarting.value) return
   if (!voiceSupported.value) {
     emit('voice-error', '当前环境不支持录音')
     return
   }
   closeMention()
   const session = voiceSession
+  // 等待授权/设备启动期间禁止再次进入，避免两次点击各自创建一个录音句柄。
+  recordingStarting.value = true
   try {
     const handle = await startVoiceRecording()
     // 等待麦克风授权期间切换了会话/卸载：迟到的句柄直接取消，不要登记到输入区。
@@ -239,6 +244,7 @@ async function startRecording(): Promise<void> {
       handle.cancel()
       return
     }
+    recordingStarting.value = false
     recording.value = handle
     recordingStartedAt = Date.now()
     recordingElapsed.value = 0
@@ -249,6 +255,7 @@ async function startRecording(): Promise<void> {
     }, 200)
   } catch (error) {
     if (session !== voiceSession) return
+    recordingStarting.value = false
     emit('voice-error', mapRecorderError(error))
   }
 }
@@ -855,7 +862,7 @@ function onInput(): void {
           type="button"
           title="录制语音消息"
           aria-label="录制语音消息"
-          :disabled="uploading || recordingStopping"
+          :disabled="uploading || recordingStarting || recordingStopping"
           @click="startRecording"
         >
           <AppIcon name="mic" :size="18" />
