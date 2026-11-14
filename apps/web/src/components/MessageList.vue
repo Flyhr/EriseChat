@@ -140,8 +140,14 @@ function restoreAnchor(anchor: { messageId: string; offset: number }, conversati
   if ((props.conversationId ?? '') !== conversationId) return false
   const row = element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.messageId)}"]`)
   if (!row) return false
+  // 首条未读上方的分隔线也属于落点：把它的高度计入偏移，否则分隔会被滚出视口。
+  const previous = row.previousElementSibling
+  const dividerHeight =
+    previous instanceof HTMLElement && previous.classList.contains('message-list__unread')
+      ? previous.getBoundingClientRect().height
+      : 0
   const delta = row.getBoundingClientRect().top - element.getBoundingClientRect().top
-  element.scrollTop += delta - anchor.offset
+  element.scrollTop += delta - anchor.offset - dividerHeight
   // 程序化定位后同步记录锚点：后续图片解码仍按同一位置恢复。
   lastVisibleAnchor = anchor
   return true
