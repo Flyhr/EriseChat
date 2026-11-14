@@ -169,8 +169,8 @@ async function onUpdateSettings(payload: {
         aria-label="搜索消息、联系人或群聊"
         @click="openGlobalSearch"
       >
-        <AppIcon name="search" :size="16" />
-        <span>搜索消息、联系人或群聊</span>
+        <span class="ec-conversation-list__search-text">搜索消息、联系人或群聊</span>
+        <AppIcon name="search" :size="16" class="ec-conversation-list__search-icon" />
       </button>
       <button
         type="button"
@@ -251,12 +251,13 @@ async function onUpdateSettings(payload: {
   flex: none;
   gap: var(--ec-space-2);
   align-items: center;
+  justify-content: space-between;
   height: var(--ec-header-height);
   padding: 0 var(--ec-space-4);
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-/* U-07：搜索触发器外观沿用输入框尺寸，点击打开全局面板。 */
+/* 与联系人页 SearchInput 同一外观（胶囊、导航底、右侧搜索图标），点击打开全局面板。 */
 .ec-conversation-list__searchbox {
   flex: 1;
   max-width: 280px;
@@ -266,26 +267,47 @@ async function onUpdateSettings(payload: {
   display: flex;
   gap: var(--ec-space-2);
   align-items: center;
-  min-height: 36px;
+  justify-content: space-between;
+  min-height: 32px;
   padding: 0 var(--ec-space-3);
-  /* 必要控件轮廓走 --ec-border-strong（≥3:1），分隔线才用 --ec-border。 */
-  border: 1px solid var(--ec-border-strong);
-  border-radius: var(--ec-radius-input);
-  background: var(--ec-surface);
-  color: var(--ec-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-nav-bg);
+  color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-secondary);
   text-align: left;
   cursor: pointer;
+  transition:
+    background var(--ec-transition-fast) var(--ec-ease),
+    border-color var(--ec-transition-fast) var(--ec-ease);
 }
 
-.ec-conversation-list__search-trigger:hover {
-  border-color: var(--ec-brand-500);
-  color: var(--ec-text-secondary);
+@media (hover: hover) and (pointer: fine) {
+  .ec-conversation-list__search-trigger:hover {
+    background: var(--ec-surface-hover);
+  }
 }
 
+/* 聚焦与联系人输入框一致：品牌细描边 + 表面色，不叠外环。 */
 .ec-conversation-list__search-trigger:focus-visible {
-  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
-  outline-offset: var(--ec-focus-offset);
+  border-color: var(--ec-brand-500);
+  background: var(--ec-surface);
+  outline: none;
+}
+
+.ec-conversation-list__search-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ec-conversation-list__search-icon {
+  flex: none;
+  color: var(--ec-text-tertiary);
+}
+
+.ec-conversation-list__search-trigger:focus-visible .ec-conversation-list__search-icon {
+  color: var(--ec-brand-600);
 }
 
 .ec-conversation-list__more {
@@ -452,6 +474,11 @@ async function onUpdateSettings(payload: {
 
   .ec-conversation-list__searchbox {
     max-width: none;
+  }
+
+  /* 与联系人页 SearchInput 的移动端高度一致。 */
+  .ec-conversation-list__search-trigger {
+    min-height: 36px;
   }
 
   .ec-conversation-list__filters {
