@@ -42,7 +42,7 @@ function removeSelected(userId: string): void {
 async function search(): Promise<void> {
   const trimmed = keyword.value.trim()
   if (trimmed.length === 0) {
-    errorMessage.value = '请输入邮箱或昵称'
+    errorMessage.value = '请输入昵称或完整邮箱'
     return
   }
   searching.value = true
@@ -140,7 +140,7 @@ watch(
           type="search"
           maxlength="64"
           class="new-group__input"
-          placeholder="输入邮箱或昵称搜索同事"
+          placeholder="输入昵称或完整邮箱搜索同事"
           aria-label="搜索待邀请成员"
         />
         <button type="submit" class="new-group__search-btn" :disabled="searching">
@@ -175,7 +175,7 @@ watch(
           />
           <span class="new-group__result-info">
             <span class="new-group__result-name">{{ user.displayName }}</span>
-            <span class="new-group__result-email">{{ user.email }}</span>
+            <span v-if="user.email" class="new-group__result-email">{{ user.email }}</span>
           </span>
           <button type="button" class="new-group__toggle" @click="toggleMember(user)">
             {{ isSelected(user.userId) ? '取消选择' : '选择' }}

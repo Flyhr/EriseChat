@@ -92,8 +92,10 @@ public static class UserEndpoints
     }
 
     /// <summary>
-    /// 按邮箱/昵称模糊搜索用户（M2-01，计划 §7）：search 去空白后 1~64 字符；
-    /// LIKE 转义 % / _ 为字面量；排除当前用户；按昵称排序；最多 20 条；无匹配返回空数组。
+    /// 搜索用户（M2-01，计划 §7；C1a 收敛邮箱可见性）：search 去空白后 1~64 字符。
+    /// 只按昵称模糊匹配（LIKE 转义 % / _ 为字面量）；关键词是完整合法邮箱时额外按邮箱精确匹配，
+    /// 因为昵称可重名、邮箱是当前唯一的精确查找标识；不再做邮箱子串检索，避免陌生人用邮箱片段枚举账号。
+    /// 排除当前用户；按昵称排序；最多 20 条；无匹配返回空数组；结果不含他人邮箱。
     /// </summary>
     private static async Task<IResult> SearchUsersAsync(
         string? search,
@@ -110,10 +112,14 @@ public static class UserEndpoints
         }
 
         var pattern = $"%{EscapeLikePattern(keyword)}%";
-        var rows = await db.Users.AsNoTracking()
-            .Where(user => user.Id != currentUserId)
-            .Where(user => EF.Functions.Like(user.Email, pattern, "\\") ||
-                           EF.Functions.Like(user.DisplayName, pattern, "\\"))
+        var exactEmail = EmailAddress.TryNormalize(keyword, out var normalizedEmail) ? normalizedEmail : null;
+
+        var query = db.Users.AsNoTracking().Where(user => user.Id != currentUserId);
+        query = exactEmail is null
+            ? query.Where(user => EF.Functions.Like(user.DisplayName, pattern, "\\"))
+            : query.Where(user => EF.Functions.Like(user.DisplayName, pattern, "\\") || user.Email == exactEmail);
+
+        var rows = await query
             .OrderBy(user => user.DisplayName)
             .Take(SearchLimit)
             .ToListAsync(cancellationToken);
@@ -148,9 +154,10 @@ public static class UserEndpoints
         return Results.Json(new UsersSearchResponse(users));
     }
 
+    /// <summary>搜索结果条目：不下发他人邮箱（C1a），relation 供联系人页决定「加为好友」等操作。</summary>
     private static MeResponse ToResponse(User user, string? relation = null) => new(
         user.Id,
-        user.Email,
+        null,
         user.DisplayName,
         user.AvatarFileId,
         user.Role.ToString().ToLowerInvariant(),
@@ -174,7 +181,8 @@ public static class UserEndpoints
     /// <summary>当前用户资料（字段与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
     public sealed record MeResponse(
         string UserId,
-        string Email,
+        /// <summary>C1a：仅本人接口（/api/me、PATCH /api/me/profile）下发邮箱；搜索结果 OMIT 该字段。</summary>
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Email,
         string DisplayName,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AvatarFileId,
         string Role,

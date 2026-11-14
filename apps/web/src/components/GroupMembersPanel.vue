@@ -251,7 +251,7 @@ async function refreshConversation(): Promise<void> {
 async function searchUsers(): Promise<void> {
   const keyword = inviteKeyword.value.trim()
   if (keyword.length === 0) {
-    errorMessage.value = '请输入邮箱或昵称'
+    errorMessage.value = '请输入昵称或完整邮箱'
     return
   }
   searching.value = true
@@ -617,7 +617,7 @@ async function removeAvatar(): Promise<void> {
             v-model="inviteKeyword"
             type="search"
             maxlength="64"
-            placeholder="输入邮箱或昵称搜索"
+            placeholder="输入昵称或完整邮箱搜索"
             aria-label="搜索待邀请用户"
           />
           <button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button>
@@ -630,7 +630,7 @@ async function removeAvatar(): Promise<void> {
             <Avatar :display-name="user.displayName" :avatar-file-id="user.avatarFileId" :size="28" />
             <span class="group-panel__candidate-info">
               <span>{{ user.displayName }}</span>
-              <span class="group-panel__member-email">{{ user.email }}</span>
+              <span v-if="user.email" class="group-panel__member-email">{{ user.email }}</span>
             </span>
             <button type="button" class="group-panel__toggle" @click="toggleInvite(user.userId)">
               {{ isSelected(user.userId) ? '取消选择' : '选择' }}

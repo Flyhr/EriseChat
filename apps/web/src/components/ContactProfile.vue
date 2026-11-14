@@ -9,11 +9,11 @@ import PresenceDot from './PresenceDot.vue'
 import { presenceLabelOf, type PresenceState } from '../core/presence'
 import type { Friend } from '../types/frames'
 
-/** 资料区需要的最小用户信息（UserProfile 结构兼容）。 */
+/** 资料区需要的最小用户信息（UserProfile 结构兼容；陌生人没有邮箱）。 */
 interface ContactUser {
   userId: string
   displayName: string
-  email: string
+  email?: string
   avatarFileId?: string | null
 }
 
@@ -103,7 +103,7 @@ function saveFriend(): void {
         <PresenceDot :online="presence" />
         <span>{{ presenceText }}</span>
       </p>
-      <p class="contact-profile__email">{{ user.email }}</p>
+      <p v-if="user.email" class="contact-profile__email">{{ user.email }}</p>
 
       <div class="contact-profile__actions">
         <button

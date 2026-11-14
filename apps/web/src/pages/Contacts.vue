@@ -2,7 +2,7 @@
 // 左栏三块切换「好友 / 申请 / 搜索」，右栏资料区（ContactProfile）。
 // - 好友：按分组展示（备注优先显示），选中可查看资料、维护备注/分组、删除好友；
 // - 申请：收到的申请可接受/拒绝，发出的可撤销（实时推送由 friends store 接收）；
-// - 搜索：按邮箱/昵称搜索同事，按 relation 显示加为好友 / 已发送 / 待处理。
+// - 搜索：按昵称或完整邮箱搜索同事，按 relation 显示加为好友 / 已发送 / 待处理；搜索结果不含他人邮箱。
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -26,11 +26,11 @@ import { usePresenceStore } from '../stores/presence'
 
 type ContactsTab = 'friends' | 'requests' | 'search'
 
-/** 资料区所需的最小用户信息（UserProfile 结构兼容）。 */
+/** 资料区所需的最小用户信息（UserProfile 结构兼容；邮箱仅好友与本人有值）。 */
 interface ContactUser {
   userId: string
   displayName: string
-  email: string
+  email?: string
   avatarFileId?: string | null
 }
 
@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
           v-if="!friends.loading && friends.friends.length === 0"
           icon="contacts"
           title="还没有好友"
-          description="切到「搜索」按邮箱或昵称查找同事，发送好友申请。"
+          description="切到「搜索」按昵称或完整邮箱查找同事，发送好友申请。"
         />
       </div>
 
@@ -524,7 +524,7 @@ onBeforeUnmount(() => {
 
       <!-- 搜索 -->
       <div v-else class="contacts-page__section">
-        <p v-if="!keyword.trim()" class="contacts-page__hint">输入邮箱或昵称搜索同事。</p>
+        <p v-if="!keyword.trim()" class="contacts-page__hint">输入昵称或完整邮箱搜索同事。</p>
         <p v-if="searchError" class="contacts-page__error" role="alert">{{ searchError }}</p>
         <p v-if="searching" class="contacts-page__hint">搜索中…</p>
         <ul v-else-if="results.length" class="contacts-page__results">
@@ -545,7 +545,7 @@ onBeforeUnmount(() => {
                   <PresenceDot :online="presence.stateOf(user.userId)" />
                   {{ user.displayName }}
                 </span>
-                <span class="contacts-page__result-email">{{ user.email }}</span>
+                <span v-if="user.email" class="contacts-page__result-email">{{ user.email }}</span>
               </span>
             </button>
             <button
@@ -586,9 +586,9 @@ onBeforeUnmount(() => {
           v-else-if="searched"
           icon="search"
           title="未找到匹配用户"
-          description="换个昵称或邮箱再试试。"
+          description="换个昵称或完整邮箱再试试。"
         />
-        <p v-else class="contacts-page__hint">输入邮箱或昵称搜索同事。</p>
+        <p v-else class="contacts-page__hint">输入昵称或完整邮箱搜索同事。</p>
       </div>
     </aside>
 
