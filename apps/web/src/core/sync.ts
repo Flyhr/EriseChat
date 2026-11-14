@@ -1,7 +1,7 @@
 // 补拉同步的纯逻辑：去重、排序、缺口检测、未读计算（无副作用、无网络/存储依赖）。
 // 协议约定见 protocol/protocol.md §4.4 / §4.6；硬要求见 AGENTS.md §5.4/§5.5/§5.6。
 
-import type { Message, SyncCursor } from '../types/frames'
+import type { Message, ReactionSummary, SyncCursor } from '../types/frames'
 import { config } from './config'
 
 /** 按 messageId 去重（同一 id 以后出现者为准）并按 seq 升序排序。 */
@@ -68,6 +68,24 @@ export function buildSyncCursors(
   }
 
   return cursors
+}
+
+/**
+ * C3：合并历史/补拉响应前，保留请求发出后又被实时帧更新过的回应摘要。
+ * 对 isNewerThanRequest 为真的消息，用本地缓存的 reactions 覆盖响应里的旧值，
+ * 避免迟到的旧响应把界面上的替换/清空状态回退（纯函数，便于单测）。
+ */
+export function keepNewerReactions<T extends { messageId: string; reactions?: ReactionSummary[] }>(
+  incoming: readonly T[],
+  localById: ReadonlyMap<string, T>,
+  isNewerThanRequest: (messageId: string) => boolean,
+): T[] {
+  return incoming.map((item) => {
+    if (!isNewerThanRequest(item.messageId)) return item
+    const local = localById.get(item.messageId)
+    // 结构安全：仅替换 reactions，其余字段仍取响应中的内容。
+    return local ? ({ ...item, reactions: local.reactions } as T) : item
+  })
 }
 
 /** 未读数 = 会话最新 seq − 我的已读游标；不单独下发 unread（AGENTS.md §5.6）。 */

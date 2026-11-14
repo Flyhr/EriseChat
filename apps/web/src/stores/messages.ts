@@ -17,7 +17,13 @@ import type {
   SyncResponseFrame,
   VoiceContent,
 } from '../types/frames'
-import { type GapCheckResult, buildSyncCursors, detectGap, mergeMessages } from '../core/sync'
+import {
+  type GapCheckResult,
+  buildSyncCursors,
+  detectGap,
+  keepNewerReactions,
+  mergeMessages,
+} from '../core/sync'
 import { messagesApi, type MessageContextPage } from '../api/messages'
 import { chatWs, type WsState } from '../core/ws'
 import { MAX_TEXT_LENGTH, config, resolveApiOrigin } from '../core/config'
@@ -172,7 +178,7 @@ export const useMessagesStore = defineStore('messages', () => {
    * F-34：把 sync.response 的 updates 覆盖到已缓存消息（仅按 messageId 定位，不新增/重排）。
    * 未缓存的消息（更早历史或已被淘汰）忽略，等用户加载历史时自然拿到最新状态。
    */
-  function applySyncUpdates(conversationId: string, updates: readonly Message[]): void {
+  function applySyncUpdates(conversationId: string, updates: readonly Message[], requestEpoch?: number): void {
     if (updates.length === 0) return
     const list = messagesOf(conversationId)
     if (list.length === 0) return
@@ -181,11 +187,15 @@ export const useMessagesStore = defineStore('messages', () => {
     const next = list.map((message) => {
       const fresh = byId.get(message.messageId)
       if (!fresh) return message
+      // C3：请求发起后收到过更新的实时回应帧时，保留本地摘要，防止旧补拉回退界面。
+      const skipReactions =
+        requestEpoch !== undefined &&
+        realtimeReactionEpochOf(conversationId, message.messageId) > requestEpoch
       if (
         fresh.deletedAt === message.deletedAt &&
         fresh.editedAt === message.editedAt &&
         fresh.content === message.content &&
-        isSameReactions(fresh.reactions, message.reactions)
+        (skipReactions || isSameReactions(fresh.reactions, message.reactions))
       ) {
         return message
       }
@@ -194,10 +204,12 @@ export const useMessagesStore = defineStore('messages', () => {
       else updated.deletedAt = fresh.deletedAt
       if (fresh.editedAt === undefined) delete updated.editedAt
       else updated.editedAt = fresh.editedAt
-      const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
-      if (fresh.reactions === undefined) delete updated.reactions
-      else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
-      if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
+      if (!skipReactions) {
+        const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
+        if (fresh.reactions === undefined) delete updated.reactions
+        else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
+        if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
+      }
       changed.push(updated)
       return updated
     })
@@ -235,6 +247,45 @@ export const useMessagesStore = defineStore('messages', () => {
    * 界面发出 REST 请求后可用 {@link reactionVersionOf} 判断响应是否已过期。
    */
   const reactionVersionByMessage = new Map<string, number>()
+
+  /**
+   * C3：本端收到实时回应帧的单调序号。历史/补拉请求发起时记录当时序号，
+   * 响应回来时若该消息已有更新的实时帧，则保留本地摘要，避免迟到的旧响应把界面回退。
+   */
+  let realtimeReactionEpoch = 0
+  const realtimeReactionEpochByMessage = new Map<string, number>()
+
+  function realtimeReactionEpochOf(conversationId: string, messageId: string): number {
+    return realtimeReactionEpochByMessage.get(`${conversationId}:${messageId}`) ?? 0
+  }
+
+  /** 标记某条消息刚收到实时回应帧，推进其新旧判断水位。 */
+  function markRealtimeReaction(conversationId: string, messageId: string): void {
+    realtimeReactionEpoch += 1
+    realtimeReactionEpochByMessage.set(`${conversationId}:${messageId}`, realtimeReactionEpoch)
+  }
+
+  /** C3：请求发起时的实时回应序号，供响应合并时做新旧判断。 */
+  function reactionRequestEpoch(): number {
+    return realtimeReactionEpoch
+  }
+
+  /**
+   * C3：合并历史/补拉响应前，若某条消息在请求发起后收到过实时回应帧，
+   * 用它保留本地较新的摘要，避免旧响应覆盖实时状态。
+   */
+  function keepNewerLocalReactions(
+    conversationId: string,
+    incoming: readonly Message[],
+    requestEpoch: number,
+  ): readonly Message[] {
+    const localById = new Map(messagesOf(conversationId).map((message) => [message.messageId, message]))
+    return keepNewerReactions(
+      incoming,
+      localById,
+      (messageId) => realtimeReactionEpochOf(conversationId, messageId) > requestEpoch,
+    )
+  }
 
   function bumpReactionVersion(
     conversationId: string,
@@ -304,7 +355,7 @@ export const useMessagesStore = defineStore('messages', () => {
   }
 
   /** 合并服务端事实消息：去重 + 按 seq 升序，并持久化消息与游标。 */
-  function merge(conversationId: string, incoming: readonly Message[]): GapCheckResult {
+  function merge(conversationId: string, incoming: readonly Message[], requestEpoch?: number): GapCheckResult {
     // F-03：「服务端已落库但 ack 丢失」时，补拉/历史里会出现同一 clientMsgId 的消息；
     // 命中后清掉本地待发消息（含重试定时器与缓存记录），避免重复展示。
     const pendingRecords = pendingOf(conversationId).map(toPendingRecord)
@@ -319,10 +370,15 @@ export const useMessagesStore = defineStore('messages', () => {
     }
 
     const result = detectGap(lastSeqOf(conversationId), incoming)
-    const merged = mergeMessages(messagesOf(conversationId), incoming)
+    // C3：历史/补拉响应可能早于本端已收到的实时回应帧，合并时保留更新的本地摘要。
+    const guarded =
+      requestEpoch === undefined
+        ? incoming
+        : keepNewerLocalReactions(conversationId, incoming, requestEpoch)
+    const merged = mergeMessages(messagesOf(conversationId), guarded)
     byConversation.value = { ...byConversation.value, [conversationId]: merged }
     setLastSeq(conversationId, result.lastSeq)
-    persistMessages(incoming)
+    persistMessages(guarded)
     persistLastSeqMap()
     return result
   }
@@ -484,9 +540,10 @@ export const useMessagesStore = defineStore('messages', () => {
       [conversationId]: true,
     }
     try {
+      const requestEpoch = reactionRequestEpoch()
       const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
       const before = lastSeqOf(conversationId)
-      const result = merge(conversationId, page.messages)
+      const result = merge(conversationId, page.messages, requestEpoch)
       const pageMaxSeq = page.messages.reduce((max, item) => Math.max(max, item.seq), before)
       // 首屏基线（本地无游标）直接以本页最大 seq 为游标；已有游标且检测到缺口时保持游标不动，
       // 交给 syncAll 从缺口处补拉，避免把缺口吞掉（M3-00 N1）。
@@ -517,8 +574,9 @@ export const useMessagesStore = defineStore('messages', () => {
     }
     try {
       const beforeSeq = list[0].seq
+      const requestEpoch = reactionRequestEpoch()
       const page = await messagesApi.history(conversationId, beforeSeq, PAGE_SIZE)
-      merge(conversationId, page.messages)
+      merge(conversationId, page.messages, requestEpoch)
       hasMoreByConversation.value = {
         ...hasMoreByConversation.value,
         [conversationId]: page.hasMore,
@@ -556,6 +614,8 @@ export const useMessagesStore = defineStore('messages', () => {
    * 已知限制：离线期间最近 50 条以外的撤回/编辑不会自动回放（需手动加载历史或刷新）。
    */
   async function refreshRecent(conversationId: string): Promise<void> {
+    // C3：记录发起时的实时回应序号；响应若早于期间收到的实时帧，保留较新的本地摘要。
+    const requestEpoch = realtimeReactionEpoch
     try {
       const page = await messagesApi.history(conversationId, undefined, PAGE_SIZE)
       const freshById = new Map(page.messages.map((message) => [message.messageId, message]))
@@ -563,11 +623,12 @@ export const useMessagesStore = defineStore('messages', () => {
       const next = messagesOf(conversationId).map((message) => {
         const fresh = freshById.get(message.messageId)
         if (!fresh) return message
+        const skipReactions = realtimeReactionEpochOf(conversationId, message.messageId) > requestEpoch
         if (
           fresh.deletedAt === message.deletedAt &&
           fresh.editedAt === message.editedAt &&
           isSameContent(fresh.content, message.content) &&
-          isSameReactions(fresh.reactions, message.reactions)
+          (skipReactions || isSameReactions(fresh.reactions, message.reactions))
         ) {
           return message
         }
@@ -577,10 +638,12 @@ export const useMessagesStore = defineStore('messages', () => {
         if (fresh.editedAt === undefined) delete updated.editedAt
         else updated.editedAt = fresh.editedAt
         if (fresh.reply) updated.reply = fresh.reply
-        const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
-        if (fresh.reactions === undefined) delete updated.reactions
-        else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
-        if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
+        if (!skipReactions) {
+          const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
+          if (fresh.reactions === undefined) delete updated.reactions
+          else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
+          if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
+        }
         changed.push(updated)
         return updated
       })
@@ -631,6 +694,8 @@ export const useMessagesStore = defineStore('messages', () => {
 
         const sentSeq = new Map(cursors.map((cursor) => [cursor.conversationId, cursor.lastSeq]))
         const frame: SyncRequestFrame = { type: 'sync.request', cursors }
+        // C3：记录发起时的实时回应序号，补拉响应合并时不能覆盖期间到达的实时摘要。
+        const requestEpoch = reactionRequestEpoch()
         let response: SyncResponseFrame
         try {
           response = await chatWs.request<SyncResponseFrame>(frame)
@@ -649,10 +714,10 @@ export const useMessagesStore = defineStore('messages', () => {
           const cursor = sentSeq.get(conversationId) ?? lastSeqOf(conversationId)
           const gap = messages.length > 0 ? detectGap(cursor, messages) : { hasGap: false, lastSeq: cursor }
           if (messages.length > 0) {
-            merge(conversationId, messages)
+            merge(conversationId, messages, requestEpoch)
             conversations.applyMessage(conversationId, messages[messages.length - 1])
           }
-          applySyncUpdates(conversationId, updates)
+          applySyncUpdates(conversationId, updates, requestEpoch)
 
           if (batch.updatedThrough !== undefined) {
             stateSyncedAtByConversation.value = {
@@ -1105,6 +1170,8 @@ export const useMessagesStore = defineStore('messages', () => {
         handleEdited(frame)
         break
       case 'message.reactions':
+        // C3：先登记实时序号，再套用摘要；之后到达的历史/补拉响应会据此保留新状态。
+        markRealtimeReaction(frame.conversationId, frame.messageId)
         applyReactionSummary(frame.conversationId, frame.messageId, frame.reactions)
         break
       case 'error': {
