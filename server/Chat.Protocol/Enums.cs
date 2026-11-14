@@ -164,6 +164,9 @@ public static class ErrorCodes
     /// <summary>邀请码已过期。</summary>
     public const string InviteExpired = "INVITE_EXPIRED";
 
+    /// <summary>邀请链接已撤销（C1c）。</summary>
+    public const string InviteRevoked = "INVITE_REVOKED";
+
     /// <summary>密码错误。</summary>
     public const string PasswordInvalid = "PASSWORD_INVALID";
 

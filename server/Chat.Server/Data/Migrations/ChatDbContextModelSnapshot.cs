@@ -379,6 +379,44 @@ namespace Chat.Server.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Chat.Server.Data.Entities.GroupInviteLink", b =>
+                {
+                    b.Property<string>("Token")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("token");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("created_by");
+
+                    b.Property<long>("ExpiresAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("expires_at");
+
+                    b.Property<long?>("RevokedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("revoked_at");
+
+                    b.HasKey("Token");
+
+                    b.HasIndex("ConversationId")
+                        .HasDatabaseName("idx_group_invite_links_conversation");
+
+                    b.HasIndex("CreatedBy");
+
+                    b.ToTable("group_invite_links", (string)null);
+                });
+
             modelBuilder.Entity("Chat.Server.Data.Entities.Invite", b =>
                 {
                     b.Property<string>("Code")
@@ -728,6 +766,21 @@ namespace Chat.Server.Data.Migrations
                     b.HasOne("Chat.Server.Data.Entities.User", null)
                         .WithMany()
                         .HasForeignKey("ToUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.GroupInviteLink", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedBy")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

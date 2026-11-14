@@ -309,3 +309,17 @@ CREATE TABLE blocks (
 );
 
 CREATE INDEX idx_blocks_blocked ON blocks (blocked_user_id);
+
+-- group_invite_links：群邀请链接（C1c）；token 为不含邮箱的随机串（base64url），可撤销、可过期。
+CREATE TABLE group_invite_links (
+    token           TEXT PRIMARY KEY NOT NULL,
+    conversation_id TEXT NOT NULL,
+    created_by      TEXT NOT NULL,
+    expires_at      INTEGER NOT NULL,
+    revoked_at      INTEGER,
+    created_at      INTEGER NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_group_invite_links_conversation ON group_invite_links (conversation_id);

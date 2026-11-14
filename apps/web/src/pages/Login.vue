@@ -14,6 +14,7 @@ import {
   setServerUrl,
 } from '../core/config'
 import { isConversationIdLike, syncServerUrlToDesktop } from '../core/desktop'
+import { isInviteTokenLike } from '../core/inviteToken'
 import { friendlyError } from '../core/errorMessages'
 import { validateNewPassword } from '../core/passwordRules'
 import { showToast } from '../core/toast'
@@ -302,13 +303,16 @@ async function submit(): Promise<void> {
       })
     }
     applySession(response)
-    // 未登录直达会话链接时，守卫只留下格式合法的会话 ID；这里再次校验后按命名路由恢复目标。
-    // 不接受任意重定向 URL；缺少有效目标时进消息首页。会话访问权仍由服务端校验。
+    // 未登录直达会话链接或群邀请链接时，守卫只留下格式合法的标识；这里再次校验后恢复目标。
+    // 不接受任意重定向 URL；缺少有效目标时进消息首页。访问权仍由服务端校验。
     const targetConversationId = route.query.conversationId
+    const targetJoinToken = route.query.join
     await router.push(
       isConversationIdLike(targetConversationId)
         ? { name: 'chat', params: { conversationId: targetConversationId } }
-        : { name: 'chat' },
+        : isInviteTokenLike(targetJoinToken)
+          ? { name: 'join', params: { token: targetJoinToken } }
+          : { name: 'chat' },
     )
   } catch (error) {
     errorMessage.value = toErrorMessage(error)

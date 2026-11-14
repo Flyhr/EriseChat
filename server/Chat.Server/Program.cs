@@ -101,6 +101,9 @@ builder.Services.AddSingleton<FriendRealtimeNotifier>();
 // C1b：拉黑关系（有方向单向行）；好友申请、群邀请、私聊发送/转发在业务入口调用其规则。
 builder.Services.AddScoped<BlockService>();
 
+// C1c：群邀请链接（可撤销、7 天有效）；兑换时校验发起人权限、拉黑、群容量。
+builder.Services.AddScoped<GroupInviteService>();
+
 // 消息（M1-08）：发送/补拉业务在 MessageService，WS 帧编排在 Realtime.MessageHub。
 builder.Services.AddScoped<MessageService>();
 builder.Services.AddScoped<MessageHub>();
@@ -292,6 +295,8 @@ app.MapSessionEndpoints();
 app.MapFriendEndpoints();
 // 拉黑关系（C1b）：GET /api/blocks、PUT/DELETE /api/blocks/{userId}（幂等）。
 app.MapBlockEndpoints();
+// 群邀请链接（C1c）：创建/列出/撤销、打开预览、兑换加入群聊。
+app.MapInviteLinkEndpoints();
 // 个人收藏（F-38）：GET/POST /api/favorites、DELETE /api/favorites/{messageId}。
 app.MapFavoriteEndpoints();
 

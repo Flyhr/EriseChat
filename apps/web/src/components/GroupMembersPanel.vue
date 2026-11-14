@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
+import { inviteLinksApi, type GroupInviteLink } from '../api/inviteLinks'
 import { usersApi, type UserProfile } from '../api/users'
 import AppDialog from './AppDialog.vue'
 import AppIcon from './AppIcon.vue'
@@ -9,6 +10,7 @@ import Avatar from './Avatar.vue'
 import MemberProfileCard from './MemberProfileCard.vue'
 import PresenceDot from './PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
+import { resolveServerOrigin } from '../core/config'
 import { compressImageFile } from '../core/imageCompress'
 import { groupAvatarFileIdOf, isAcceptableAvatarFile } from '../core/groupAvatar'
 import {
@@ -62,6 +64,11 @@ const inviteKeyword = ref('')
 const inviteResults = ref<UserProfile[]>([])
 const selectedInviteIds = ref<string[]>([])
 const searching = ref(false)
+
+// 群邀请链接（C1c）：列出未撤销链接、生成后复制、撤销；仅群主可邀的配置由服务端校验并回 403。
+const inviteLinks = ref<GroupInviteLink[]>([])
+const inviteLinkBusy = ref(false)
+const inviteLinkError = ref('')
 
 // 群资料（F-14）：群主可编辑群名与公告，其余成员只读。
 const canEditProfile = computed(() => canEditGroupProfile(props.conversation, props.selfUserId))
@@ -163,6 +170,7 @@ function syncMemberCardAnchor(): void {
 onMounted(() => {
   window.addEventListener('resize', syncMemberCardAnchor, { passive: true })
   window.addEventListener('scroll', syncMemberCardAnchor, { capture: true, passive: true })
+  void loadInviteLinks()
 })
 
 onBeforeUnmount(() => {
@@ -301,6 +309,64 @@ async function invite(): Promise<void> {
   } finally {
     busy.value = false
   }
+}
+
+/** 加载该群未撤销的邀请链接；仅群主可邀的配置下普通成员会收到 403。 */
+async function loadInviteLinks(): Promise<void> {
+  inviteLinkError.value = ''
+  try {
+    const response = await inviteLinksApi.list(props.conversation.conversationId)
+    inviteLinks.value = response.links
+  } catch (error) {
+    inviteLinkError.value = friendlyError(error)
+  }
+}
+
+/** 生成邀请链接后立即复制分享地址。 */
+async function createInviteLink(): Promise<void> {
+  if (inviteLinkBusy.value) return
+  inviteLinkBusy.value = true
+  inviteLinkError.value = ''
+  try {
+    const link = await inviteLinksApi.create(props.conversation.conversationId)
+    inviteLinks.value = [link, ...inviteLinks.value]
+    await copyInviteLink(link.token)
+  } catch (error) {
+    inviteLinkError.value = friendlyError(error)
+  } finally {
+    inviteLinkBusy.value = false
+  }
+}
+
+/** 复制分享地址：用服务端 origin 拼绝对地址，桌面/APK 的 file:// 页面同样指向服务端。 */
+async function copyInviteLink(token: string): Promise<void> {
+  const url = `${resolveServerOrigin()}/join/${token}`
+  try {
+    await navigator.clipboard.writeText(url)
+    showToast('邀请链接已复制', 'success')
+  } catch {
+    // 非安全上下文（纯 HTTP）没有 Clipboard API：把地址显示出来供手动复制。
+    inviteLinkError.value = `复制失败，请手动复制：${url}`
+  }
+}
+
+async function revokeInviteLink(link: GroupInviteLink): Promise<void> {
+  if (inviteLinkBusy.value) return
+  inviteLinkBusy.value = true
+  inviteLinkError.value = ''
+  try {
+    await inviteLinksApi.revoke(props.conversation.conversationId, link.token)
+    inviteLinks.value = inviteLinks.value.filter((item) => item.token !== link.token)
+    showToast('已撤销邀请链接', 'success')
+  } catch (error) {
+    inviteLinkError.value = friendlyError(error)
+  } finally {
+    inviteLinkBusy.value = false
+  }
+}
+
+function inviteLinkExpiryText(expiresAt: number): string {
+  return `${new Date(expiresAt).toLocaleDateString()} 到期`
 }
 
 /** 移除成员：打开自绘确认弹窗，真正执行在 confirmDialog()。 */
@@ -654,6 +720,34 @@ async function removeAvatar(): Promise<void> {
       </template>
     </section>
 
+    <section class="group-panel__section">
+      <div class="group-panel__section-head">
+        <h3 class="group-panel__section-title">邀请链接</h3>
+        <button type="button" class="group-panel__toggle" :disabled="inviteLinkBusy" @click="createInviteLink">
+          {{ inviteLinkBusy ? '生成中…' : '生成链接' }}
+        </button>
+      </div>
+      <p class="group-panel__hint">链接 7 天内有效，对方打开后确认加入。</p>
+      <p v-if="inviteLinkError" class="group-panel__error" role="alert">{{ inviteLinkError }}</p>
+      <p v-else-if="inviteLinks.length === 0" class="group-panel__hint">暂无可用链接。</p>
+      <ul v-else class="group-panel__invite-links">
+        <li v-for="link in inviteLinks" :key="link.token" class="group-panel__invite-link">
+          <span>{{ inviteLinkExpiryText(link.expiresAt) }}</span>
+          <span class="group-panel__invite-link-actions">
+            <button type="button" class="group-panel__toggle" @click="copyInviteLink(link.token)">复制</button>
+            <button
+              type="button"
+              class="group-panel__toggle"
+              :disabled="inviteLinkBusy"
+              @click="revokeInviteLink(link)"
+            >
+              撤销
+            </button>
+          </span>
+        </li>
+      </ul>
+    </section>
+
     <section v-if="!isOwner" class="group-panel__section group-panel__leave">
       <button type="button" class="group-panel__danger" :disabled="busy" @click="askLeaveGroup">
         退出群聊
@@ -1002,6 +1096,35 @@ async function removeAvatar(): Promise<void> {
   margin: 0;
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-secondary);
+}
+
+/* C1c：群邀请链接列表（生成/复制/撤销）。 */
+.group-panel__invite-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ec-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-panel__invite-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ec-space-2);
+  padding: var(--ec-space-2) var(--ec-space-3);
+  border: 1px solid var(--ec-border);
+  border-radius: var(--ec-radius-md);
+  background: var(--ec-bg-canvas);
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-secondary);
+}
+
+.group-panel__invite-link-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--ec-space-1);
 }
 
 .group-panel__leave {

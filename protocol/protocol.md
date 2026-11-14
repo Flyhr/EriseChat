@@ -571,6 +571,7 @@ batch 对象：
 | `INVITE_REQUIRED` | 当前注册需要邀请码 |
 | `INVITE_INVALID` | 邀请码无效或已被使用 |
 | `INVITE_EXPIRED` | 邀请码已过期 |
+| `INVITE_REVOKED` | 群邀请链接已撤销（C1c） |
 | `PASSWORD_INVALID` | 密码错误 |
 | `ACCOUNT_LOCKED` | 登录失败次数过多，临时锁定 |
 | `ACCOUNT_DISABLED` | 账号已被禁用 |
@@ -716,6 +717,16 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 服务端拦截点：好友申请发送、拉黑后接受此前落库的旧申请、新建单聊、建群直接选人、后续邀请成员均返回 `BLOCKED`（403）；单聊的 `message.send` 与转发到单聊的 `POST /api/messages/forward` 同样返回 `BLOCKED`。已落库消息的重试（`clientMsgId` 幂等命中）仍返回原回执，不受拉黑影响。
     - 拉黑/解除不推送 WS 帧；客户端在打开资料卡、设置页时重新拉取，同账号多端各自刷新。
 
+16. **群邀请链接（REST，v1，C1c）**：可撤销的群聊邀请链接，只处理「加入群聊」；「加入服务」与「添加好友」的邀请在各自规则确定后单独实现。令牌为 32 字节随机串（base64url、无填充、不含邮箱），服务端日志不记录令牌；链接默认 7 天有效。
+
+    - `POST /api/conversations/{conversationId}/invite-links`：创建链接（须为群成员；`App:GroupOnlyOwnerCanInvite=true` 时仅群主），成功返回 `{ "token", "conversationId", "expiresAt", "revokedAt", "createdAt" }`。
+    - `GET /api/conversations/{conversationId}/invite-links`：列出该群未撤销的链接（按创建时间倒序），响应 `{ "links": [ ... ] }`；权限同创建。
+    - `DELETE /api/conversations/{conversationId}/invite-links/{token}`：撤销链接，成功返回 `204`；群主可撤销任意链接、创建者可撤销自己的；重复撤销幂等。
+    - `GET /api/invite-links/{token}`：登录后打开链接的预览，返回 `{ "conversationId", "title", "memberCount", "maxMembers", "creatorDisplayName", "expiresAt", "expired", "revoked", "alreadyMember" }`；令牌不存在返回 `INVITE_INVALID`（404）。
+    - `POST /api/invite-links/{token}/join`：兑换加入群聊，成功返回该用户视角的 Conversation；已是成员时幂等返回，不重复写入、不重复广播。
+    - 兑换校验：令牌不存在或对应群不存在 → `INVITE_INVALID`（404）；已撤销 → `INVITE_REVOKED`（410）；已过期 → `INVITE_EXPIRED`（410）；发起人已不在群、或 `GroupOnlyOwnerCanInvite` 下发起人已非群主 → `INVITE_INVALID`（403）；兑换者与发起人存在拉黑关系 → `BLOCKED`（403）；群成员数已达 `App:GroupMaxMembers` → `VALIDATION_FAILED`（400）。成员插入与系统消息在同一事务内完成，事务内重读成员数，重复/并发兑换不产生重复成员行。
+    - 加入成功后写系统消息 `member.joined`（text 为「{昵称} 通过邀请链接加入群聊」），并按既有 `message.new` + `conv.updated` 推送；不新增帧类型。链接过期不自动续期。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -798,3 +809,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（更新分发扩展） | 2026-11-12 | `/download/files/{fileName}` 额外放行固定名 `latest.yml` 与 `EriseChat-Setup-x.y.z.exe.blockmap`，单段文件名与路径穿越校验不变，安装包与 blockmap 保留 Range；`latest.yml` 返回 `Cache-Control: no-store`；`release.json` 不对外提供；`/api/version` 与原有 exe/APK 下载契约不变 |
 | v1（C1a 用户搜索隐私） | 2026-11-14 | `GET /api/users?search=` 不再返回他人邮箱（`email` 字段省略；仅 `/api/me` 与 `PATCH /api/me/profile` 下发本人邮箱）；搜索只按昵称模糊匹配，邮箱改为「整串是完整合法邮箱时精确匹配」，取消邮箱子串检索以避免枚举他人账号；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C1b 拉黑与私聊权限） | 2026-11-14 | 新增 `blocks` 表（有方向单向行：`blocker_user_id` → `blocked_user_id`，复合主键 + `idx_blocks_blocked`，`protocol/schema.sql` 与 EF 迁移同步）与 REST `GET /api/blocks`、`PUT/DELETE /api/blocks/{userId}`（均幂等）；新增错误码 `BLOCKED`（403）：任一方拉黑期间，好友申请、拉黑后接受旧申请、新建单聊、建群选人、邀请成员、单聊发送、转发到单聊均拒绝，已落库消息的幂等重试不受影响；拉黑不改变好友关系，共同群消息与历史读取照常；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
+| v1（C1c 群邀请链接） | 2026-11-14 | 新增 `group_invite_links` 表（`token` 主键、`conversation_id`、`created_by`、`expires_at`、`revoked_at`、`created_at`、`idx_group_invite_links_conversation`，`protocol/schema.sql` 与 EF 迁移同步）与 5 个 REST 接口（创建/列出/撤销、预览、兑换加入）；新增错误码 `INVITE_REVOKED`（410）；令牌为 32 字节 base64url 随机串、不含邮箱、日志不记录，默认 7 天有效；兑换时校验撤销/有效期/发起人当前权限/拉黑关系/群容量，成员插入与系统消息同事务且重复/并发兑换幂等；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |

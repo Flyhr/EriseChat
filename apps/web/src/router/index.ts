@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory, createWebHistory } from 'vue-router'
 import { chatWs } from '../core/ws'
 import { isConversationIdLike } from '../core/desktop'
+import { isInviteTokenLike } from '../core/inviteToken'
 import { useAuthStore } from '../stores/auth'
 
 // 路由表（docs/project-overview.md §7.2）；页面组件懒加载，减小首屏体积。
@@ -17,6 +18,8 @@ const router = createRouter({
     { path: '/contacts', name: 'contacts', component: () => import('../pages/Contacts.vue') },
     { path: '/favorites', name: 'favorites', component: () => import('../pages/Favorites.vue') },
     { path: '/settings', name: 'settings', component: () => import('../pages/Settings.vue') },
+    // 群邀请链接落地页（C1c）：blank 布局，登录后确认加入；未登录时守卫把令牌带进登录页。
+    { path: '/join/:token', name: 'join', component: () => import('../pages/JoinGroup.vue'), meta: { layout: 'blank' } },
     { path: '/admin', name: 'admin', component: () => import('../pages/Admin.vue') },
     { path: '/download', name: 'download', component: () => import('../pages/Download.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/chat' },
@@ -41,7 +44,11 @@ router.beforeEach((to) => {
     // 会话访问权仍由服务端在加载会话时校验，前端不预判权限。
     const conversationId = to.name === 'chat' ? to.params.conversationId : undefined
     const target = isConversationIdLike(conversationId) ? conversationId : null
-    return { name: 'login', query: target ? { conversationId: target } : {} }
+    // 群邀请链接同理：只带格式合法的令牌，登录成功后回到落地页由用户确认加入。
+    const joinToken = to.name === 'join' ? to.params.token : undefined
+    const inviteToken = isInviteTokenLike(joinToken) ? joinToken : null
+    const query = target ? { conversationId: target } : inviteToken ? { join: inviteToken } : {}
+    return { name: 'login', query }
   }
   if (auth.isLoggedIn && to.name === 'login') {
     return { name: 'chat' }

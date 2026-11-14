@@ -40,6 +40,8 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<Block> Blocks => Set<Block>();
 
+    public DbSet<GroupInviteLink> GroupInviteLinks => Set<GroupInviteLink>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -58,6 +60,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureFriendRequests(modelBuilder);
         ConfigureFavorites(modelBuilder);
         ConfigureBlocks(modelBuilder);
+        ConfigureGroupInviteLinks(modelBuilder);
     }
 
     /// <summary>枚举 ↔ TEXT 小写转换（与 schema.sql 的 CHECK 值域一致）。</summary>
@@ -304,6 +307,28 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .OnDelete(DeleteBehavior.ClientNoAction);
             entity.HasOne<User>().WithMany().HasForeignKey(invite => invite.UsedBy)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+    }
+
+    private static void ConfigureGroupInviteLinks(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<GroupInviteLink>(entity =>
+        {
+            entity.ToTable("group_invite_links");
+
+            entity.HasKey(link => link.Token);
+            entity.Property(link => link.Token).HasColumnName("token");
+            entity.Property(link => link.ConversationId).HasColumnName("conversation_id").IsRequired();
+            entity.Property(link => link.CreatedBy).HasColumnName("created_by").IsRequired();
+            entity.Property(link => link.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(link => link.RevokedAt).HasColumnName("revoked_at");
+            entity.Property(link => link.CreatedAt).HasColumnName("created_at");
+            entity.HasIndex(link => link.ConversationId).HasDatabaseName("idx_group_invite_links_conversation");
+
+            entity.HasOne<Conversation>().WithMany().HasForeignKey(link => link.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany().HasForeignKey(link => link.CreatedBy)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 
