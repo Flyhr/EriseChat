@@ -9,7 +9,7 @@ import {
   voiceProgressRatio,
   voiceSeekTimeText,
 } from '../core/voice'
-import { claimVoicePlayback, releaseVoicePlayback } from '../core/voicePlayer'
+import { claimVoicePlayback, clearVoicePosition, recallVoicePosition, releaseVoicePlayback, rememberVoicePosition } from '../core/voicePlayer'
 
 // F-28：语音消息播放器（播放/暂停 + 进度条拖拽定位）。
 // 点击播放时才下载（走 filesApi.downloadBlob + blobCache），不在历史渲染时预取；
@@ -21,6 +21,11 @@ const props = defineProps<{
 }>()
 
 type PlayerState = 'idle' | 'loading' | 'playing' | 'error'
+
+/** C2b：播放速度档位，按 1× → 1.5× → 2× 循环切换，播放中立即生效。 */
+const RATES = [1, 1.5, 2] as const
+const rate = ref<number>(1)
+const rateLabel = computed(() => `${rate.value}×`)
 
 const state = ref<PlayerState>('idle')
 /** 当前播放位置（毫秒）。 */
@@ -46,8 +51,16 @@ const timeText = computed(() => {
 const actionLabel = computed(() => (state.value === 'playing' ? '暂停语音' : '播放语音'))
 const trackDisabled = computed(() => state.value === 'loading' || state.value === 'error')
 
+/** 记住当前播放位置，供切换会话/暂停后继续（播完、出错时不记）。 */
+function rememberPosition(): void {
+  if (!audio) return
+  const currentMs = Math.round(audio.currentTime * 1000)
+  if (currentMs > 0 && currentMs < totalMs.value) rememberVoicePosition(props.fileId, currentMs)
+}
+
 /** 停止并复位（播放结束、被其它语音抢占或组件卸载时调用）。 */
 function stopPlayback(): void {
+  if (state.value === 'playing') rememberPosition()
   if (audio) {
     audio.pause()
     audio.currentTime = 0
@@ -64,6 +77,7 @@ function onEnded(): void {
   seekMs.value = null
   pendingSeekMs = 0
   state.value = 'idle'
+  clearVoicePosition(props.fileId)
   releaseVoicePlayback(stopPlayback)
 }
 
@@ -77,6 +91,7 @@ function onError(): void {
   state.value = 'error'
   progressMs.value = 0
   seekMs.value = null
+  clearVoicePosition(props.fileId)
   releaseVoicePlayback(stopPlayback)
 }
 
@@ -163,6 +178,7 @@ function el(event: Event): HTMLElement {
 async function togglePlayback(): Promise<void> {
   if (state.value === 'loading' || state.value === 'error') return
   if (state.value === 'playing') {
+    rememberPosition()
     audio?.pause()
     state.value = 'idle'
     releaseVoicePlayback(stopPlayback)
@@ -174,6 +190,7 @@ async function togglePlayback(): Promise<void> {
       const url = await getOrLoadBlobUrl(props.fileId, () => filesApi.downloadBlob(props.fileId))
       if (disposed) return
       audio = new Audio(url)
+      audio.playbackRate = rate.value
       audio.addEventListener('ended', onEnded)
       audio.addEventListener('timeupdate', onTimeUpdate)
       audio.addEventListener('error', onError)
@@ -185,6 +202,13 @@ async function togglePlayback(): Promise<void> {
       return
     }
   }
+  // C2b：从当前登录期间记录的位置继续（播完已清除，不会把进度按旧值恢复）。
+  const savedMs = recallVoicePosition(props.fileId)
+  if (savedMs > 0 && savedMs < totalMs.value) {
+    pendingSeekMs = savedMs
+    audio.currentTime = savedMs / 1000
+    progressMs.value = savedMs
+  }
   claimVoicePlayback(stopPlayback)
   try {
     await audio.play()
@@ -193,6 +217,14 @@ async function togglePlayback(): Promise<void> {
     if (!disposed) state.value = 'error'
     releaseVoicePlayback(stopPlayback)
   }
+}
+
+/** 循环切换播放速度：1× → 1.5× → 2×，播放中立即生效。 */
+function cycleRate(): void {
+  const index = RATES.indexOf(rate.value as (typeof RATES)[number])
+  const next = RATES[(index + 1) % RATES.length]
+  rate.value = next
+  if (audio) audio.playbackRate = next
 }
 
 onBeforeUnmount(() => {
@@ -240,6 +272,15 @@ onBeforeUnmount(() => {
         <span class="voice-player__fill" :style="{ width: `${Math.round(ratio * 100)}%` }" />
       </span>
     </span>
+    <button
+      class="voice-player__rate"
+      type="button"
+      :aria-label="`播放速度 ${rate} 倍，点击切换`"
+      :title="`当前播放速度 ${rateLabel}`"
+      @click="cycleRate"
+    >
+      {{ rateLabel }}
+    </button>
     <span class="voice-player__time">{{ timeText }}</span>
   </div>
 </template>
@@ -339,6 +380,29 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* C2b：倍速按钮，与时间并排；保持 1× 起，点击循环到 1.5×/2×。 */
+.voice-player__rate {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid var(--ec-media-border);
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.voice-player__rate:hover {
+  color: var(--ec-text-primary);
+}
+
+.voice-player__rate:focus-visible {
+  outline: var(--ec-focus-width) solid var(--ec-focus-ring);
+  outline-offset: var(--ec-focus-offset);
+}
+
 .voice-player--error {
   background: var(--ec-media-surface);
   color: var(--ec-danger);
@@ -366,6 +430,11 @@ onBeforeUnmount(() => {
 }
 
 :global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__time {
+  color: var(--ec-text-inverse);
+}
+
+:global(.message-bubble--self:not(.message-bubble--plain)) .voice-player__rate {
+  border-color: rgb(255 255 255 / 45%);
   color: var(--ec-text-inverse);
 }
 

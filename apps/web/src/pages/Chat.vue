@@ -42,6 +42,7 @@ import { shouldAdvanceRead } from '../core/readReceipt'
 import { showToast } from '../core/toast'
 import { TypingThrottle } from '../core/typingThrottle'
 import type { ReplyPreviewLike } from '../core/replyPreview'
+import { stopActiveVoicePlayback } from '../core/voicePlayer'
 import { chatWs, type WsState } from '../core/ws'
 import { useAuthStore } from '../stores/auth'
 import { useConversationsStore } from '../stores/conversations'
@@ -1799,8 +1800,10 @@ function sendPendingImages(): void {
 }
 
 // 切换会话时放弃未确认的多图预览，避免把图片误发到另一个会话；已入队批次仍归属原会话。
+// 同时暂停语音播放（C2b），播放位置由语音播放器记在当前登录期间，返回该会话后可继续。
 watch(activeId, () => {
   if (pendingImages.value.length > 0) clearPendingImages()
+  stopActiveVoicePlayback()
 })
 
 /** 选择文件：图片先进入多图预览（C2a），非图片沿用原 F-35 即入队链路。 */

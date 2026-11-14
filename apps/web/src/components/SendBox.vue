@@ -117,6 +117,68 @@ const voiceSupported = computed(
 let recordingTimer: number | null = null
 let recordingStartedAt = 0
 
+// C2b：录音结束后先进试听，用户确认「发送」才交给父组件；取消/重录不入队。
+interface VoicePreview {
+  blob: Blob
+  durationMs: number
+  url: string
+  autoStopped: boolean
+}
+const voicePreview = ref<VoicePreview | null>(null)
+const previewPlaying = ref(false)
+let previewAudio: HTMLAudioElement | null = null
+const previewActive = computed(() => voicePreview.value !== null)
+
+/** 释放试听音频与对象 URL（取消、重录、发送、切换会话或卸载时调用）。 */
+function clearVoicePreview(): void {
+  if (previewAudio) {
+    previewAudio.pause()
+    previewAudio = null
+  }
+  previewPlaying.value = false
+  if (voicePreview.value) URL.revokeObjectURL(voicePreview.value.url)
+  voicePreview.value = null
+}
+
+async function togglePreviewPlayback(): Promise<void> {
+  const preview = voicePreview.value
+  if (!preview) return
+  if (!previewAudio) {
+    previewAudio = new Audio(preview.url)
+    previewAudio.addEventListener('ended', () => {
+      previewPlaying.value = false
+      if (previewAudio) previewAudio.currentTime = 0
+    })
+  }
+  if (previewPlaying.value) {
+    previewAudio.pause()
+    previewPlaying.value = false
+    return
+  }
+  try {
+    await previewAudio.play()
+    previewPlaying.value = true
+  } catch {
+    emit('voice-error', '试听失败，请重试')
+  }
+}
+
+/** 确认发送：把录音交给父组件上传并以 voice 消息发送。 */
+function sendVoicePreview(): void {
+  const preview = voicePreview.value
+  if (!preview || props.uploading) return
+  const payload = { blob: preview.blob, durationMs: preview.durationMs }
+  clearVoicePreview()
+  emit('send-voice', payload)
+}
+
+/** 重录：丢弃本次录音并重新开始。 */
+function recordAgain(): void {
+  if (props.uploading) return
+  clearVoicePreview()
+  void startRecording()
+}
+
 function clearRecordingTimer(): void {
   if (recordingTimer !== null) {
     window.clearInterval(recordingTimer)
@@ -130,9 +192,20 @@ function onRecordingKeydown(event: KeyboardEvent): void {
   cancelRecording()
 }
 
+function onPreviewKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  clearVoicePreview()
+}
+
 watch(recordingActive, (active) => {
   if (active) document.addEventListener('keydown', onRecordingKeydown, true)
   else document.removeEventListener('keydown', onRecordingKeydown, true)
+})
+
+watch(previewActive, (active) => {
+  if (active) document.addEventListener('keydown', onPreviewKeydown, true)
+  else document.removeEventListener('keydown', onPreviewKeydown, true)
 })
 
 async function startRecording(): Promise<void> {
@@ -165,12 +238,18 @@ async function finishRecording(autoStop = false): Promise<void> {
   try {
     const result = await handle.stop()
     recording.value = null
-    if (autoStop) emit('voice-error', '录音已达 60 秒，已自动结束')
     if (result.durationMs < 1_000 || result.blob.size === 0) {
       emit('voice-error', '录音时间太短（至少 1 秒）')
       return
     }
-    emit('send-voice', { blob: result.blob, durationMs: Math.min(result.durationMs, 60_000) })
+    // C2b：停止后先进入试听，发送由用户确认；达到 60 秒上限时同样只进入试听。
+    clearVoicePreview()
+    voicePreview.value = {
+      blob: result.blob,
+      durationMs: Math.min(result.durationMs, 60_000),
+      url: URL.createObjectURL(result.blob),
+      autoStopped: autoStop || handle.autoStopped,
+    }
   } catch {
     recording.value = null
     emit('voice-error', '录音结束失败，请重试')
@@ -374,6 +453,7 @@ onBeforeUnmount(() => {
   if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
   resizeFrame = 0
   clearRecordingTimer()
+  clearVoicePreview()
   const handle = recording.value
   recording.value = null
   handle?.cancel()
@@ -385,6 +465,7 @@ watch(
   () => {
     closeMention()
     cancelRecording()
+    clearVoicePreview()
   },
 )
 watch(
@@ -643,6 +724,37 @@ function onInput(): void {
           :disabled="recordingStopping"
           @click="finishRecording(false)"
         >
+          发送
+        </button>
+      </div>
+      <!-- C2b：录音结束后先试听，确认后才发送；Esc 取消。 -->
+      <div v-else-if="voicePreview" class="send-box__voice-preview" role="status" aria-live="polite">
+        <button
+          class="send-box__icon"
+          type="button"
+          :title="previewPlaying ? '暂停试听' : '播放试听'"
+          :aria-label="previewPlaying ? '暂停试听' : '播放试听'"
+          @click="togglePreviewPlayback"
+        >
+          <AppIcon :name="previewPlaying ? 'pause' : 'play'" :size="18" />
+        </button>
+        <span class="send-box__recording-time">{{ formatDuration(voicePreview.durationMs) }}</span>
+        <span class="send-box__recording-hint">
+          {{ voicePreview.autoStopped ? '已达 60 秒上限' : '试听确认后发送' }}
+        </span>
+        <span class="send-box__spacer" />
+        <button class="send-box__text-btn" type="button" :disabled="uploading" @click="recordAgain">重录</button>
+        <button
+          class="send-box__icon"
+          type="button"
+          title="取消语音"
+          aria-label="取消语音"
+          :disabled="uploading"
+          @click="clearVoicePreview"
+        >
+          <AppIcon name="close" :size="18" />
+        </button>
+        <button class="send-box__send" type="button" :disabled="uploading" @click="sendVoicePreview">
           发送
         </button>
       </div>
@@ -1104,6 +1216,36 @@ function onInput(): void {
   color: var(--ec-text-tertiary);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* C2b：录音试听条与录音条同高，播放/重录/取消/发送一行排布。 */
+.send-box__voice-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--ec-space-2);
+  min-height: 64px;
+  padding: 0 var(--ec-space-2);
+}
+
+/* 纯文字次级操作（重录）：与图标按钮同一触达高度，但不抢发送按钮。 */
+.send-box__text-btn {
+  flex: none;
+  padding: 0 var(--ec-space-1);
+  border: none;
+  border-radius: var(--ec-radius-sm);
+  background: transparent;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  cursor: pointer;
+}
+
+.send-box__text-btn:hover {
+  color: var(--ec-text-primary);
+}
+
+.send-box__text-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 @keyframes send-box-recording-blink {

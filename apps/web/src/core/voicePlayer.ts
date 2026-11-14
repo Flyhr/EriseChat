@@ -23,3 +23,26 @@ export function stopActiveVoicePlayback(): void {
     stop()
   }
 }
+
+// C2b：登录期间记录每条语音的最近播放位置（以 fileId 为键，仅内存、不落盘）。
+// 切换会话或暂停时写入，重新进入该会话后点击播放从记录位置继续；播放结束即清除。
+const voicePositions = new Map<string, number>()
+
+/** 记住播放位置（毫秒）；非正数视为已回到起点，直接清除记录。 */
+export function rememberVoicePosition(fileId: string, positionMs: number): void {
+  if (!fileId || !Number.isFinite(positionMs) || positionMs <= 0) {
+    voicePositions.delete(fileId)
+    return
+  }
+  voicePositions.set(fileId, Math.round(positionMs))
+}
+
+/** 读取播放位置（毫秒）；没有记录返回 0。 */
+export function recallVoicePosition(fileId: string): number {
+  return voicePositions.get(fileId) ?? 0
+}
+
+/** 清除播放位置（播完、出错或拖动回起点时调用）。 */
+export function clearVoicePosition(fileId: string): void {
+  voicePositions.delete(fileId)
+}
