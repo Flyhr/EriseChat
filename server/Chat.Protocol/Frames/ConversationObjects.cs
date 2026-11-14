@@ -1,16 +1,18 @@
+using System.Text.Json.Serialization;
+
 namespace Chat.Protocol.Frames;
 
 /// <summary>会话成员对象（protocol/protocol.md §4.5）。</summary>
 /// <param name="UserId">用户 ID。</param>
 /// <param name="DisplayName">昵称。</param>
-/// <param name="Email">邮箱（内部版可直接下发）。</param>
+/// <param name="Email">邮箱：会话成员投影恒为 null 并从 JSON 省略（C1 隐私收敛，陌生人可凭 userId 直接建单聊）；本人邮箱走 /api/me。</param>
 /// <param name="Role">会话内角色。</param>
 /// <param name="JoinedAt">加入时间（UTC 毫秒）。</param>
 /// <param name="AvatarFileId">头像文件 ID（可选）。</param>
 public sealed record ConversationMember(
     string UserId,
     string DisplayName,
-    string Email,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Email,
     MemberRole Role,
     long JoinedAt,
     string? AvatarFileId = null);

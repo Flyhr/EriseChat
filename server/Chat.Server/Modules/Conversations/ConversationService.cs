@@ -1047,7 +1047,6 @@ public sealed class ConversationService
                     member.ConversationId,
                     member.UserId,
                     user.DisplayName,
-                    user.Email,
                     member.Role,
                     member.JoinedAt,
                     user.AvatarFileId,
@@ -1121,12 +1120,13 @@ public sealed class ConversationService
         var result = new List<Conversation>(conversations.Count);
         foreach (var conversation in conversations)
         {
+            // C1 隐私收敛：会话成员投影不再下发邮箱（陌生人可凭搜索结果里的 userId 直接建单聊）。
             var members = memberRows
                 .Where(row => string.Equals(row.ConversationId, conversation.Id, StringComparison.Ordinal))
                 .Select(row => new ConversationMember(
                     row.UserId,
                     row.DisplayName,
-                    row.Email,
+                    Email: null,
                     row.Role,
                     row.JoinedAt,
                     row.AvatarFileId))

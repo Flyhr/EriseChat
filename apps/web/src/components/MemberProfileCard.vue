@@ -68,7 +68,7 @@ let previousFocus: HTMLElement | null = null
 
 const presenceText = computed(() => presenceLabelOf(props.presence))
 const roleLabel = computed(() => (props.member?.role === 'owner' ? '群主' : '成员'))
-const emailText = computed(() => props.member?.email?.trim() || '—')
+const emailText = computed(() => props.member?.email?.trim() ?? '')
 const joinedText = computed(() => {
   const formatted = formatSessionTime(props.member?.joinedAt ?? 0)
   return formatted === '—' ? '—' : formatted.slice(0, 10)
@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
       </header>
 
       <dl class="member-card__meta">
-        <div class="member-card__row">
+        <div v-if="emailText" class="member-card__row">
           <dt>邮箱</dt>
           <dd>{{ emailText }}</dd>
         </div>

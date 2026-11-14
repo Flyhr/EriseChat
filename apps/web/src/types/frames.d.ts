@@ -137,7 +137,8 @@ export interface Message {
 export interface ConversationMember {
   userId: string
   displayName: string
-  email: string
+  /** 邮箱：会话成员投影已不下发（字段省略），仅本人账户接口保留。 */
+  email?: string
   role: MemberRole
   joinedAt: number
   avatarFileId?: string

@@ -371,7 +371,7 @@ batch 对象：
 |---|---|---|---|
 | `userId` | string | 是 | 用户 ID |
 | `displayName` | string | 是 | 昵称 |
-| `email` | string | 是 | 邮箱（内部版可直接下发） |
+| `email` | string | 否 | 邮箱：会话成员投影不下发（C1 隐私收敛，字段省略）；本人邮箱由 `/api/me` 提供 |
 | `role` | string | 是 | `owner` / `member` |
 | `joinedAt` | integer | 是 | 加入时间（UTC 毫秒） |
 | `avatarFileId` | string | 否 | 头像文件 ID |
@@ -810,3 +810,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C1a 用户搜索隐私） | 2026-11-14 | `GET /api/users?search=` 不再返回他人邮箱（`email` 字段省略；仅 `/api/me` 与 `PATCH /api/me/profile` 下发本人邮箱）；搜索只按昵称模糊匹配，邮箱改为「整串是完整合法邮箱时精确匹配」，取消邮箱子串检索以避免枚举他人账号；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C1b 拉黑与私聊权限） | 2026-11-14 | 新增 `blocks` 表（有方向单向行：`blocker_user_id` → `blocked_user_id`，复合主键 + `idx_blocks_blocked`，`protocol/schema.sql` 与 EF 迁移同步）与 REST `GET /api/blocks`、`PUT/DELETE /api/blocks/{userId}`（均幂等）；新增错误码 `BLOCKED`（403）：任一方拉黑期间，好友申请、拉黑后接受旧申请、新建单聊、建群选人、邀请成员、单聊发送、转发到单聊均拒绝，已落库消息的幂等重试不受影响；拉黑不改变好友关系，共同群消息与历史读取照常；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
 | v1（C1c 群邀请链接） | 2026-11-14 | 新增 `group_invite_links` 表（`token` 主键、`conversation_id`、`created_by`、`expires_at`、`revoked_at`、`created_at`、`idx_group_invite_links_conversation`，`protocol/schema.sql` 与 EF 迁移同步）与 5 个 REST 接口（创建/列出/撤销、预览、兑换加入）；新增错误码 `INVITE_REVOKED`（410）；令牌为 32 字节 base64url 随机串、不含邮箱、日志不记录，默认 7 天有效；兑换时校验撤销/有效期/发起人当前权限/拉黑关系/群容量，成员插入与系统消息同事务且重复/并发兑换幂等；无新帧（`type` 仍 23 个）、`protocolVersion` 仍为 1 |
+| v1（C1 会话成员邮箱收敛） | 2026-11-14 | 会话对象 `members[]` 的 `email` 字段不再下发（字段省略）：`GET/POST /api/conversations`、成员变更响应、WS `conv.list`/`conv.updated` 使用同一投影，均受影响；好友对象 `Friend.email` 与本人 `/api/me` 不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
