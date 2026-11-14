@@ -137,6 +137,20 @@ export interface Message {
   deletedAt?: number
   /** F-18：编辑时间（UTC 毫秒）；非空表示编辑过。 */
   editedAt?: number
+  /**
+   * C3：表情回应摘要（按当前账号计算 mine）；无回应或已撤回消息缺省。
+   * 最后一个回应被移除时服务端返回空数组，客户端据此清空旧摘要。
+   */
+  reactions?: ReactionSummary[]
+}
+
+/** C3 表情回应摘要（protocol.md §4.3） */
+export interface ReactionSummary {
+  /** 稳定表情标识（服务端白名单，如 thumbs_up / heart） */
+  emoji: string
+  count: number
+  /** 当前账号是否选择了该表情 */
+  mine: boolean
 }
 
 /** 会话成员（protocol.md §4.5） */
@@ -270,6 +284,15 @@ export interface MessageEditedFrame extends FrameBase {
   content: string
   editedAt: number
   operatorId: string
+}
+
+/** C3：回应变化广播（摘要共享、mine 按接收账号计算；空数组表示已无回应）。 */
+export interface MessageReactionsFrame extends FrameBase {
+  type: 'message.reactions'
+  conversationId: string
+  messageId: string
+  seq: number
+  reactions: ReactionSummary[]
 }
 
 export interface SyncCursor {
@@ -453,6 +476,7 @@ export type ServerFrame =
   | MessageNewFrame
   | MessageRecalledFrame
   | MessageEditedFrame
+  | MessageReactionsFrame
   | SyncResponseFrame
   | ConvListResponseFrame
   | ConvUpdatedFrame

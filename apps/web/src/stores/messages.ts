@@ -6,10 +6,12 @@ import type {
   MessageAckFrame,
   MessageEditFrame,
   MessageEditedFrame,
+  MessageReactionsFrame,
   MessageRecallFrame,
   MessageRecalledFrame,
   MessageSendFrame,
   MessageSendType,
+  ReactionSummary,
   ServerFrame,
   SyncRequestFrame,
   SyncResponseFrame,
@@ -182,7 +184,8 @@ export const useMessagesStore = defineStore('messages', () => {
       if (
         fresh.deletedAt === message.deletedAt &&
         fresh.editedAt === message.editedAt &&
-        fresh.content === message.content
+        fresh.content === message.content &&
+        isSameReactions(fresh.reactions, message.reactions)
       ) {
         return message
       }
@@ -191,6 +194,10 @@ export const useMessagesStore = defineStore('messages', () => {
       else updated.deletedAt = fresh.deletedAt
       if (fresh.editedAt === undefined) delete updated.editedAt
       else updated.editedAt = fresh.editedAt
+      const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
+      if (fresh.reactions === undefined) delete updated.reactions
+      else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
+      if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
       changed.push(updated)
       return updated
     })
@@ -211,7 +218,7 @@ export const useMessagesStore = defineStore('messages', () => {
   function patchStoredMessage(
     conversationId: string,
     messageId: string,
-    patch: Partial<Pick<Message, 'content' | 'deletedAt' | 'editedAt'>>,
+    patch: Partial<Pick<Message, 'content' | 'deletedAt' | 'editedAt' | 'reactions'>>,
   ): void {
     const list = messagesOf(conversationId)
     const index = list.findIndex((message) => message.messageId === messageId)
@@ -221,6 +228,57 @@ export const useMessagesStore = defineStore('messages', () => {
     next[index] = updated
     byConversation.value = { ...byConversation.value, [conversationId]: next }
     persistMessages([updated])
+  }
+
+  /**
+   * C3：每条消息当前回应摘要的本地版本号。实时帧/补拉/历史刷新都会推进它，
+   * 界面发出 REST 请求后可用 {@link reactionVersionOf} 判断响应是否已过期。
+   */
+  const reactionVersionByMessage = new Map<string, number>()
+
+  function bumpReactionVersion(
+    conversationId: string,
+    messageId: string,
+    reactions: readonly ReactionSummary[] | undefined,
+  ): void {
+    const key = `${conversationId}:${messageId}`
+    reactionVersionByMessage.set(key, (reactionVersionByMessage.get(key) ?? 0) + 1)
+    // F-37：定位窗口等临时视图靠原始帧补丁更新，不能依赖消息是否已在缓存中。
+    lastMessagePatch.value = {
+      conversationId,
+      messageId,
+      patch: { reactions: reactions === undefined ? undefined : reactions.map((item) => ({ ...item })) },
+    }
+  }
+
+  /** C3：当前消息回应摘要的版本号（0 表示本端还没收到过服务端摘要）。 */
+  function reactionVersionOf(conversationId: string, messageId: string): number {
+    return reactionVersionByMessage.get(`${conversationId}:${messageId}`) ?? 0
+  }
+
+  /** C3：应用服务端权威回应摘要（实时帧/补拉/历史刷新），并推进本地版本号。 */
+  function applyReactionSummary(
+    conversationId: string,
+    messageId: string,
+    reactions: readonly ReactionSummary[],
+  ): void {
+    const normalized = reactions.map((item) => ({ ...item }))
+    bumpReactionVersion(conversationId, messageId, normalized)
+    patchStoredMessage(conversationId, messageId, { reactions: normalized })
+  }
+
+  /** C3：回应摘要是否等价（避免无变化时重渲染与落库）。 */
+  function isSameReactions(
+    left: readonly ReactionSummary[] | undefined,
+    right: readonly ReactionSummary[] | undefined,
+  ): boolean {
+    const a = left ?? []
+    const b = right ?? []
+    if (a.length !== b.length) return false
+    return a.every(
+      (item, index) =>
+        item.emoji === b[index].emoji && item.count === b[index].count && item.mine === b[index].mine,
+    )
   }
 
   /** F-37：最近一次实时撤回/编辑帧的补丁（供定位窗口等非缓存视图同步）。 */
@@ -508,7 +566,8 @@ export const useMessagesStore = defineStore('messages', () => {
         if (
           fresh.deletedAt === message.deletedAt &&
           fresh.editedAt === message.editedAt &&
-          isSameContent(fresh.content, message.content)
+          isSameContent(fresh.content, message.content) &&
+          isSameReactions(fresh.reactions, message.reactions)
         ) {
           return message
         }
@@ -518,6 +577,10 @@ export const useMessagesStore = defineStore('messages', () => {
         if (fresh.editedAt === undefined) delete updated.editedAt
         else updated.editedAt = fresh.editedAt
         if (fresh.reply) updated.reply = fresh.reply
+        const reactionsChanged = !isSameReactions(fresh.reactions, message.reactions)
+        if (fresh.reactions === undefined) delete updated.reactions
+        else updated.reactions = fresh.reactions.map((item) => ({ ...item }))
+        if (reactionsChanged) bumpReactionVersion(conversationId, message.messageId, updated.reactions)
         changed.push(updated)
         return updated
       })
@@ -1041,6 +1104,9 @@ export const useMessagesStore = defineStore('messages', () => {
       case 'message.edited':
         handleEdited(frame)
         break
+      case 'message.reactions':
+        applyReactionSummary(frame.conversationId, frame.messageId, frame.reactions)
+        break
       case 'error': {
         const match = /^msg-(.+)$/.exec(frame.reqId ?? '')
         if (!match) break
@@ -1221,6 +1287,8 @@ export const useMessagesStore = defineStore('messages', () => {
     sendRecall,
     sendEdit,
     refreshRecent,
+    applyReactionSummary,
+    reactionVersionOf,
     retrySend,
     removeConversation,
     subscribeRealtime,
