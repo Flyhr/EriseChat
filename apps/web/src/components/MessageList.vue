@@ -292,50 +292,31 @@ function shrinkWindowAtBottom(): void {
   void nextTick(scrollToBottom)
 }
 
-/** 向上扩窗：窗口内还有更早消息时直接在内存中扩大渲染范围，并用锚点保持视口不动。 */
-function expandOlder(): void {
+/** 向滚动方向扩窗，渲染前裁掉另一端，并恢复首条可见消息的位置。 */
+function expandWindow(direction: 'older' | 'newer'): void {
   const element = container.value
-  const range = currentRange()
-  if (!element || range.start <= 0) return
-  const anchor = { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight }
-  windowRange.value = expandOlderRange(range, WINDOW_STEP, totalMessages())
-  void nextTick(() => {
-    const node = container.value
-    if (!node) return
-    node.scrollTop = anchorScrollTop(anchor.scrollTop, anchor.scrollHeight, node.scrollHeight)
-    // 用户此时在顶部：超过上限时从较新一侧收缩，即可见区域不受影响。
-    const next = currentRange()
-    if (next.end - next.start > MAX_RENDERED_MESSAGES) {
-      windowRange.value = { start: next.start, end: next.start + MAX_RENDERED_MESSAGES }
-    }
-    updateStickState()
-  })
-}
+  if (!element) return
 
-/** 向下扩窗：翻阅到窗口底部但尚未到真实底部时，把之后的消息纳入窗口。 */
-function expandNewer(): void {
   const range = currentRange()
-  if (range.end >= totalMessages()) return
-  windowRange.value = clampWindow(
-    { start: range.start, end: range.end + WINDOW_STEP },
-    totalMessages(),
-  )
+  const total = totalMessages()
+  const older = direction === 'older'
+  const expanded = older
+    ? expandOlderRange(range, WINDOW_STEP, total)
+    : clampWindow({ start: range.start, end: range.end + WINDOW_STEP }, total)
+  const next = older
+    ? { start: expanded.start, end: Math.min(expanded.end, expanded.start + MAX_RENDERED_MESSAGES) }
+    : { start: Math.max(expanded.start, expanded.end - MAX_RENDERED_MESSAGES), end: expanded.end }
+  const conversationId = props.conversationId ?? ''
+  const anchor = getVisibleAnchor()
+  const prevTop = element.scrollTop
+  const prevHeight = element.scrollHeight
+  windowRange.value = next
   void nextTick(() => {
-    const node = container.value
-    if (!node) return
-    const next = currentRange()
-    if (next.end - next.start > MAX_RENDERED_MESSAGES) {
-      // 从较旧一侧收缩（在视口上方），按高度差补偿 scrollTop，保持可见内容不动。
-      const prevTop = node.scrollTop
-      const prevHeight = node.scrollHeight
-      windowRange.value = { start: next.end - MAX_RENDERED_MESSAGES, end: next.end }
-      void nextTick(() => {
-        const shrunk = container.value
-        if (!shrunk) return
-        shrunk.scrollTop = Math.max(0, prevTop - (prevHeight - shrunk.scrollHeight))
-        updateStickState()
-      })
-      return
+    if (container.value !== element || (props.conversationId ?? '') !== conversationId) return
+    const restored = anchor && restoreAnchor(anchor, conversationId)
+    // 两端同时变化时，总高度差不能代表锚点上方的变化。
+    if (!restored && older && next.end === range.end) {
+      element.scrollTop = anchorScrollTop(prevTop, prevHeight, element.scrollHeight)
     }
     updateStickState()
   })
@@ -345,7 +326,7 @@ function expandNewer(): void {
 function onLoadMoreClick(): void {
   const range = currentRange()
   if (range.start > 0) {
-    expandOlder()
+    expandWindow('older')
     return
   }
   const element = container.value
@@ -375,7 +356,7 @@ function onScroll(): void {
 
   if (atTop) {
     if (range.start > 0) {
-      expandOlder()
+      expandWindow('older')
       return
     }
     if (
@@ -395,7 +376,7 @@ function onScroll(): void {
   }
 
   if (range.end < totalMessages() && isPhysicalNearBottom()) {
-    expandNewer()
+    expandWindow('newer')
     return
   }
 
