@@ -71,7 +71,7 @@
 
 ### 3.5 体积阈值
 
-入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至批次 B 实测 **93.31 KB / 266.83 KB**（入口为 Vite 输出；全站为 `dist/web` 全部 js+css 的 zlib gzip 实测，Vite 逐文件 gzip 合计为 275.37 KB；两套产物数值一致，`dist/file` 入口 89.91 KB / 266.82 KB）。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
+入口共享 chunk gzip **≤200 KB**、全站 JS+CSS gzip **≤520 KB**（2026-11-12 用户裁决，由原 ≤100 / ≤260 KB 翻倍，为动效基座留出空间；硬规则见 `AGENTS.md` §14.6）。截至批次 B 实测 **93.30 KB / 266.90 KB**（入口为 Vite 输出；全站为 `dist/web` 全部 js+css 的 zlib gzip 实测，Vite 逐文件 gzip 合计为 275.37 KB；两套产物一致，`dist/file` 入口 89.91 KB / 266.91 KB）。阈值放宽不等于放弃体积纪律：每次引入组件库或新依赖仍须复核并记录 gzip 实测增量。
 
 ### 3.6 已具备的交互能力
 
@@ -164,7 +164,7 @@
 | B2 阅读路径 | 新增 `core/readingPosition.ts`（按账号 + 服务器作用域、最近 40 条裁剪）；进入会话按「指定消息 → 上次浏览 → 首条未读 → 最新」落点；未读起点未加载时给「查看未读起点」，已加载时插入「以下是未读消息」分隔；`MessageList` 用首条可见消息 ID + 偏移恢复（前插、图片解码、会话切换），高度差补偿保留为退路；列表筛选与滚动位置返回恢复 |
 | B3 输入与键盘 | 输入框手机 1 行 / 桌面 2 行起、5 行封顶后框内滚动，断点与软键盘变化时重算；消息区尺寸变化时贴底保持贴底、历史位置按锚点恢复；输入法组合与 compositionend 后的补发 Enter 不发送；消息操作菜单补 ↑/↓/Home/End |
 
-> 校验：`npm run build` 与 `npm run build:file` 顺序通过（含 `vue-tsc --noEmit`）；`dist/web` 用 `/assets/*`、`dist/file` 用 `./assets/*`；入口 gzip **93.31 KB**、全站 js+css **266.83 KB**（zlib 实测）；token 审计无未定义引用。**未运行 Vitest / E2E / 真机**；四档宽度、缩放、软键盘与阅读锚点漂移的目视/实测待执行，见 §6 与 `docs/web.md` §7 第 50~53 项。
+> 校验：`npm run build` 与 `npm run build:file` 顺序通过（含 `vue-tsc --noEmit`）；`dist/web` 用 `/assets/*`、`dist/file` 用 `./assets/*`；入口 gzip **93.30 KB**、全站 js+css **266.90 KB**（zlib 实测）；token 审计无未定义引用。**未运行 Vitest / E2E / 真机**；四档宽度、缩放、软键盘与阅读锚点漂移的目视/实测待执行，见 §6 与 `docs/web.md` §7 第 50~53 项。
 
 ### 范围外（不因对标而建议）
 
