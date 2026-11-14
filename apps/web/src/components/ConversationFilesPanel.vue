@@ -72,6 +72,13 @@ const errorByTab = ref<Record<FileTab, string>>({ image: '', link: '', file: '' 
 const urls = ref<Record<string, string>>({})
 const failedIds = ref<Set<string>>(new Set())
 const requestSeqs: Record<FileTab, number> = { image: 0, link: 0, file: 0 }
+/** 每个页签在途列表请求的游标：撤回让响应失效时用它原样重发这一页。 */
+interface InflightPage {
+  reset: boolean
+  beforeSeq?: number
+  beforeOffset?: number
+}
+const inflightByTab: Record<FileTab, InflightPage | null> = { image: null, link: null, file: null }
 /** 会话切换或组件卸载时递增，用于丢弃上一个会话的在途响应。 */
 let loadEpoch = 0
 let unsubscribeRecall: (() => void) | null = null
@@ -139,13 +146,23 @@ function switchTab(tab: FileTab): void {
   void nextTick(restoreScroll)
 }
 
-async function load(tab: FileTab, reset: boolean): Promise<void> {
+async function load(tab: FileTab, reset: boolean, retryPage?: InflightPage): Promise<void> {
   const conversationId = props.conversationId
   if (!conversationId) return
   // 快速来回切页签时同一页签可能已有在途请求：直接复用，不再重复发起。
   if (reset ? loadingByTab.value[tab] : loadingMoreByTab.value[tab]) return
   const epoch = loadEpoch
   const seq = ++requestSeqs[tab]
+  // 记录本次请求的游标：撤回需要让在途响应失效时，用同一游标原样重发这一页。
+  const cursor = reset
+    ? { beforeSeq: retryPage?.beforeSeq, beforeOffset: retryPage?.beforeOffset }
+    : tab === 'link'
+      ? {
+          beforeSeq: retryPage?.beforeSeq ?? linksCursor.value.seq ?? undefined,
+          beforeOffset: retryPage?.beforeOffset ?? linksCursor.value.offset ?? undefined,
+        }
+      : { beforeSeq: retryPage?.beforeSeq ?? lastSeqOf(itemsByTab.value[tab]), beforeOffset: undefined }
+  inflightByTab[tab] = { reset, beforeSeq: cursor.beforeSeq, beforeOffset: cursor.beforeOffset }
   if (reset) {
     loadingByTab.value = { ...loadingByTab.value, [tab]: true }
     errorByTab.value = { ...errorByTab.value, [tab]: '' }
@@ -154,15 +171,9 @@ async function load(tab: FileTab, reset: boolean): Promise<void> {
   }
   try {
     if (tab === 'link') {
-      const cursor = reset
-        ? { seq: undefined, offset: undefined }
-        : {
-            seq: linksCursor.value.seq ?? undefined,
-            offset: linksCursor.value.offset ?? undefined,
-          }
       const page = await conversationsApi.listLinks(conversationId, {
-        beforeSeq: cursor.seq,
-        beforeOffset: cursor.offset,
+        beforeSeq: cursor.beforeSeq,
+        beforeOffset: cursor.beforeOffset,
         limit: SHARED_FILES_PAGE_SIZE,
       })
       if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
@@ -174,10 +185,9 @@ async function load(tab: FileTab, reset: boolean): Promise<void> {
       }
       loadedTabs.value = { ...loadedTabs.value, link: true }
     } else {
-      const beforeSeq = reset ? undefined : lastSeqOf(itemsByTab.value[tab])
       const page = await conversationsApi.listFiles(conversationId, {
         type: tab,
-        beforeSeq,
+        beforeSeq: reset ? undefined : cursor.beforeSeq,
         limit: SHARED_FILES_PAGE_SIZE,
       })
       if (epoch !== loadEpoch || seq !== requestSeqs[tab]) return
@@ -194,6 +204,7 @@ async function load(tab: FileTab, reset: boolean): Promise<void> {
     errorByTab.value = { ...errorByTab.value, [tab]: friendlyError(error) }
   } finally {
     if (seq === requestSeqs[tab]) {
+      inflightByTab[tab] = null
       if (loadingByTab.value[tab]) {
         loadingByTab.value = { ...loadingByTab.value, [tab]: false }
       }
@@ -280,34 +291,34 @@ function locateCurrentPreview(): void {
   if (current?.messageId) locateMessage(current.messageId)
 }
 
-/** 让所有页签的在途列表响应失效（撤回可能发生在响应生成之后）。 */
-function invalidateListRequests(): void {
-  for (const tab of TAB_ORDER) {
-    requestSeqs[tab] += 1
-    if (loadingByTab.value[tab]) {
-      loadingByTab.value = { ...loadingByTab.value, [tab]: false }
-    }
-    if (loadingMoreByTab.value[tab]) {
-      loadingMoreByTab.value = { ...loadingMoreByTab.value, [tab]: false }
-    }
+/** 让指定页签的在途列表响应失效（撤回可能发生在响应生成之后）。 */
+function invalidateInflight(tab: FileTab): InflightPage | null {
+  const inflight = inflightByTab[tab]
+  if (!inflight) return null
+  requestSeqs[tab] += 1
+  inflightByTab[tab] = null
+  if (loadingByTab.value[tab]) {
+    loadingByTab.value = { ...loadingByTab.value, [tab]: false }
   }
+  if (loadingMoreByTab.value[tab]) {
+    loadingMoreByTab.value = { ...loadingMoreByTab.value, [tab]: false }
+  }
+  return inflight
 }
 
 /**
- * 已打开的共享面板随撤回事件失效：删掉对应消息的图片/文件/链接条目，预览列表自动收敛。
- * 撤回帧可能早于「撤回前生成」的列表响应到达，因此同时让在途结果失效并重取当前页签，
- * 避免迟到响应把撤回内容合并回来；撤回后的下载仍由文件接口鉴权拒绝，这里只处理展示。
+ * 已打开的共享面板随撤回失效：只从已加载列表删掉对应条目，保留当前页与滚动位置。
+ * 若该页签有在途列表请求，则让旧响应失效并用原游标重发这一页，避免迟到响应把撤回内容
+ * 合并回来；撤回后的下载仍由文件接口鉴权拒绝，这里只处理展示。
  */
 function handleRecalledMessage(messageId: string): void {
-  invalidateListRequests()
   removeRecalledMessage(messageId)
   for (const tab of TAB_ORDER) {
-    if (tab !== activeTab.value && loadedTabs.value[tab]) {
-      // 其它页签下次切回时重新取第一页即可。
-      loadedTabs.value = { ...loadedTabs.value, [tab]: false }
-    }
+    const inflight = invalidateInflight(tab)
+    if (!inflight) continue
+    // 用原游标重发这一页：已加载的其它页保持不动，用户无需重新翻页。
+    void load(tab, inflight.reset, inflight)
   }
-  void load(activeTab.value, true)
 }
 
 /** 从当前列表与预览中移除已撤回消息的条目。 */
@@ -347,6 +358,9 @@ watch(
     linksCursor.value = { seq: null, offset: null }
     urls.value = {}
     failedIds.value = new Set()
+    inflightByTab.image = null
+    inflightByTab.link = null
+    inflightByTab.file = null
     errorByTab.value = { image: '', link: '', file: '' }
     loadingByTab.value = { image: false, link: false, file: false }
     loadingMoreByTab.value = { image: false, link: false, file: false }
