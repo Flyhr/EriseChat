@@ -333,13 +333,9 @@ public sealed class ConversationService
             throw ApiException.ValidationFailed("仅群聊支持成员管理");
         }
 
-        // C1：直接加人与邀请链接兑换共用同一把 SQLite 写锁。若在事务外读取成员数，并发兑换占掉
-        // 空位后仍会按旧人数通过容量检查并写入，最终超过群上限；因此成员读取、候选过滤、容量检查
-        // 与写入全部放进同一写事务，先执行一次空更新取得写锁再读。
+        // C1：直接加人与邀请链接兑换共用同一把 SQLite 写锁。BeginTransaction 默认使用 BEGIN IMMEDIATE，
+        // 事务开始即持有写锁；成员读取、候选过滤、容量检查与写入都在锁内完成，并发入口会串行执行。
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
-        await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE conversations SET last_seq = last_seq WHERE id = {conversationId}",
-            cancellationToken);
         // 写锁内重新加载会话，保证新成员 LastReadSeq 取到最新 last_seq（加入前的历史不计未读）。
         await _db.Entry(conversation).ReloadAsync(cancellationToken);
 

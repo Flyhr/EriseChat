@@ -156,14 +156,18 @@ public sealed class GroupInviteService
     }
 
     /// <summary>
-    /// 兑换邀请链接：校验有效期/撤销状态/发起人当前权限/拉黑关系/群容量，成员变更与兑换在同一事务内完成；
-    /// 重复或并发兑换幂等返回当前会话，不产生重复成员记录。
+    /// 兑换邀请链接：有效期、撤销状态、发起人当前权限、拉黑关系与群容量全部在取得 SQLite 写锁后判定，
+    /// 成员变更与兑换在同一事务内完成；重复或并发兑换幂等返回当前会话，不产生重复成员记录。
     /// </summary>
     public async Task<GroupInviteJoinResult> JoinAsync(
         string currentUserId,
         string token,
         CancellationToken cancellationToken)
     {
+        // BEGIN IMMEDIATE：事务开始即持有 SQLite 写锁。若在事务外读取链接状态，撤销请求先行提交后
+        // 兑换仍会凭旧状态放行，因此在取得写锁之后再读取链接、邀请人权限、拉黑关系与成员数。
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+
         var link = await FindLinkAsync(token, cancellationToken);
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (link.RevokedAt is not null)
@@ -185,9 +189,10 @@ public sealed class GroupInviteService
             .Select(member => member.UserId)
             .ToListAsync(cancellationToken);
 
-        // 已在群内：幂等返回，不重复写成员行与系统消息。
+        // 已在群内：幂等返回，不重复写成员行与系统消息（先释放写锁再读会话快照）。
         if (memberIds.Contains(currentUserId, StringComparer.Ordinal))
         {
+            await transaction.RollbackAsync(cancellationToken);
             return new GroupInviteJoinResult(
                 await _conversations.GetAsync(currentUserId, conversation.Id, cancellationToken),
                 SystemMessage: null,
@@ -220,62 +225,38 @@ public sealed class GroupInviteService
         await _blocks.EnsureInteractionAllowedAsync(currentUserId, link.CreatedBy, cancellationToken);
 
         var maxMembers = Math.Clamp(_appOptions.Value.GroupMaxMembers, 2, 500);
-        MessageDto? systemMessage = null;
-        var joined = false;
-
-        await using (var transaction = await _db.Database.BeginTransactionAsync(cancellationToken))
+        if (memberIds.Count >= maxMembers)
         {
-            // 先执行一次空更新取得 SQLite 写锁：与「直接加人」共用同一把锁，避免两条入口
-            // 并发时都按旧人数通过容量检查、最终把群撑过上限。
-            await _db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE conversations SET last_seq = last_seq WHERE id = {conversation.Id}",
-                cancellationToken);
-            // 写锁内重新加载会话，保证新成员 LastReadSeq 取到最新 last_seq。
-            await _db.Entry(conversation).ReloadAsync(cancellationToken);
-
-            // 事务内重新读取成员数：SQLite 写事务串行，避免并发兑换把群撑过上限。
-            var currentMemberIds = await _db.ConversationMembers
-                .Where(member => member.ConversationId == conversation.Id)
-                .Select(member => member.UserId)
-                .ToListAsync(cancellationToken);
-
-            if (!currentMemberIds.Contains(currentUserId, StringComparer.Ordinal))
-            {
-                if (currentMemberIds.Count >= maxMembers)
-                {
-                    throw ApiException.ValidationFailed($"群成员数量已达上限（最多 {maxMembers} 人）");
-                }
-
-                _db.ConversationMembers.Add(new ConversationMemberEntity
-                {
-                    ConversationId = conversation.Id,
-                    UserId = currentUserId,
-                    Role = MemberRole.Member,
-                    JoinedAt = now,
-                    // 新成员加入前历史消息不计未读；加入系统消息计 1 条未读（protocol §4.6）。
-                    LastReadSeq = conversation.LastSeq,
-                });
-                await _db.SaveChangesAsync(cancellationToken);
-
-                systemMessage = await _systemMessages.AppendAsync(
-                    conversation,
-                    currentUserId,
-                    new SystemContent(
-                        "member.joined",
-                        currentUserId,
-                        new[] { currentUserId },
-                        $"{user.DisplayName} 通过邀请链接加入群聊"),
-                    cancellationToken);
-                await _db.SaveChangesAsync(cancellationToken);
-                joined = true;
-            }
-
-            await transaction.CommitAsync(cancellationToken);
+            throw ApiException.ValidationFailed($"群成员数量已达上限（最多 {maxMembers} 人）");
         }
+
+        _db.ConversationMembers.Add(new ConversationMemberEntity
+        {
+            ConversationId = conversation.Id,
+            UserId = currentUserId,
+            Role = MemberRole.Member,
+            JoinedAt = now,
+            // 新成员加入前历史消息不计未读；加入系统消息计 1 条未读（protocol §4.6）。
+            LastReadSeq = conversation.LastSeq,
+        });
+        await _db.SaveChangesAsync(cancellationToken);
+
+        var systemMessage = await _systemMessages.AppendAsync(
+            conversation,
+            currentUserId,
+            new SystemContent(
+                "member.joined",
+                currentUserId,
+                new[] { currentUserId },
+                $"{user.DisplayName} 通过邀请链接加入群聊"),
+            cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         var result = await _conversations.GetAsync(currentUserId, conversation.Id, cancellationToken);
         var memberUserIds = await _conversations.GetMemberUserIdsAsync(currentUserId, conversation.Id, cancellationToken);
-        return new GroupInviteJoinResult(result, joined ? systemMessage : null, memberUserIds);
+        return new GroupInviteJoinResult(result, systemMessage, memberUserIds);
     }
 
     /// <summary>加载链接；不存在统一返回 INVITE_INVALID，避免枚举令牌。</summary>
