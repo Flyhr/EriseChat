@@ -153,40 +153,18 @@ const detailsTrigger = ref<HTMLElement | null>(null)
 /** 发送框实例：Emoji 面板选择后调用其 insertEmoji，让插入落在当前光标处（草稿不丢）。 */
 const sendBoxRef = ref<{ insertEmoji: (emoji: string) => void; focusInput: () => void } | null>(null)
 
-// 连接状态页内提示（UI-02 批次4）：断线/重连就地提示，恢复后短暂显示 3 秒；
-// 只读取 core/ws.ts 的真实状态，不替代全局 ConnectionBanner，也不伪造连接状态。
-const wsState = ref<WsState>(chatWs.state)
-const recovered = ref(false)
-let recoveredTimer: ReturnType<typeof setTimeout> | null = null
+// 连接状态提示统一由全局 ConnectionBanner 承担，聊天页不再重复展示断线/重连/恢复文案，
+// 这里只保留重连成功后的历史定位窗口刷新（F-38）。
+let previousWsState: WsState = chatWs.state
 let offWsState: (() => void) | null = null
 
-const connectionNotice = computed<{ text: string; tone: 'warning' | 'success' } | null>(() => {
-  if (wsState.value === 'closed') return { text: '网络已断开，消息可能延迟', tone: 'warning' }
-  if (wsState.value === 'reconnecting') return { text: '正在重新连接…', tone: 'warning' }
-  if (recovered.value) return { text: '已恢复连接', tone: 'success' }
-  return null
-})
-
 function onWsStateChange(next: WsState): void {
-  const previous = wsState.value
-  wsState.value = next
-  if (recoveredTimer) {
-    clearTimeout(recoveredTimer)
-    recoveredTimer = null
-  }
-  // 仅「断线/重连 → 已认证」才算恢复；首次登录 connecting→authed 不提示。
-  if (next === 'authed' && (previous === 'reconnecting' || previous === 'closed')) {
-    recovered.value = true
-    recoveredTimer = setTimeout(() => {
-      recovered.value = false
-      recoveredTimer = null
-    }, 3000)
-  }
+  const previous = previousWsState
+  previousWsState = next
   // F-38 前置修复：断线重连成功后刷新历史定位窗口（保持查看位置）。
   if (next === 'authed' && previous !== 'authed' && locateMode.value) {
     void refreshLocateWindow()
   }
-  if (next !== 'authed') recovered.value = false
 }
 
 // 会话列表筛选（UI-02）：全部/未读/群聊。群聊仍可由 /chat?group=all 直达；
@@ -1363,10 +1341,6 @@ onBeforeUnmount(() => {
   offWsState?.()
   offWsState = null
   conversations.setActiveConversation(null)
-  if (recoveredTimer) {
-    clearTimeout(recoveredTimer)
-    recoveredTimer = null
-  }
   document.removeEventListener('visibilitychange', markActiveConversationRead)
   // 批次 B2：离开聊天页（去设置/退出登录）前保存当前会话的阅读位置。
   if (activeId.value) saveReadingAnchor(activeId.value, atBottom.value)
@@ -2187,12 +2161,6 @@ function onWindowDrop(event: DragEvent): void {
       @drop="onDrop"
     >
       <NoticeBar v-if="pageNotice" :text="pageNotice" action-label="知道了" @action="pageNotice = ''" />
-      <NoticeBar
-        v-if="connectionNotice"
-        :text="connectionNotice.text"
-        :tone="connectionNotice.tone"
-      />
-
       <template v-if="activeConversation">
         <ChatHeader
           ref="headerRef"

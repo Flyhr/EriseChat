@@ -46,7 +46,7 @@ const text = computed(() => {
     case 'reconnecting':
       return reconnectElapsed.value ? '正在重新连接…' : ''
     case 'closed':
-      return '连接已断开，消息将在恢复后发送'
+      return '网络已断开，消息将在恢复后发送'
     default:
       return ''
   }
