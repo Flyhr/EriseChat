@@ -2,7 +2,7 @@
 
 > 本文是 Android 客户端（Capacitor 壳 + `apps/web` 构建产物）的安装、配置、构建、签名与真机联调说明。
 > 协议与表结构见 `protocol/protocol.md`、`protocol/schema.sql`；服务器部署见 `docs/deploy.md`；项目介绍以 `README.md` 为准。
-> 本文最近更新：2026-11-13（补充后台消息提醒的绝对地址约定；其余同步 1.2.0 命名统一后的产物、签名与版本基线）。
+> 本文最近更新：2026-11-16（新增 §5.9 开发期热更新；上一版 2026-11-13 补充后台消息提醒的绝对地址约定，并同步 1.2.0 命名统一后的产物、签名与版本基线）。
 
 ## 1. 交付物
 
@@ -324,6 +324,36 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 
 > 若走局域网而不接 USB：③ 改为 `dotnet run --urls http://0.0.0.0:6580`、放行防火墙 6580，④ 跳过，App 内服务器地址改填 `http://<电脑IPv4>:6580`。
 
+### 5.9 开发期热更新（改 Web 不用重新打包）
+
+改 `apps/web` 时不需要重新打包 APK。dev 版壳直接加载开发机的 Vite dev server，保存即刷新（HMR），改动到手机生效约 1 秒。正式产物仍走 `infra/build-apk.sh`：Web 资源打进 APK、不依赖在线加载（AGENTS.md §3），本节的开发通道不改变发版行为，也不能用于交付。
+
+**原理**：`npm run dev:android`（`apps/mobile/scripts/dev-android.mjs`）在 `android/app/src/debug/assets/` 生成一份只多出 `server.url=http://localhost:5173` 的 `capacitor.config.json`。Gradle 合并资源时 debug 变体覆盖 `src/main` 的同名文件，于是 dev 包的 WebView 直接加载 dev server；页面里的 `/api`、`/ws` 由 Vite 代理到本机 6580，手机侧的 `localhost:5173` 经 `adb reverse` 隧道回到开发机。`src/main` 的配置与 release 包完全不受影响。
+
+**一次性准备**：
+
+1. 手机开启 USB 调试并连接，`adb devices` 能看到一行 `device`（见 §5.5）。
+2. 终端要能找到 JDK（Gradle 依赖它）：没有全局设置时先执行 `set JAVA_HOME=D:\softWare\jdk21`。SDK 路径由脚本从 `android/local.properties` 的 `sdk.dir` 读取，不需要另设 `ANDROID_HOME`。
+3. 首次 `npm run dev:android` 会编译并安装 debug 包（冷缓存约 2 分钟，之后走 Gradle 增量）。
+
+**日常三步**（三个终端，逐条粘贴即可）：
+
+1. `cd /d D:\Code\EriseChat\apps\web && npm run dev` —— Vite，监听 `127.0.0.1:5173`
+2. `cd /d D:\Code\EriseChat\server\Chat.Server && dotnet run` —— 服务端 6580
+3. `cd /d D:\Code\EriseChat\apps\mobile && npm run dev:android` —— 生成 dev 配置、建隧道、安装并启动 dev 包
+
+之后改 `apps/web` 任意文件，手机上 1 秒内生效，不再碰 Gradle；登录页也不需要填服务器地址（开发态走 Vite 代理）。
+
+**必须知道的几点**：
+
+- **只能用 `localhost`，不能填局域网 IP**。`http://<IP>:5173` 不是安全上下文（secure context），WebView 会拒绝 `getUserMedia`，语音消息等能力在 dev 包里直接不可用；`adb reverse` 把手机 `localhost:5173` 映射到开发机的 `127.0.0.1:5173`，USB 与无线调试（`adb pair`）都适用。
+- **dev 包与正式包并存**。debug 用默认 debug 签名，与已装的 release 包同名会 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，因此 debug 变体加了 `applicationIdSuffix ".dev"`：包名 `com.erisechat.mobile.dev`，桌面图标「EriseChat Dev」。两者登录态、缓存互不影响（origin 不同），dev 包首次打开需重新登录。
+- **开发态页面是 Vue dev 版**，性能与真包不同。性能、包体、签名、覆盖升级、后台提醒等验收仍用 release 包。
+- **端口映射会失效**：拔插 USB、`adb kill-server`、电脑休眠后 dev 包会白屏或连不上，重跑 `npm run dev:android` 即可（它会重新建隧道并重装）。
+- **只影响 debug 变体**：覆盖配置写在 `src/debug/assets/` 且已 gitignore，release 打包不读它，也不需要事后还原；`infra/build-apk.sh` 照旧把 Web 资源打进正式包。
+
+**改原生层**（Java / Manifest / 插件 / 权限）时重跑 `npm run dev:android` 即可，脚本每次都执行 `installDebug`，无需另外打包。
+
 ## 6. 故障排查
 
 | 现象 | 排查 |
@@ -340,3 +370,6 @@ D:\softWare\android-sdk\platform-tools\adb.exe reverse tcp:6580 tcp:6580
 | 安装被拦截 | 允许「安装未知应用」；确认 APK 完整（对比下载页/`sha256sum` 输出的 SHA256） |
 | 收不到新消息提醒 | v1 无系统推送，打开应用会自动补拉；后台被系统冻结属预期 |
 | 覆盖安装后仍是旧界面 | 打包时未包含最新 Web 产物：重新 `bash infra/build-apk.sh`（脚本内含 `npm run build` 与 `cap sync`），并核对安装包大小/SHA256 已更新 |
+| dev 版（EriseChat Dev）白屏或一直连不上 | 热更新依赖隧道：确认 `npm run dev` 在跑、`adb reverse --list` 里有 `tcp:5173`，否则重跑 `npm run dev:android`（见 §5.9）。正式版不受影响 |
+| `npm run dev:android` 报未找到 JDK | Gradle 需要 `JAVA_HOME`：`set JAVA_HOME=D:\softWare\jdk21` 后重试（见 §5.9） |
+| `npm run dev:android` 报找不到 Android SDK | 补 `apps/mobile/android/local.properties` 的 `sdk.dir`，或设置 `ANDROID_HOME`（脚本两者都支持） |

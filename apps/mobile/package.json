@@ -7,7 +7,8 @@
     "add:android": "cap add android",
     "sync": "cap sync android",
     "open": "cap open android",
-    "build:debug": "npm run sync && cd android && ./gradlew assembleDebug"
+    "build:debug": "npm run sync && cd android && ./gradlew assembleDebug",
+    "dev:android": "node scripts/dev-android.mjs"
   },
   "engines": {
     "node": ">=20"

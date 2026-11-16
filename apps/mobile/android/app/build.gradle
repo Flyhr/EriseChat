@@ -44,6 +44,11 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+        debug {
+            // 开发期热更新（docs/mobile.md §5.9）：debug 用默认 debug 签名，与已装的 release 包同包名会
+            // INSTALL_FAILED_UPDATE_INCOMPATIBLE，加 .dev 后缀让两个 App 并存；release 包名保持不变（AGENTS.md §3）。
+            applicationIdSuffix ".dev"
+        }
     }
 }
 

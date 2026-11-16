@@ -77,6 +77,8 @@ apps/mobile/android/build/
 apps/mobile/android/app/build/
 apps/mobile/android/local.properties
 apps/mobile/android/app/src/main/assets/public/
+# dev:android 生成的热更新覆盖配置（docs/mobile.md §5.9）
+apps/mobile/android/app/src/debug/assets/capacitor.config.json
 *.apk
 *.aab
 *.idsig

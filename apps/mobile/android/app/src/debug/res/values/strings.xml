@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- 仅 debug 变体：与正式包并存时区分图标和标题（applicationIdSuffix .dev，见 app/build.gradle）。 -->
+    <string name="app_name">EriseChat Dev</string>
+    <string name="title_activity_main">EriseChat Dev</string>
+</resources>
