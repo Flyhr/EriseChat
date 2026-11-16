@@ -104,6 +104,10 @@ server/Chat.Server.Tests/
 /docs/ui-optimization-plan.md
 # 客户端更新计划（2026-11-12，计划类文档，本地保留不入库）
 /docs/update-plan.md
+# 移动端音视频计划（2026-11-16，计划类文档，本地保留不入库）
+/docs/mobile-call-plan.md
+# 未完成项清单（2026-11-16，过程类文档，本地保留不入库）
+/docs/backlog.md
 /docs/ui/ui-00-review.md
 /docs/ui/*/
 /docs/ui/*.png
@@ -121,3 +125,5 @@ server/Chat.Server.Tests/
 
 # ==== Docker 部署 ====
 /.env
+docs/team-1000-product-plan.md
+docs/ui/deep-research-report (1).md

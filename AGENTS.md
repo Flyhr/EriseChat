@@ -1,6 +1,6 @@
 # AGENTS.md — EriseChat 项目约束
 
-> 版本 2.10（2026-11-12）。改动仓库前必须阅读并遵守本文件；计划变更涉及仓库约束时同步更新。2.4 起测试文件统一放根级 `tests/`（不入库），新增测试子目录须先征得用户同意。2.5 修订：校正 §10 后续功能清单、更正 §6 算法名、新增 §1.1 命名总则（唯一名称为 EriseChat，运行时标识与代码同步迁移）。2.6 修订：新增 §14「界面与 UI 约束」收口原散落约定；旧 UI 资产归档至 `docs/deprecated/` 并标记废弃，`docs/ui/README.md` 原地重写为现行 UI 更新文档。2.7 修订：撤销 §14.2 深色主题冻结，改为「允许实现 + 实施前置条件」。2.8 修订：深色主题已实现，§14.2 改为「已实现 + 主题变更前置条件」；实施规格见 `docs/ui/README.md` §9。2.9 修订：§14.6 体积阈值翻倍至 200 / 520 KB，新增 §14.9「加载反馈与动效」固化动效规范与依赖口径（主线 `motion`）；批次 4 目视验收暂缓至代码修改完成后。2.10 同步 §10 已确认的更新与统一发版范围。
+> 版本 2.11（2026-11-16）。改动仓库前必须阅读并遵守本文件；计划变更涉及仓库约束时同步更新。2.4 起测试文件统一放根级 `tests/`（不入库），新增测试子目录须先征得用户同意。2.5 修订：校正 §10 后续功能清单、更正 §6 算法名、新增 §1.1 命名总则（唯一名称为 EriseChat，运行时标识与代码同步迁移）。2.6 修订：新增 §14「界面与 UI 约束」收口原散落约定；旧 UI 资产归档至 `docs/deprecated/` 并标记废弃，`docs/ui/README.md` 原地重写为现行 UI 更新文档。2.7 修订：撤销 §14.2 深色主题冻结，改为「允许实现 + 实施前置条件」。2.8 修订：深色主题已实现，§14.2 改为「已实现 + 主题变更前置条件」；实施规格见 `docs/ui/README.md` §9。2.9 修订：§14.6 体积阈值翻倍至 200 / 520 KB，新增 §14.9「加载反馈与动效」固化动效规范与依赖口径（主线 `motion`）；批次 4 目视验收暂缓至代码修改完成后。2.10 同步 §10 已确认的更新与统一发版范围。2.11 按 2026-11-16 用户裁决调整范围与部署约束：§2.4 增加 TURN 容器例外、§2.5 允许移动端 1:1 语音/视频、§3 新增媒体选型、§10 登记该待实施能力（计划见本地 `docs/mobile-call-plan.md`）。
 
 ## 1. 文档分工与优先级
 
@@ -28,8 +28,8 @@
 1. **不引入第三方 IM**：OpenIM、融云、环信、腾讯云 IM、Sendbird 等一律不用；IM 协议由本项目自研。
 2. **不产生授权费用**：不买商业授权/SDK、不买签名证书、不买 Apple 开发者账号、不接付费推送或短信服务。
 3. **依赖许可**：只允许 MIT / Apache-2.0 / BSD / ISC 等宽松许可；**禁止** GPL / AGPL / SSPL / BUSL 或商业限制许可进入仓库。新增 npm/NuGet 依赖前检查 LICENSE，不确定先问用户。
-4. **架构与部署**：不引入 Kubernetes / Redis / Kafka / MongoDB / PostgreSQL / MinIO / Nginx / SignalR，不拆微服务。使用根目录 `docker-compose.yml` 与 `infra/docker/` 实现 Docker Compose 单容器一键部署，容器内运行 ASP.NET Core 单进程，使用 SQLite 和本地文件卷。允许 Docker / Compose 与官方 .NET/Node 基础镜像；禁止多容器编排。端口只绑定宿主 `127.0.0.1:6580`，HTTPS 由宿主 Tailscale Serve（内测）或 Caddy（公网）提供。安全组只开放必要端口，可用 fail2ban。
-5. **范围边界**：不写 iPhone/iOS 代码、不做 TestFlight；iPhone 仅在用户明确启动后续版本时评估（计划 §5.4）。不做语音/视频通话、朋友圈、AI、机器人、E2EE；使用说明须写明不提供 E2EE。ICP、等保、短信、厂商推送等公开发布事项不在范围内。
+4. **架构与部署**：不引入 Kubernetes / Redis / Kafka / MongoDB / PostgreSQL / MinIO / Nginx / SignalR，不拆微服务。使用根目录 `docker-compose.yml` 与 `infra/docker/` 实现 Docker Compose 单容器一键部署，容器内运行 ASP.NET Core 单进程，使用 SQLite 和本地文件卷。允许 Docker / Compose 与官方 .NET/Node 基础镜像；**除下述 TURN 例外外**禁止多容器编排。业务端口只绑定宿主 `127.0.0.1:6580`，HTTPS 由宿主 Tailscale Serve（内测）或 Caddy（公网）提供。**TURN 例外（2026-11-16 用户裁决）**：允许且仅允许新增一个 `coturn` 容器（BSD-3-Clause），只做 WebRTC 媒体中继，不承载业务、不持久化数据；端口白名单为 `3478/udp`、`3478/tcp` 与 relay 段（默认 `50000-50100/udp`，可配）；不得以音视频为由再引入其它容器或编排。安全组只开放必要端口，可用 fail2ban。
+5. **范围边界**：不写 iPhone/iOS 代码、不做 TestFlight；iPhone 仅在用户明确启动后续版本时评估（计划 §5.4）。**通话范围（2026-11-16 用户裁决）**：允许并优先实现移动端 **1:1 语音与 1:1 视频**（WebRTC P2P + 自建 TURN，见 §2.4、§3）；群组音视频、通话录制、屏幕共享、通话转写暂不做，重启需用户另行确认。不做朋友圈、AI、机器人、E2EE；使用说明须写明不提供 E2EE（DTLS-SRTP 是 WebRTC 强制项，不等于 E2EE 承诺）。ICP、等保、短信、厂商推送等公开发布事项不在范围内。
 6. **密钥纪律**：token、密码、验证码明文、SMTP 凭据、JWT 密钥、keystore 等敏感值不得进入源码、日志、示例或提交历史。凭据通过 `secrets.json` 或环境变量配置；Android keystore 按 §3 存放。日志不得记录邮件明文。
 7. **协议兼容**：协议帧与数据库结构只允许向后兼容的增量修改，例如新增可选字段或帧类型；不得删除字段、改名或改变语义。
 8. **数据归属**：服务端是唯一事实源（SQLite + `/data/files`）；客户端可用 IndexedDB 做缓存，但不得只存在本地；不接云数据库/云存储（备份到对象存储除外）。
@@ -51,6 +51,7 @@
 | 前端 | Vue 3 + TypeScript + Vite + Pinia + 轻量 UI；核心模块 `core/ws.ts`、`core/sync.ts`、`stores/` |
 | Windows 壳 | Electron + electron-builder（NSIS，`appId=com.erisechat.desktop`，安装包 `EriseChat-Setup-x.y.z.exe`，免签名） |
 | Android 壳 | Capacitor，Web 资源打进 APK（不依赖在线加载），最低 API 26，自签名 keystore 放 `infra/keys/`（gitignore），APK 名 `EriseChat-x.y.z.apk` |
+| 媒体 | WebRTC（P2P，仅 1:1 语音/视频）+ 自建 TURN（`coturn`，BSD-3-Clause，独立容器，见 §2.4 例外）；信令复用自研 JSON-over-WebSocket，不新增信令服务 |
 
 ## 4. 目录与命名
 
@@ -126,6 +127,7 @@ sudo bash infra/backup.sh                       # 服务器每日备份（cron �
 - 统一发版已确认，待实施。本地脚本与私有 GitHub 仓库自托管 runner 共用流程，一并部署服务端/Web 的 Docker Compose 镜像并发布 Windows、Android 安装包和清单。计划见 `docs/internal-plan.md` §14.1、§14.4 和本地专项 `docs/update-plan.md`。
 - 移出本仓库：管理员功能（F-16，2026-11-01 用户裁决，由独立后台系统承接）。
 - 已获授权并实现：消息撤回和编辑（F-18，2026-10-28，协议 §4.3）；语音消息（F-28，2026-11-02，协议 §7 第 9 条）。
+- 已裁决、待实施：移动端 1:1 语音与 1:1 视频（2026-11-16）。范围为 1:1，Web/桌面本期不做通话 UI；群组音视频、录制、屏幕共享与转写暂不做。部署形态为 P2P + 独立 `coturn` 容器（§2.4 例外），技术栈见 §3。计划与验收见本地 `docs/mobile-call-plan.md`（计划类文档不入库）。
 
 ## 11. 测试与提交
 

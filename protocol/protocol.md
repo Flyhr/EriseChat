@@ -76,6 +76,37 @@
 | `kicked` | S→C | 被踢下线 | 随后关闭连接 |
 | `error` | S→C | 统一错误 | 错误码见 §5 |
 
+### 3.1 通话信令（规划中，尚未实现）
+
+> 2026-11-16 用户裁决：允许移动端 **1:1 语音 / 1:1 视频**（AGENTS §2.5），群组音视频暂不做。
+> 本节为**协议先行规划**：服务端与客户端均未实现，`protocolVersion` 仍为 1，帧总数仍为 24。
+> 实现时按 §3 帧总表并入（总数变 35）、错误码并入 §5.1，并同步 `protocol/schema.sql` 与 EF 迁移（`calls` 表）。
+
+| type | 方向 | 用途 | 备注 |
+|---|---|---|---|
+| `call.invite` | C→S | 发起 1:1 通话 | `kind`: `audio` / `video` |
+| `call.incoming` | S→C | 来电推送 | 推给被叫**全部在线连接**（多端同时振铃） |
+| `call.ringing` | S→C | 对端已振铃 | 可选，仅用于主叫 UI |
+| `call.accept` | C→S | 接听 | 首个 `accept` 生效，其余连接收 `call.cancel` |
+| `call.accepted` | S→C | 接听确认 | 广播两端，触发 SDP/ICE 交换 |
+| `call.reject` | C→S | 拒接 | `reason`: `declined` / `busy` / `unavailable` |
+| `call.cancel` | C→S / S→C | 取消 | 主叫取消；服务端也会下发（超时、他人已接） |
+| `call.end` | C→S / S→C | 挂断 | 任一端发起，服务端清理会话并广播 |
+| `call.sdp` | 双向 | SDP 交换 | `{ callId, sdp: { type, sdp } }`，只转发给对端连接，不落库 |
+| `call.ice` | 双向 | ICE candidate 交换 | `{ callId, candidate }`，只转发、不落库、不写日志 |
+| `call.state` | S→C | 重连同步 | `{ callId, state }` 或 `null`（无进行中通话） |
+
+约束：
+
+- 仅 1:1：`conversationId` 必须为单聊且两端均为成员；群会话调用 `call.invite` 回 `CALL_UNSUPPORTED`（400）。
+- 每用户同时最多 1 通：已通话时新来电回 `CALL_BUSY`（409）；同一对用户重复 `call.invite` 幂等返回当前状态。
+- 超时：被叫 60 秒无应答 → 服务端下发 `call.end`（`reason: timeout`）。
+- 断线：WS 断开后服务端保留通话 10 秒，重连后以 `call.state` 让客户端恢复或收尾。
+- 隐私：SDP / ICE 内容不落库、不进日志；通话元数据（起止时间、结束原因）按实现阶段决定是否落 `calls` 表。
+- 兼容：旧客户端收到未知 `type` 忽略且不断连（§2），Web / 桌面本期不展示通话 UI。
+
+错误码（实现时并入 §5.1）：`CALL_BUSY`（409）、`CALL_NOT_FOUND`（404）、`CALL_FORBIDDEN`（403）、`CALL_UNSUPPORTED`（400）。
+
 ## 4. 帧定义
 
 ### 4.1 `auth` / `hello`（认证）
@@ -873,3 +904,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C3 消息表情回应） | 2026-11-14 | 新增 1 个帧（共 24 个 type）：`message.reactions`（S→C，摘要 `{ emoji, count, mine }`，摘要共享、`mine` 按接收账号计算，空数组表示已无回应）；Message 新增可选 `reactions`；新增 REST `PUT` / `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`（白名单 `thumbs_up`/`heart`/`joy`/`wow`/`sad`/`tada`，每人每消息至多一条，均幂等）；`messages` 新增 `reactions_updated_at INTEGER` 列，新增 `message_reactions` 表（主键 `(message_id, user_id)`）；`sync.response` 的 `updates` 起覆盖回应新增/替换/取消，恢复不依赖消息 `seq`，移除最后一个回应时返回空数组；回应不产生消息、不推进 `seq`/已读/未读、不改会话排序、不推送系统通知；`protocolVersion` 仍为 1 |
 | v1（C3 修订：回应同步游标与并发写入） | 2026-11-14 | ① `sync.response` 的每条 batch 都携带 `updatedThrough`；客户端未提供 `updatedAfter` 的会话即使没有新消息/状态变化也返回一条仅含 `updatedThrough` 的**游标初始化** batch，修复空缓存客户端「没有游标就不发 `updatedAfter`」的死循环；② 回应设置/移除的服务端成员与消息状态校验、读取本人回应、写入放进同一 SQLite 写事务（`BEGIN IMMEDIATE`），同账号多端并发设置、替换或删除不再因复合主键冲突返回 500（后到者等待写锁后走幂等/替换分支）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（隐私设置与陌生人消息限制） | 2026-11-15 | 新增 REST `GET` / `PATCH /api/me/privacy`（字段 `allowStrangerMessages`，默认 false）；`users` 表新增 `allow_stranger_messages INTEGER NOT NULL DEFAULT 0`；关闭时陌生人在对方回复前只能发送 1 条单聊消息，转发进入单聊同受限制（`FORBIDDEN` 403），好友/共同群/群聊不受影响，已落库消息的幂等重试不受影响；无新帧、`protocolVersion` 仍为 1 |
+| v1（1:1 通话信令·规划） | 2026-11-16 | 按用户裁决新增 §3.1：规划 11 个通话帧（`call.invite` / `call.incoming` / `call.ringing` / `call.accept` / `call.accepted` / `call.reject` / `call.cancel` / `call.end` / `call.sdp` / `call.ice` / `call.state`）与 `CALL_BUSY` / `CALL_NOT_FOUND` / `CALL_FORBIDDEN` / `CALL_UNSUPPORTED` 四个错误码；范围为 1:1 语音/视频，群组音视频不做；SDP/ICE 只转发不落库；实现时并入帧总表（总数 35）、§5.1 与 `calls` 表迁移；**本期仅文档规划，代码未实现**，`protocolVersion` 仍为 1 |
