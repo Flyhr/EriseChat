@@ -20,6 +20,11 @@ export interface SearchUsersResponse {
   users: UserProfile[]
 }
 
+/** 隐私设置（GET/PATCH /api/me/privacy）：是否允许陌生人直接向我发送消息。 */
+export interface PrivacySettings {
+  allowStrangerMessages: boolean
+}
+
 export const usersApi = {
   /** 当前登录用户资料（GET /api/me） */
   me: () => http.get<UserProfile>('/me'),
@@ -31,4 +36,11 @@ export const usersApi = {
    * http.get 的 query 会序列化为 `?search=...`（见 core/http.ts buildUrl）。
    */
   search: (search: string) => http.get<SearchUsersResponse>('/users', { query: { search } }),
+
+  /** 读取隐私设置（GET /api/me/privacy）。 */
+  privacy: () => http.get<PrivacySettings>('/me/privacy'),
+
+  /** 更新是否允许陌生人直接发送消息（PATCH /api/me/privacy）。 */
+  updatePrivacy: (allowStrangerMessages: boolean) =>
+    http.patch<PrivacySettings>('/me/privacy', { allowStrangerMessages }),
 }

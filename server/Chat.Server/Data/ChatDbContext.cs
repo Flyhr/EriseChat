@@ -102,6 +102,9 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .HasDefaultValueSql("'active'")
                 .HasSentinel((UserStatus)(-1));
             entity.Property(user => user.CreatedAt).HasColumnName("created_at");
+            entity.Property(user => user.AllowStrangerMessages)
+                .HasColumnName("allow_stranger_messages")
+                .HasDefaultValue(false);
         });
     }
 

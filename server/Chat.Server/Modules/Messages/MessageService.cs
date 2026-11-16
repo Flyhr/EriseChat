@@ -211,6 +211,9 @@ public sealed class MessageService
             await _blocks.EnsureDirectMessageAllowedAsync(senderId, conversationId, cancellationToken);
         }
 
+        // 陌生人消息限制：对方关闭「允许陌生人向我发送消息」时，回复前只能发送 1 条。
+        await EnsureStrangerMessageAllowedAsync(senderId, conversation, cancellationToken);
+
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
@@ -427,6 +430,9 @@ public sealed class MessageService
             {
                 await _blocks.EnsureDirectMessageAllowedAsync(userId, targetId, cancellationToken);
             }
+
+            // 陌生人消息限制：转发进入单聊同样受「回复前 1 条」限制。
+            await EnsureStrangerMessageAllowedAsync(userId, targetConversation, cancellationToken);
 
             var source = await _db.Messages.AsNoTracking()
                 .FirstOrDefaultAsync(item => item.Id == messageIdValue, cancellationToken);
@@ -1436,6 +1442,87 @@ public sealed class MessageService
         }
 
         return conversation;
+    }
+
+    /// <summary>
+    /// 陌生人消息限制：接收方未开启「允许陌生人向我发送消息」时，
+    /// 非好友且无其他共同会话的发送者在对方回复前只能发送 1 条消息。
+    /// 仅作用于单聊；群聊、好友与存在其他共同会话的用户不受限。
+    /// </summary>
+    private async Task EnsureStrangerMessageAllowedAsync(
+        string senderId,
+        ConversationEntity conversation,
+        CancellationToken cancellationToken)
+    {
+        if (conversation.Type != ConversationType.Direct)
+        {
+            return;
+        }
+
+        var memberIds = await _db.ConversationMembers.AsNoTracking()
+            .Where(member => member.ConversationId == conversation.Id)
+            .Select(member => member.UserId)
+            .ToListAsync(cancellationToken);
+        var recipientId = memberIds.FirstOrDefault(memberId => memberId != senderId);
+        if (recipientId is null)
+        {
+            return;
+        }
+
+        var allowStrangerMessages = await _db.Users.AsNoTracking()
+            .Where(user => user.Id == recipientId)
+            .Select(user => (bool?)user.AllowStrangerMessages)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (allowStrangerMessages is not false)
+        {
+            // 已开启（或对方账号已不存在）时不额外限制，成员校验负责兜底。
+            return;
+        }
+
+        var isFriend = await _db.Friends.AsNoTracking()
+            .AnyAsync(
+                friend => friend.OwnerUserId == senderId && friend.FriendUserId == recipientId,
+                cancellationToken);
+        if (isFriend)
+        {
+            return;
+        }
+
+        // 存在除当前单聊外的其他共同会话（如共同群聊）时不算陌生人。
+        var sharesOtherConversation = await (
+            from senderMember in _db.ConversationMembers.AsNoTracking()
+            where senderMember.UserId == senderId && senderMember.ConversationId != conversation.Id
+            join recipientMember in _db.ConversationMembers.AsNoTracking()
+                on senderMember.ConversationId equals recipientMember.ConversationId
+            where recipientMember.UserId == recipientId
+            select senderMember.ConversationId).AnyAsync(cancellationToken);
+        if (sharesOtherConversation)
+        {
+            return;
+        }
+
+        var recipientReplied = await _db.Messages.AsNoTracking()
+            .AnyAsync(
+                message => message.ConversationId == conversation.Id
+                    && message.SenderId == recipientId
+                    && message.MsgType != MessageType.System
+                    && message.DeletedAt == null,
+                cancellationToken);
+        if (recipientReplied)
+        {
+            return;
+        }
+
+        var senderSentBefore = await _db.Messages.AsNoTracking()
+            .AnyAsync(
+                message => message.ConversationId == conversation.Id
+                    && message.SenderId == senderId
+                    && message.MsgType != MessageType.System,
+                cancellationToken);
+        if (senderSentBefore)
+        {
+            throw ApiException.Forbidden("对方暂不接受陌生人消息，互加好友后可继续发送");
+        }
     }
 
     /// <summary>

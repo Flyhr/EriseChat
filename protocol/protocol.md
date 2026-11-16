@@ -775,6 +775,14 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 实时：变化成功后向该会话全部在线连接广播 `message.reactions`（摘要共享、`mine` 按接收账号计算）；离线成员重连后由历史/同步拿最新摘要，撤回后不可再修改。
     - 历史、搜索、定位上下文与补拉的 Message 对象均带 `reactions`（本人视角）；已撤回消息不返回回应。
 
+19. **隐私设置与陌生人消息限制（REST，v1）**：默认不允许陌生人直接发送消息。陌生人指「非好友、且与该账号不存在除当前单聊之外的其他共同会话」的用户；群聊、好友与存在其他共同会话的用户不受限。
+
+    - `GET /api/me/privacy`：读取隐私设置，返回 `{ "allowStrangerMessages": false }`。
+    - `PATCH /api/me/privacy`：请求体 `{ "allowStrangerMessages": true }`，返回更新后的设置；字段缺失或不是布尔值 → `VALIDATION_FAILED`（400）；未登录 → `UNAUTHORIZED`（401）。
+    - 存储：`users` 表新增 `allow_stranger_messages INTEGER NOT NULL DEFAULT 0`（`protocol/schema.sql` 与 EF 迁移同步），默认 0 = 关闭；旧库升级时按默认值补齐，不影响既有账号。
+    - 关闭时：陌生人对该账号的单聊只能发送 **1 条**消息，对方回复（未撤回）后不再受该限制；`message.send`（WS）与转发进入单聊的 `POST /api/messages/forward` 同受影响。拒绝返回 `FORBIDDEN`（403），文案「对方暂不接受陌生人消息，互加好友后可继续发送」。已落库消息的幂等重试（`clientMsgId` 命中）仍返回原回执，不受限制。
+    - 开启时不限制陌生人的单聊发送；已有消息与历史读取、已读/未读、`seq` 连续性均不受影响；开关不推送 WS 帧，客户端重新拉取即可。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -864,3 +872,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C2c 修订：共享链接游标） | 2026-11-14 | `GET /api/conversations/{conversationId}/links` 改为 `(beforeSeq, beforeOffset)` 组合游标，响应新增 `nextBeforeSeq` / `nextBeforeOffset`：只在 `seq` 等于 `beforeSeq` 的消息内从第 `beforeOffset` 个链接继续取，同一条消息里的多个链接可分页取完；没有有效链接的区间由服务端在同一请求内继续跨过（单次最多扫描 2000 条含 `http` 的候选消息）；只传 `beforeSeq` 的旧客户端保持「`seq` 小于 `beforeSeq`」语义；`files` 接口与撤回过滤不变；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（C3 消息表情回应） | 2026-11-14 | 新增 1 个帧（共 24 个 type）：`message.reactions`（S→C，摘要 `{ emoji, count, mine }`，摘要共享、`mine` 按接收账号计算，空数组表示已无回应）；Message 新增可选 `reactions`；新增 REST `PUT` / `DELETE /api/conversations/{conversationId}/messages/{messageId}/reactions/mine`（白名单 `thumbs_up`/`heart`/`joy`/`wow`/`sad`/`tada`，每人每消息至多一条，均幂等）；`messages` 新增 `reactions_updated_at INTEGER` 列，新增 `message_reactions` 表（主键 `(message_id, user_id)`）；`sync.response` 的 `updates` 起覆盖回应新增/替换/取消，恢复不依赖消息 `seq`，移除最后一个回应时返回空数组；回应不产生消息、不推进 `seq`/已读/未读、不改会话排序、不推送系统通知；`protocolVersion` 仍为 1 |
 | v1（C3 修订：回应同步游标与并发写入） | 2026-11-14 | ① `sync.response` 的每条 batch 都携带 `updatedThrough`；客户端未提供 `updatedAfter` 的会话即使没有新消息/状态变化也返回一条仅含 `updatedThrough` 的**游标初始化** batch，修复空缓存客户端「没有游标就不发 `updatedAfter`」的死循环；② 回应设置/移除的服务端成员与消息状态校验、读取本人回应、写入放进同一 SQLite 写事务（`BEGIN IMMEDIATE`），同账号多端并发设置、替换或删除不再因复合主键冲突返回 500（后到者等待写锁后走幂等/替换分支）；无新帧、不改库表、`protocolVersion` 仍为 1 |
+| v1（隐私设置与陌生人消息限制） | 2026-11-15 | 新增 REST `GET` / `PATCH /api/me/privacy`（字段 `allowStrangerMessages`，默认 false）；`users` 表新增 `allow_stranger_messages INTEGER NOT NULL DEFAULT 0`；关闭时陌生人在对方回复前只能发送 1 条单聊消息，转发进入单聊同受限制（`FORBIDDEN` 403），好友/共同群/群聊不受影响，已落库消息的幂等重试不受影响；无新帧、`protocolVersion` 仍为 1 |

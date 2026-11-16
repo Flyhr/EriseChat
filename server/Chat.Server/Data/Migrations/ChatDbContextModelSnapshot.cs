@@ -661,6 +661,12 @@ namespace Chat.Server.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasColumnName("id");
 
+                    b.Property<bool>("AllowStrangerMessages")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false)
+                        .HasColumnName("allow_stranger_messages");
+
                     b.Property<string>("AvatarFileId")
                         .HasColumnType("TEXT")
                         .HasColumnName("avatar_file_id");

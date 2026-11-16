@@ -28,6 +28,7 @@
 -- status : active / disabled（禁用后不可登录、不发消息）
 -- avatar_file_id 为便利引用（指向 files.id），不加外键以避免 users ↔ files 循环依赖；
 -- 由服务端在文件清理时维护一致性。
+-- allow_stranger_messages：是否允许陌生人直接发送消息（0/1，默认 0 = 陌生人在我回复前只能发送 1 条）。
 -- ------------------------------------------------------------
 CREATE TABLE users (
     id                TEXT PRIMARY KEY NOT NULL,
@@ -38,7 +39,8 @@ CREATE TABLE users (
     avatar_file_id    TEXT,
     role              TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
     status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-    created_at        INTEGER NOT NULL
+    created_at        INTEGER NOT NULL,
+    allow_stranger_messages INTEGER NOT NULL DEFAULT 0
 );
 
 -- ------------------------------------------------------------

@@ -34,4 +34,10 @@ public sealed class User
 
     /// <summary>创建时间。</summary>
     public long CreatedAt { get; set; }
+
+    /// <summary>
+    /// 是否允许陌生人直接向我发送消息（默认 false）。
+    /// 关闭时：非好友且无共同会话的发送者只能发送 1 条消息，直到我回复后才可继续。
+    /// </summary>
+    public bool AllowStrangerMessages { get; set; }
 }

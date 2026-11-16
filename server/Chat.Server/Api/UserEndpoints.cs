@@ -33,6 +33,16 @@ public static class UserEndpoints
             .RequireAuthorization()
             .Produces(StatusCodes.Status204NoContent);
 
+        app.MapGet("/api/me/privacy", GetPrivacyAsync)
+            .WithName("GetPrivacy")
+            .RequireAuthorization()
+            .Produces<PrivacySettingsResponse>();
+
+        app.MapPatch("/api/me/privacy", UpdatePrivacyAsync)
+            .WithName("UpdatePrivacy")
+            .RequireAuthorization()
+            .Produces<PrivacySettingsResponse>();
+
         app.MapGet("/api/users", SearchUsersAsync)
             .WithName("SearchUsers")
             .RequireAuthorization()
@@ -57,6 +67,49 @@ public static class UserEndpoints
             profile.Status,
             profile.CreatedAt,
             profile.HasPassword));
+    }
+
+    /// <summary>隐私设置：读取当前用户是否允许陌生人直接发送消息（默认 false）。</summary>
+    private static async Task<IResult> GetPrivacyAsync(
+        ClaimsPrincipal principal,
+        ChatDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        var allow = await db.Users.AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => (bool?)user.AllowStrangerMessages)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (allow is null)
+        {
+            throw ApiException.NotFound("用户不存在");
+        }
+
+        return Results.Json(new PrivacySettingsResponse(allow.Value));
+    }
+
+    /// <summary>隐私设置：更新是否允许陌生人直接发送消息（仅允许改这一个开关）。</summary>
+    private static async Task<IResult> UpdatePrivacyAsync(
+        ClaimsPrincipal principal,
+        UpdatePrivacyRequest request,
+        ChatDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var userId = principal.UserId();
+        if (request.AllowStrangerMessages is not bool allow)
+        {
+            throw ApiException.ValidationFailed("allowStrangerMessages 必须为布尔值");
+        }
+
+        var user = await db.Users.FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            throw ApiException.NotFound("用户不存在");
+        }
+
+        user.AllowStrangerMessages = allow;
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Json(new PrivacySettingsResponse(allow));
     }
 
     /// <summary>F-13：修改/设置密码（已有密码须校验旧密码；从未设置过密码时直接设置）。</summary>
@@ -177,6 +230,12 @@ public static class UserEndpoints
 
     /// <summary>F-13：POST /api/me/password 请求体（已有密码须 oldPassword；从未设置过密码可省略）。</summary>
     public sealed record ChangePasswordRequest(string? OldPassword = null, string? NewPassword = null);
+
+    /// <summary>隐私设置（GET/PATCH /api/me/privacy）：是否允许陌生人直接发送消息，默认 false。</summary>
+    public sealed record PrivacySettingsResponse(bool AllowStrangerMessages);
+
+    /// <summary>PATCH /api/me/privacy 请求体；省略或 null 时按参数校验失败处理。</summary>
+    public sealed record UpdatePrivacyRequest(bool? AllowStrangerMessages = null);
 
     /// <summary>当前用户资料（字段与 apps/web/src/api/users.ts 的 UserProfile 对齐）。</summary>
     public sealed record MeResponse(
