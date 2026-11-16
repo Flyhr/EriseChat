@@ -1,14 +1,16 @@
 // 联系人页（UI-03 批次2 双栏 + F-17 批次5 好友体系）：
-// 左栏三块切换「好友 / 申请 / 搜索」，右栏资料区（ContactProfile）。
+// 左栏「好友 / 申请」两块切换，右栏资料区（ContactProfile）。
 // - 好友：按分组展示（备注优先显示），选中可查看资料、维护备注/分组、删除好友；
 // - 申请：收到的申请可接受/拒绝，发出的可撤销（实时推送由 friends store 接收）；
-// - 搜索：按昵称或完整邮箱搜索同事，按 relation 显示加为好友 / 已发送 / 待处理；搜索结果不含他人邮箱。
+// - 搜索：头部搜索框输入即内联搜索「联系人 + 聊天信息」，好友与会话成员归「联系人」，陌生人单独分类；
+//   与消息页共用同一输入框样式与结果区，输入期间隐藏页签、结果直接替换列表；清空后恢复原页签。
+//   点聊天信息直接跳到对应会话并定位（与全局搜索面板同一跳转方式）。搜索结果不含他人邮箱。
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { blocksApi } from '../api/blocks'
-import { usersApi, type UserProfile } from '../api/users'
-import type { Conversation } from '../types/frames'
+import type { UserProfile } from '../api/users'
+import type { Conversation, Message } from '../types/frames'
 import type { Friend, FriendRequest } from '../types/frames'
 import AppDialog from '../components/AppDialog.vue'
 import SearchInput from '../components/SearchInput.vue'
@@ -16,16 +18,18 @@ import AppIcon from '../components/AppIcon.vue'
 import Avatar from '../components/Avatar.vue'
 import ContactProfile from '../components/ContactProfile.vue'
 import EmptyState from '../components/EmptyState.vue'
+import InlineSearchResults from '../components/InlineSearchResults.vue'
 import NewGroupDialog from '../components/NewGroupDialog.vue'
 import PresenceDot from '../components/PresenceDot.vue'
 import { friendlyError } from '../core/errorMessages'
+import { useInlineSearch } from '../core/inlineSearch'
 import { enter, type MotionHandle } from '../core/motion'
 import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
 import { useFriendsStore } from '../stores/friends'
 import { usePresenceStore } from '../stores/presence'
 
-type ContactsTab = 'friends' | 'requests' | 'search'
+type ContactsTab = 'friends' | 'requests'
 
 /** 资料区所需的最小用户信息（UserProfile 结构兼容；邮箱仅好友与本人有值）。 */
 interface ContactUser {
@@ -35,7 +39,6 @@ interface ContactUser {
   avatarFileId?: string | null
 }
 
-const SEARCH_DEBOUNCE_MS = 300
 const MESSAGE_MAX_LENGTH = 100
 
 const router = useRouter()
@@ -45,12 +48,21 @@ const friends = useFriendsStore()
 
 const tab = ref<ContactsTab>('friends')
 
-// 搜索态
-const keyword = ref('')
-const results = ref<UserProfile[]>([])
-const searched = ref(false)
-const searching = ref(false)
-const searchError = ref('')
+// 搜索态（内联搜索：联系人 + 聊天信息；陌生人单独分类，默认不展示）
+const {
+  query: searchQuery,
+  keyword: searchKeyword,
+  category: searchCategory,
+  loading: searchLoading,
+  error: searchError,
+  selfUserId,
+  contactMatches,
+  strangerMatches,
+  messageMatches,
+  clear: clearSearch,
+  setCategory: setSearchCategory,
+  updateUserRelation,
+} = useInlineSearch()
 
 // 选中与操作态
 const selectedUser = ref<ContactUser | null>(null)
@@ -77,8 +89,6 @@ const requestMessage = ref('')
 const requestSubmitting = ref(false)
 const requestDialogError = ref('')
 
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-
 const incomingCount = computed(() => friends.incomingCount)
 
 const selectedFriend = computed<Friend | null>(() => {
@@ -92,7 +102,10 @@ const selectedPresence = computed(() => presence.stateOf(selectedUser.value?.use
 const selectedRelation = computed<'friend' | 'outgoing' | 'incoming' | null>(() => {
   if (!selectedUser.value) return null
   if (selectedFriend.value) return 'friend'
-  const result = results.value.find((item) => item.userId === selectedUser.value?.userId)
+  const userId = selectedUser.value.userId
+  const result =
+    contactMatches.value.find((item) => item.userId === userId) ??
+    strangerMatches.value.find((item) => item.userId === userId)
   return result?.relation ?? null
 })
 
@@ -163,67 +176,36 @@ watch(
 )
 
 // ---------------------------------------------------------------------------
-// 搜索
+// 内联搜索（联系人 + 聊天信息，陌生人单独分类）
 // ---------------------------------------------------------------------------
 
-/** 头部搜索框获得焦点时切到「搜索」页签（输入直接触发防抖搜索）。 */
-function onHeaderSearchFocus(): void {
-  if (tab.value !== 'search') switchTab('search')
-}
-
 function clearKeyword(): void {
-  keyword.value = ''
+  clearSearch()
 }
 
-async function search(immediate = false): Promise<void> {
-  if (searchTimer) {
-    clearTimeout(searchTimer)
-    searchTimer = null
-  }
-
-  const text = keyword.value.trim()
-  if (!text) {
-    results.value = []
-    searched.value = false
-    searchError.value = ''
-    return
-  }
-
-  if (!immediate) {
-    searchTimer = setTimeout(() => {
-      searchTimer = null
-      void search(true)
-    }, SEARCH_DEBOUNCE_MS)
-    return
-  }
-
-  searching.value = true
-  searchError.value = ''
-  try {
-    const response = await usersApi.search(text)
-    results.value = response.users
-    searched.value = true
-  } catch (error) {
-    results.value = []
-    searched.value = true
-    searchError.value = friendlyError(error)
-  } finally {
-    searching.value = false
-  }
+function searchUserOf(userId: string): UserProfile | undefined {
+  return (
+    contactMatches.value.find((item) => item.userId === userId) ??
+    strangerMatches.value.find((item) => item.userId === userId)
+  )
 }
 
-watch(keyword, () => {
-  // 头部搜索框输入即切到「搜索」页签（不依赖 focus 事件，避免键盘/程序化输入时漏切）。
-  if (keyword.value.trim() && tab.value !== 'search') switchTab('search')
-  if (tab.value === 'search') void search()
-})
-
-function selectResult(user: UserProfile): void {
+function selectSearchUser(user: UserProfile): void {
   selectedUser.value = user
 }
 
-function updateRelationLocal(userId: string, relation: 'friend' | 'outgoing'): void {
-  results.value = results.value.map((user) => (user.userId === userId ? { ...user, relation } : user))
+function requestSearchFriend(userId: string): void {
+  const user = searchUserOf(userId)
+  if (user) askRequest(user)
+}
+
+/** 点聊天信息：跳到对应会话并定位到该消息（与全局搜索面板同一跳转方式）。 */
+async function selectSearchMessage(message: Message): Promise<void> {
+  await router.push({
+    name: 'chat',
+    params: { conversationId: message.conversationId },
+    query: { jumpSeq: String(message.seq), jumpMessageId: message.messageId },
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +231,7 @@ async function confirmRequest(): Promise<void> {
   requestDialogError.value = ''
   try {
     const result = await friends.sendRequest(target.userId, message || undefined)
-    updateRelationLocal(target.userId, result.autoAccepted ? 'friend' : 'outgoing')
+    updateUserRelation(target.userId, result.autoAccepted ? 'friend' : 'outgoing')
     requestTarget.value = null
   } catch (error) {
     requestDialogError.value = friendlyError(error)
@@ -391,13 +373,9 @@ async function onGroupCreated(conversation: Conversation): Promise<void> {
 
 void ensureFriendsLoaded()
 void ensureBlocksLoaded()
-
-onBeforeUnmount(() => {
-  if (searchTimer) {
-    clearTimeout(searchTimer)
-    searchTimer = null
-  }
-})
+// 内联搜索的聊天信息行要用会话标题与成员昵称（SearchResultItem 从会话 store 取），
+// 联系人页不加载会话列表时会退化成会话 ID 与「未知用户」，这里幂等补齐。
+void conversations.load().catch(() => undefined)
 </script>
 
 <template>
@@ -405,12 +383,11 @@ onBeforeUnmount(() => {
     <aside class="contacts-page__list">
       <header class="contacts-page__header">
         <SearchInput
-          v-model="keyword"
+          v-model="searchQuery"
           class="contacts-page__searchbox"
-          placeholder="搜索联系人"
-          aria-label="搜索联系人"
+          placeholder="搜索联系人或聊天信息"
+          aria-label="搜索联系人或聊天信息"
           :maxlength="64"
-          @focus="onHeaderSearchFocus"
           @escape="clearKeyword"
         />
         <button
@@ -424,7 +401,12 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <div class="contacts-page__tabs" role="tablist" aria-label="联系人视图">
+      <div
+        v-if="!searchKeyword"
+        class="contacts-page__tabs"
+        role="tablist"
+        aria-label="联系人视图"
+      >
         <button
           type="button"
           role="tab"
@@ -446,20 +428,10 @@ onBeforeUnmount(() => {
           申请
           <span v-if="incomingCount > 0" class="contacts-page__tab-badge">{{ incomingCount }}</span>
         </button>
-        <button
-          type="button"
-          role="tab"
-          class="contacts-page__tab"
-          :class="{ 'contacts-page__tab--active': tab === 'search' }"
-          :aria-selected="tab === 'search'"
-          @click="switchTab('search')"
-        >
-          搜索
-        </button>
       </div>
 
       <!-- 好友 -->
-      <div v-if="tab === 'friends'" class="contacts-page__section">
+      <div v-if="!searchKeyword && tab === 'friends'" class="contacts-page__section">
         <p v-if="friendLoadError" class="contacts-page__error" role="alert">{{ friendLoadError }}</p>
         <div
           v-if="friends.loading && friends.friends.length === 0"
@@ -504,12 +476,12 @@ onBeforeUnmount(() => {
           v-if="!friends.loading && friends.friends.length === 0"
           icon="contacts"
           title="还没有好友"
-          description="切到「搜索」按昵称或完整邮箱查找同事，发送好友申请。"
+          description="在顶部搜索框按昵称或完整邮箱查找同事，发送好友申请。"
         />
       </div>
 
       <!-- 申请 -->
-      <div v-else-if="tab === 'requests'" class="contacts-page__section">
+      <div v-else-if="!searchKeyword && tab === 'requests'" class="contacts-page__section">
         <p v-if="requestError" class="contacts-page__error" role="alert">{{ requestError }}</p>
         <h3 class="contacts-page__group">收到的申请</h3>
         <p v-if="friends.incoming.length === 0" class="contacts-page__hint">暂无收到的好友申请。</p>
@@ -562,73 +534,25 @@ onBeforeUnmount(() => {
         </ul>
       </div>
 
-      <!-- 搜索 -->
-      <div v-else class="contacts-page__section">
-        <p v-if="!keyword.trim()" class="contacts-page__hint">输入昵称或完整邮箱搜索同事。</p>
-        <p v-if="searchError" class="contacts-page__error" role="alert">{{ searchError }}</p>
-        <p v-if="searching" class="contacts-page__hint">搜索中…</p>
-        <ul v-else-if="results.length" class="contacts-page__results">
-          <li v-for="user in results" :key="user.userId" class="contacts-page__row">
-            <button
-              type="button"
-              class="contacts-page__row-main"
-              :class="{ 'contacts-page__row-main--active': selectedUser?.userId === user.userId }"
-              @click="selectResult(user)"
-            >
-              <Avatar
-                :display-name="user.displayName"
-                :size="36"
-                :avatar-file-id="user.avatarFileId ?? undefined"
-              />
-              <span class="contacts-page__result-info">
-                <span class="contacts-page__result-name">
-                  <PresenceDot :online="presence.stateOf(user.userId)" />
-                  {{ user.displayName }}
-                </span>
-                <span v-if="user.email" class="contacts-page__result-email">{{ user.email }}</span>
-              </span>
-            </button>
-            <button
-              v-if="user.relation === 'friend'"
-              type="button"
-              class="contacts-page__relation-btn"
-              @click="selectResult(user)"
-            >
-              已好友
-            </button>
-            <button
-              v-else-if="user.relation === 'outgoing'"
-              type="button"
-              class="contacts-page__relation-btn"
-              disabled
-            >
-              已发送
-            </button>
-            <button
-              v-else-if="user.relation === 'incoming'"
-              type="button"
-              class="contacts-page__relation-btn"
-              @click="switchTab('requests')"
-            >
-              待处理
-            </button>
-            <button
-              v-else
-              type="button"
-              class="contacts-page__relation-btn contacts-page__relation-btn--primary"
-              @click="askRequest(user)"
-            >
-              加好友
-            </button>
-          </li>
-        </ul>
-        <EmptyState
-          v-else-if="searched"
-          icon="search"
-          title="未找到匹配用户"
-          description="换个昵称或完整邮箱再试试。"
+      <!-- 搜索：联系人 + 聊天信息（陌生人单独分类，默认不展示）；与消息页结果区同样占满列表区 -->
+      <div v-else class="contacts-page__section contacts-page__section--search">
+        <InlineSearchResults
+          :query="searchKeyword"
+          :category="searchCategory"
+          :loading="searchLoading"
+          :error="searchError"
+          :conversations="[]"
+          :contacts="contactMatches"
+          :strangers="strangerMatches"
+          :messages="messageMatches"
+          :self-user-id="selfUserId"
+          :active-user-id="selectedUser?.userId ?? ''"
+          show-relation-actions
+          @update:category="setSearchCategory"
+          @select-user="selectSearchUser"
+          @select-message="selectSearchMessage"
+          @request-friend="requestSearchFriend"
         />
-        <p v-else class="contacts-page__hint">输入昵称或完整邮箱搜索同事。</p>
       </div>
     </aside>
 
@@ -803,6 +727,13 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+/* 内联搜索结果自带滚动与内边距（与消息页同构），这里只负责占满列表区。 */
+.contacts-page__section--search {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .contacts-page__group {
   margin: var(--ec-space-2) 0 0;
   color: var(--ec-text-tertiary);
@@ -855,8 +786,7 @@ onBeforeUnmount(() => {
   list-style: none;
 }
 
-.contacts-page__result,
-.contacts-page__row-main {
+.contacts-page__result {
   display: flex;
   gap: var(--ec-space-2);
   align-items: center;
@@ -870,19 +800,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.contacts-page__result--active,
-.contacts-page__row-main--active {
+.contacts-page__result--active {
   background: var(--ec-brand-050);
-}
-
-.contacts-page__row {
-  display: flex;
-  gap: var(--ec-space-2);
-  align-items: center;
-}
-
-.contacts-page__row-main {
-  flex: 1;
 }
 
 .contacts-page__result-info {
@@ -907,28 +826,6 @@ onBeforeUnmount(() => {
   font-size: var(--ec-font-size-small);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.contacts-page__relation-btn {
-  flex: none;
-  padding: 4px var(--ec-space-2);
-  border: 1px solid var(--ec-border);
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-surface);
-  color: var(--ec-text-secondary);
-  font-size: var(--ec-font-size-small);
-  cursor: pointer;
-}
-
-.contacts-page__relation-btn--primary {
-  border-color: var(--ec-brand-600);
-  color: var(--ec-brand-600);
-  font-weight: var(--ec-font-weight-medium);
-}
-
-.contacts-page__relation-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .contacts-page__request {
@@ -1118,6 +1015,10 @@ onBeforeUnmount(() => {
 
   .contacts-page__section {
     padding: var(--ec-space-2) var(--ec-space-3) var(--ec-space-4);
+  }
+
+  .contacts-page__section--search {
+    padding: 0;
   }
 
   .contacts-page__result,

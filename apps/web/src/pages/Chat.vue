@@ -5,6 +5,7 @@ import AppDialog from '../components/AppDialog.vue'
 import AppIcon from '../components/AppIcon.vue'
 import ChatDetailsPanel from '../components/ChatDetailsPanel.vue'
 import ChatHeader from '../components/ChatHeader.vue'
+import ContactProfile from '../components/ContactProfile.vue'
 import ConversationList from '../components/ConversationList.vue'
 import EmojiPanel from '../components/EmojiPanel.vue'
 import ForwardDialog from '../components/ForwardDialog.vue'
@@ -53,7 +54,9 @@ import { usePresenceStore } from '../stores/presence'
 import { useTypingStore } from '../stores/typing'
 import { useDraftsStore } from '../stores/drafts'
 import { useFavoritesStore } from '../stores/favorites'
+import { useFriendsStore } from '../stores/friends'
 import { useSearchStore } from '../stores/search'
+import type { UserProfile } from '../api/users'
 import type { Conversation, Message } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
@@ -67,6 +70,7 @@ const typing = useTypingStore()
 const presence = usePresenceStore()
 const drafts = useDraftsStore()
 const favorites = useFavoritesStore()
+const friends = useFriendsStore()
 /** typing 帧的客户端节流（同一会话 3 秒最多一次，protocol.md §4.7）。 */
 const typingThrottle = new TypingThrottle()
 
@@ -86,6 +90,21 @@ watch(
 )
 const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
+)
+
+/**
+ * 内联搜索点击联系人/陌生人：在第三栏预览资料，不清空搜索、不改变当前会话。
+ * 预览优先于聊天内容显示，点会话或「返回」退出预览。
+ */
+const previewUser = ref<UserProfile | null>(null)
+const previewFriend = computed(() =>
+  previewUser.value
+    ? friends.friends.find((friend) => friend.userId === previewUser.value?.userId) ?? null
+    : null,
+)
+const previewPresence = computed(() => presence.stateOf(previewUser.value?.userId))
+const previewRelation = computed<'friend' | 'outgoing' | 'incoming' | null>(() =>
+  previewFriend.value ? 'friend' : previewUser.value?.relation ?? null,
 )
 const isGroup = computed(() => activeConversation.value?.type === 'group')
 /** F-25：群聊 @ 成员候选（单聊为空 = 不启用候选面板）；角色用于候选行小字。 */
@@ -1353,7 +1372,38 @@ onBeforeUnmount(() => {
 })
 
 function selectConversation(conversationId: string): void {
+  previewUser.value = null
   void router.push({ name: 'chat', params: { conversationId } })
+}
+
+/** 内联搜索结果点击联系人/陌生人：第三栏预览资料（不建会话、不清空搜索）。 */
+function openUserPreview(user: UserProfile): void {
+  previewUser.value = user
+  void friends.ensureLoaded().catch(() => undefined)
+}
+
+function closeUserPreview(): void {
+  previewUser.value = null
+}
+
+/** 资料预览里明确点「发送消息」才创建单聊并进入会话。 */
+async function startPreviewChat(user: { userId: string }): Promise<void> {
+  try {
+    const conversation = await conversations.createDirect(user.userId)
+    previewUser.value = null
+    selectConversation(conversation.conversationId)
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  }
+}
+
+async function requestPreviewFriend(user: { userId: string }): Promise<void> {
+  try {
+    await friends.sendRequest(user.userId)
+    showToast('好友申请已发送')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  }
 }
 
 /** ≤800 移动布局：从聊天详情返回——有站内历史则后退（保留列表滚动/筛选），否则回会话列表。 */
@@ -2139,7 +2189,10 @@ function onWindowDrop(event: DragEvent): void {
 <template>
   <main
     class="chat-page"
-    :class="{ 'chat-page--conversation': Boolean(activeId), 'chat-page--members': asideOpen }"
+    :class="{
+      'chat-page--conversation': Boolean(activeId) || Boolean(previewUser),
+      'chat-page--members': asideOpen,
+    }"
   >
     <ConversationList
       class="chat-page__list"
@@ -2149,6 +2202,7 @@ function onWindowDrop(event: DragEvent): void {
       :loading="conversations.loading"
       :filter="listFilter"
       @select="selectConversation"
+      @select-user="openUserPreview"
       @update:filter="changeListFilter"
       @create="openContacts"
     />
@@ -2161,7 +2215,28 @@ function onWindowDrop(event: DragEvent): void {
       @drop="onDrop"
     >
       <NoticeBar v-if="pageNotice" :text="pageNotice" action-label="知道了" @action="pageNotice = ''" />
-      <template v-if="activeConversation">
+
+      <template v-if="previewUser">
+        <div class="chat-page__profile">
+          <header class="chat-page__profile-header">
+            <button type="button" class="chat-page__inline-action" @click="closeUserPreview">
+              <AppIcon name="back" :size="16" />
+              返回
+            </button>
+            <h2 class="chat-page__profile-title">联系人资料</h2>
+          </header>
+          <ContactProfile
+            :user="previewUser"
+            :presence="previewPresence"
+            :friend="previewFriend"
+            :relation="previewRelation"
+            :show-block="false"
+            @start-chat="startPreviewChat"
+            @send-request="requestPreviewFriend"
+          />
+        </div>
+      </template>
+      <template v-else-if="activeConversation">
         <ChatHeader
           ref="headerRef"
           :title="activeTitle"
@@ -2570,6 +2645,34 @@ function onWindowDrop(event: DragEvent): void {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+}
+
+/* 内联搜索结果点击用户：第三栏资料预览（替换聊天内容，返回后回到原会话）。 */
+.chat-page__profile {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chat-page__profile-header {
+  display: flex;
+  flex: none;
+  gap: var(--ec-space-3);
+  align-items: center;
+  padding: var(--ec-space-3) var(--ec-space-4);
+  border-bottom: 1px solid var(--ec-border-soft);
+}
+
+.chat-page__profile-title {
+  margin: 0;
+  color: var(--ec-text-primary);
+  font-size: var(--ec-font-size-body);
+  font-weight: var(--ec-font-weight-semibold);
+}
+
+.chat-page__profile .contact-profile {
   min-height: 0;
 }
 

@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Conversation } from '../types/frames'
+import { useRouter } from 'vue-router'
+import type { Conversation, Message } from '../types/frames'
+import type { UserProfile } from '../api/users'
 import { filterConversations, type ConversationFilter } from '../core/chatLayout'
 import { friendlyError } from '../core/errorMessages'
+import { useInlineSearch } from '../core/inlineSearch'
 import { enter, type MotionHandle } from '../core/motion'
 import { showToast } from '../core/toast'
 import { useConversationsStore } from '../stores/conversations'
-import { useSearchStore } from '../stores/search'
 import AppIcon from './AppIcon.vue'
 import ConversationItem from './ConversationItem.vue'
+import InlineSearchResults from './InlineSearchResults.vue'
+import SearchInput from './SearchInput.vue'
 
 // 会话列表（UI-02 批次1，计划 §5.2）：头部搜索框 + 发起聊天、全部/未读/群聊本地筛选、复用 ConversationItem。
 // F-11 体验调整：搜索框放在「发起聊天」左侧，可直接输入（250ms 防抖）在列表区内联展示命中消息，
@@ -27,6 +31,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   select: [conversationId: string]
+  'select-user': [user: UserProfile]
   'update:filter': [filter: ConversationFilter]
   create: []
 }>()
@@ -83,11 +88,38 @@ watch(
   { immediate: true },
 )
 
-const search = useSearchStore()
+// 列表内联搜索（F-11 体验调整）：直接在本页搜索框内完成「会话 / 联系人 / 聊天信息」搜索，
+// 不再打开全局 SearchDialog；Ctrl/Cmd+K 的全局面板保持不变。
+const router = useRouter()
+const {
+  query,
+  category,
+  keyword,
+  hasKeyword,
+  conversationMatches,
+  contactMatches,
+  strangerMatches,
+  messageMatches,
+  loading: searchLoading,
+  error: searchError,
+  clear: clearSearch,
+  setCategory,
+} = useInlineSearch()
 
-/** U-07：搜索统一走全局 SearchDialog，列表内不再发第二次请求。 */
-function openGlobalSearch(): void {
-  search.openGlobal()
+function selectSearchConversation(conversationId: string): void {
+  emit('select', conversationId)
+}
+
+async function selectSearchMessage(message: Message): Promise<void> {
+  await router.push({
+    name: 'chat',
+    params: { conversationId: message.conversationId },
+    query: { jumpSeq: String(message.seq), jumpMessageId: message.messageId },
+  })
+}
+
+function selectSearchUser(user: UserProfile): void {
+  emit('select-user', user)
 }
 
 const emptyText = computed(() => {
@@ -163,15 +195,14 @@ async function onUpdateSettings(payload: {
 <template>
   <section class="ec-conversation-list" aria-label="会话列表">
     <header class="ec-conversation-list__header">
-      <button
-        type="button"
-        class="ec-conversation-list__searchbox ec-conversation-list__search-trigger"
-        aria-label="搜索消息、联系人或群聊"
-        @click="openGlobalSearch"
-      >
-        <span class="ec-conversation-list__search-text">搜索消息、联系人或群聊</span>
-        <AppIcon name="search" :size="16" class="ec-conversation-list__search-icon" />
-      </button>
+      <SearchInput
+        v-model="query"
+        class="ec-conversation-list__searchbox"
+        placeholder="搜索会话、联系人或消息"
+        aria-label="搜索会话、联系人或消息"
+        :maxlength="64"
+        @escape="clearSearch"
+      />
       <button
         type="button"
         class="ec-conversation-list__create"
@@ -183,7 +214,7 @@ async function onUpdateSettings(payload: {
       </button>
     </header>
 
-    <div class="ec-conversation-list__filters" role="tablist" aria-label="会话筛选">
+    <div v-if="!hasKeyword" class="ec-conversation-list__filters" role="tablist" aria-label="会话筛选">
       <button
         v-for="item in filters"
         :key="item.key"
@@ -198,40 +229,61 @@ async function onUpdateSettings(payload: {
       </button>
     </div>
 
-    <div
-      v-if="loading && visible.length === 0"
-      ref="loadingRef"
-      class="ec-conversation-list__loading"
-      role="status"
-      aria-label="会话加载中"
-      aria-busy="true"
-    >
-      <div v-for="index in 6" :key="index" class="ec-conversation-list__loading-row">
-        <div class="ec-skeleton ec-conversation-list__loading-avatar" />
-        <div class="ec-conversation-list__loading-lines">
-          <div class="ec-skeleton ec-conversation-list__loading-line" />
-          <div class="ec-skeleton ec-conversation-list__loading-line ec-conversation-list__loading-line--short" />
+    <template v-if="!hasKeyword">
+      <div
+        v-if="loading && visible.length === 0"
+        ref="loadingRef"
+        class="ec-conversation-list__loading"
+        role="status"
+        aria-label="会话加载中"
+        aria-busy="true"
+      >
+        <div v-for="index in 6" :key="index" class="ec-conversation-list__loading-row">
+          <div class="ec-skeleton ec-conversation-list__loading-avatar" />
+          <div class="ec-conversation-list__loading-lines">
+            <div class="ec-skeleton ec-conversation-list__loading-line" />
+            <div class="ec-skeleton ec-conversation-list__loading-line ec-conversation-list__loading-line--short" />
+          </div>
         </div>
       </div>
-    </div>
-    <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
-    <nav
+      <p v-else-if="visible.length === 0" class="ec-conversation-list__hint">{{ emptyText }}</p>
+      <nav
+        v-else
+        ref="listRef"
+        class="ec-conversation-list__items ec-fade"
+        @scroll.passive="saveListScroll"
+      >
+        <ConversationItem
+          v-for="conversation in visible"
+          :key="conversation.conversationId"
+          :conversation="conversation"
+          :self-user-id="selfUserId"
+          :active="conversation.conversationId === activeId"
+          :unread="unreadOf(conversation.conversationId)"
+          @select="emit('select', $event)"
+          @update-settings="onUpdateSettings"
+        />
+      </nav>
+    </template>
+
+    <InlineSearchResults
       v-else
-      ref="listRef"
-      class="ec-conversation-list__items ec-fade"
-      @scroll.passive="saveListScroll"
-    >
-      <ConversationItem
-        v-for="conversation in visible"
-        :key="conversation.conversationId"
-        :conversation="conversation"
-        :self-user-id="selfUserId"
-        :active="conversation.conversationId === activeId"
-        :unread="unreadOf(conversation.conversationId)"
-        @select="emit('select', $event)"
-        @update-settings="onUpdateSettings"
-      />
-    </nav>
+      class="ec-conversation-list__search-results"
+      :query="keyword"
+      :category="category"
+      :loading="searchLoading"
+      :error="searchError"
+      :conversations="conversationMatches"
+      :contacts="contactMatches"
+      :strangers="strangerMatches"
+      :messages="messageMatches"
+      :self-user-id="selfUserId"
+      show-conversations
+      @update:category="setCategory"
+      @select-conversation="selectSearchConversation"
+      @select-message="selectSearchMessage"
+      @select-user="selectSearchUser"
+    />
   </section>
 </template>
 
@@ -257,57 +309,16 @@ async function onUpdateSettings(payload: {
   border-bottom: 1px solid var(--ec-border-soft);
 }
 
-/* 与联系人页 SearchInput 同一外观（胶囊、导航底、右侧搜索图标），点击打开全局面板。 */
+/* 与联系人页 SearchInput 同一外观（胶囊、导航底、右侧搜索图标），输入即内联搜索。 */
 .ec-conversation-list__searchbox {
   flex: 1;
   max-width: 280px;
 }
 
-.ec-conversation-list__search-trigger {
-  display: flex;
-  gap: var(--ec-space-2);
-  align-items: center;
-  justify-content: space-between;
-  min-height: 32px;
-  padding: 0 var(--ec-space-3);
-  border: 1px solid transparent;
-  border-radius: var(--ec-radius-full);
-  background: var(--ec-nav-bg);
-  color: var(--ec-text-tertiary);
-  font-size: var(--ec-font-size-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background var(--ec-transition-fast) var(--ec-ease),
-    border-color var(--ec-transition-fast) var(--ec-ease);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .ec-conversation-list__search-trigger:hover {
-    background: var(--ec-surface-hover);
-  }
-}
-
-/* 聚焦与联系人输入框一致：品牌细描边 + 表面色，不叠外环。 */
-.ec-conversation-list__search-trigger:focus-visible {
-  border-color: var(--ec-brand-500);
-  background: var(--ec-surface);
-  outline: none;
-}
-
-.ec-conversation-list__search-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ec-conversation-list__search-icon {
-  flex: none;
-  color: var(--ec-text-tertiary);
-}
-
-.ec-conversation-list__search-trigger:focus-visible .ec-conversation-list__search-icon {
-  color: var(--ec-brand-600);
+/* 内联搜索结果占满列表区（芯片 + 分组结果 + 滚动）。 */
+.ec-conversation-list__search-results {
+  flex: 1;
+  min-height: 0;
 }
 
 .ec-conversation-list__more {
@@ -474,11 +485,6 @@ async function onUpdateSettings(payload: {
 
   .ec-conversation-list__searchbox {
     max-width: none;
-  }
-
-  /* 与联系人页 SearchInput 的移动端高度一致。 */
-  .ec-conversation-list__search-trigger {
-    min-height: 36px;
   }
 
   .ec-conversation-list__filters {

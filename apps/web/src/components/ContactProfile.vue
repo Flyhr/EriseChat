@@ -35,6 +35,8 @@ const props = defineProps<{
   blocked?: boolean
   /** 拉黑/解除拉黑请求进行中。 */
   blockBusy?: boolean
+  /** 是否展示拉黑入口（聊天页的资料预览不提供拉黑操作）。 */
+  showBlock?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -172,7 +174,7 @@ function saveFriend(): void {
       </button>
 
       <button
-        v-if="user"
+        v-if="user && showBlock !== false"
         type="button"
         class="contact-profile__remove contact-profile__remove--block"
         :disabled="blockBusy"
@@ -180,7 +182,9 @@ function saveFriend(): void {
       >
         {{ blockBusy ? '处理中…' : blocked ? '解除拉黑' : '拉黑' }}
       </button>
-      <p v-if="blocked" class="contact-profile__hint">已拉黑：双方不能私聊、申请好友或邀请入群</p>
+      <p v-if="blocked && showBlock !== false" class="contact-profile__hint">
+        已拉黑：双方不能私聊、申请好友或邀请入群
+      </p>
     </div>
     <EmptyState
       v-else
