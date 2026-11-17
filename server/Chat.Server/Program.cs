@@ -9,6 +9,7 @@ using Chat.Server.Common.Options;
 using Chat.Server.Data;
 using Chat.Server.Modules.Auth;
 using Chat.Server.Modules.Blocks;
+using Chat.Server.Modules.Calls;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Email;
 using Chat.Server.Modules.Files;
@@ -45,6 +46,7 @@ builder.Services.Configure<AppOptions>(builder.Configuration.GetSection(AppOptio
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection(RateLimitOptions.SectionName));
+builder.Services.Configure<CallOptions>(builder.Configuration.GetSection(CallOptions.SectionName));
 
 // REST JSON 约定与 WS 帧保持一致（protocol/protocol.md §2）：camelCase、枚举小写字符串、null 字段省略，
 // 这样 Conversation 等协议 DTO 在 REST 与 WS 两处的序列化结果一致（前端按 frames.d.ts 解析）。
@@ -124,6 +126,8 @@ builder.Services.AddHostedService<OrphanFileCleanupService>();
 
 // 实时通信（M1-06）：WS 握手/心跳/单活动连接；M1-08 起接入 message.send / sync.request。
 builder.Services.AddSingleton<ConnectionManager>();
+// 通话状态机（1:1 音视频，protocol.md §3.1）：只在内存里维护 ringing/connecting/active，结束事件落库。
+builder.Services.AddSingleton<CallSessionManager>();
 builder.Services.AddSingleton<WebSocketConnectionHandler>();
 builder.Services.AddScoped<WsAuthenticator>();
 builder.Services.AddHostedService<HeartbeatService>();
@@ -295,6 +299,8 @@ app.MapSessionEndpoints();
 app.MapFriendEndpoints();
 // 拉黑关系（C1b）：GET /api/blocks、PUT/DELETE /api/blocks/{userId}（幂等）。
 app.MapBlockEndpoints();
+// 通话历史（§3.1）：GET /api/calls 返回本人最近 50 条。
+app.MapCallEndpoints();
 // 群邀请链接（C1c）：创建/列出/撤销、打开预览、兑换加入群聊。
 app.MapInviteLinkEndpoints();
 // 个人收藏（F-38）：GET/POST /api/favorites、DELETE /api/favorites/{messageId}。

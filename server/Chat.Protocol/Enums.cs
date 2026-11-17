@@ -75,6 +75,32 @@ public enum FriendRequestStatus
     Cancelled,
 }
 
+/// <summary>通话类型（storage: calls.kind，JSON 中为小写字符串）。</summary>
+public enum CallKind
+{
+    /// <summary>语音通话。</summary>
+    Audio,
+
+    /// <summary>视频通话。</summary>
+    Video,
+}
+
+/// <summary>通话状态（storage: calls.state，JSON 中为小写字符串）。</summary>
+public enum CallState
+{
+    /// <summary>振铃中（已邀请，被叫未接听）。</summary>
+    Ringing,
+
+    /// <summary>已接听，等待媒体接通（SDP/ICE 交换中）。</summary>
+    Connecting,
+
+    /// <summary>媒体已接通（收到首个 call.connected）。</summary>
+    Active,
+
+    /// <summary>已结束。</summary>
+    Ended,
+}
+
 /// <summary>协议版本常量（唯一来源：protocol/protocol.md §8）。</summary>
 public static class ProtocolVersion
 {
@@ -181,4 +207,21 @@ public static class ErrorCodes
 
     /// <summary>文件 MIME 或扩展名不在允许范围。</summary>
     public const string FileTypeNotAllowed = "FILE_TYPE_NOT_ALLOWED";
+
+    // ---------- §5.1 通话错误码（1:1 音视频） ----------
+
+    /// <summary>用户已有进行中的通话，或对端正忙。</summary>
+    public const string CallBusy = "CALL_BUSY";
+
+    /// <summary>被叫没有可接听的在线设备（只开 Web、旧客户端或完全离线）。</summary>
+    public const string CallUnavailable = "CALL_UNAVAILABLE";
+
+    /// <summary>通话不存在或已结束。</summary>
+    public const string CallNotFound = "CALL_NOT_FOUND";
+
+    /// <summary>无权参与该通话（非会话成员、已被拉黑等）。</summary>
+    public const string CallForbidden = "CALL_FORBIDDEN";
+
+    /// <summary>当前端、会话类型或通话类型不支持。</summary>
+    public const string CallUnsupported = "CALL_UNSUPPORTED";
 }

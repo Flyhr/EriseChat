@@ -77,4 +77,42 @@ public static class FrameTypes
 
     /// <summary>统一错误（S→C）。</summary>
     public const string Error = "error";
+
+    // ---------- 通话信令（1:1，protocol.md §3.1） ----------
+
+    /// <summary>发起 1:1 通话（C→S）。</summary>
+    public const string CallInvite = "call.invite";
+
+    /// <summary>来电推送（S→C）。</summary>
+    public const string CallIncoming = "call.incoming";
+
+    /// <summary>已显示来电的回执（双向）。</summary>
+    public const string CallRinging = "call.ringing";
+
+    /// <summary>接听（C→S）。</summary>
+    public const string CallAccept = "call.accept";
+
+    /// <summary>接听确认（S→C）。</summary>
+    public const string CallAccepted = "call.accepted";
+
+    /// <summary>媒体已通（C→S）。</summary>
+    public const string CallConnected = "call.connected";
+
+    /// <summary>拒接（C→S）。</summary>
+    public const string CallReject = "call.reject";
+
+    /// <summary>取消（双向）。</summary>
+    public const string CallCancel = "call.cancel";
+
+    /// <summary>挂断/结束（双向）。</summary>
+    public const string CallEnd = "call.end";
+
+    /// <summary>SDP 交换（双向，只转发不落库）。</summary>
+    public const string CallSdp = "call.sdp";
+
+    /// <summary>ICE candidate 交换（双向，只转发不落库）。</summary>
+    public const string CallIce = "call.ice";
+
+    /// <summary>重连同步当前通话（S→C）。</summary>
+    public const string CallState = "call.state";
 }

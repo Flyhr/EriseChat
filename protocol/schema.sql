@@ -347,3 +347,38 @@ CREATE TABLE message_reactions (
 );
 
 CREATE INDEX idx_message_reactions_message ON message_reactions (message_id);
+-- ------------------------------------------------------------
+-- calls：1:1 通话记录（protocol.md §3.1；SDP 与 ICE 不落库）
+-- id             : 通话 ID（服务端生成 UUID 文本）
+-- conversation_id: 发起通话时的单聊会话
+-- caller_id      : 主叫用户
+-- callee_id      : 被叫用户
+-- kind           : audio / video
+-- state          : ringing / connecting / active / ended
+-- created_at     : 发起时间（UTC 毫秒）
+-- answered_at    : 被叫接听时间，空表示未接
+-- connected_at   : 首个媒体接通确认时间，空表示未接通
+-- ended_at       : 结束时间
+-- end_reason     : completed / rejected / canceled / busy / unavailable / timeout / failed / disconnected
+-- 说明：已接通通话结束后由服务端在同一事务写入一条系统消息（content.event = call.completed），
+--       双方时间线看到同一条记录；未接/拒接/失败只保留本表记录。
+-- ------------------------------------------------------------
+CREATE TABLE calls (
+    id              TEXT NOT NULL PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    caller_id       TEXT NOT NULL,
+    callee_id       TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('audio', 'video')),
+    state           TEXT NOT NULL CHECK (state IN ('ringing', 'connecting', 'active', 'ended')),
+    created_at      INTEGER NOT NULL,
+    answered_at     INTEGER,
+    connected_at    INTEGER,
+    ended_at        INTEGER,
+    end_reason      TEXT,
+    FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE,
+    FOREIGN KEY (caller_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY (callee_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_calls_callee_state ON calls (callee_id, state);
+CREATE INDEX idx_calls_conversation_created ON calls (conversation_id, created_at);

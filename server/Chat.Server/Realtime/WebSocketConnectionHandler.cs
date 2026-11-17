@@ -3,6 +3,7 @@ using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
 using Chat.Server.Common.Options;
+using Chat.Server.Modules.Calls;
 using Chat.Server.Modules.Conversations;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Modules.Realtime;
@@ -27,10 +28,13 @@ public sealed class WebSocketConnectionHandler
     private readonly ILogger<WebSocketConnectionHandler> _logger;
     private readonly int _maxConnectionsPerUser;
     private readonly TypingThrottle _typingThrottle = new();
+    private readonly CallSessionManager _calls;
+
     public WebSocketConnectionHandler(
         ConnectionManager connections,
         PresenceService presence,
         IServiceScopeFactory scopeFactory,
+        CallSessionManager calls,
         IOptions<AppOptions> appOptions,
         ILoggerFactory loggerFactory,
         ILogger<WebSocketConnectionHandler> logger)
@@ -38,6 +42,7 @@ public sealed class WebSocketConnectionHandler
         _connections = connections;
         _presence = presence;
         _scopeFactory = scopeFactory;
+        _calls = calls;
         _maxConnectionsPerUser = Math.Clamp(appOptions.Value.MaxConnectionsPerUser, 1, 10);
         _loggerFactory = loggerFactory;
         _logger = logger;
@@ -89,7 +94,11 @@ public sealed class WebSocketConnectionHandler
             var userId = authResult.UserId!;
             // 记录注册前的在线状态，用于判定 presence 是否 0→1（单活动连接踢旧时不算重新上线）。
             var hadOnlineConnections = _connections.GetConnections(userId).Count > 0;
-            connection.MarkAuthenticated(userId, auth.DeviceId!.Trim(), authResult.SessionId);
+            connection.MarkAuthenticated(
+                userId,
+                auth.DeviceId!.Trim(),
+                authResult.SessionId,
+                NormalizeCallCapabilities(auth.CallCapabilities));
             _connections.Register(connection);
 
             // 多端在线（F-22）：连接数超过上限时，只踢「最早建立」的超额连接（先 kicked 再 close 4001）。
@@ -101,6 +110,9 @@ public sealed class WebSocketConnectionHandler
                 DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 Chat.Protocol.ProtocolVersion.Current);
             await connection.SendFrameAsync(hello, connectionAborted);
+
+            // 重连同步（protocol.md §3.1）：把进行中的通话状态补发给本连接（无通话时发 call.state(null)）。
+            await _calls.SendStateAsync(connection, connectionAborted);
 
             _logger.LogInformation(
                 "WS 认证成功：用户 {UserId}，设备 {DeviceId}，连接 {ConnectionId}",
@@ -130,6 +142,7 @@ public sealed class WebSocketConnectionHandler
         finally
         {
             _connections.Unregister(connection);
+            _calls.HandleConnectionClosed(connection);
             _logger.LogDebug("WS 连接结束：{ConnectionId}（用户 {UserId}）", connection.ConnectionId, connection.UserId);
 
             // presence 下线：仅当该用户已无任何在线连接时推送（被踢旧连接此时新连接仍在，不推）。
@@ -285,6 +298,10 @@ public sealed class WebSocketConnectionHandler
                 case TypingClientFrame typing:
                     await HandleTypingAsync(connection, typing, connectionAborted);
                     break;
+                // 通话信令（protocol.md §3.1）：invite/ringing/accept/connected/reject/cancel/end/sdp/ice。
+                case CallFrameBase callFrame:
+                    await HandleCallFrameAsync(connection, callFrame, connectionAborted);
+                    break;
                 case AuthFrame:
                     _logger.LogDebug("WS 已认证连接重复发送 auth 帧，已忽略（连接 {ConnectionId}）", connection.ConnectionId);
                     break;
@@ -297,6 +314,82 @@ public sealed class WebSocketConnectionHandler
                     break;
             }
         }
+    }
+
+    /// <summary>通话信令（protocol.md §3.1）：校验/转发/状态机由 CallSessionManager 处理；失败只回 error，不断连。</summary>
+    private async Task HandleCallFrameAsync(
+        WsConnection connection,
+        CallFrameBase request,
+        CancellationToken connectionAborted)
+    {
+        try
+        {
+            switch (request)
+            {
+                case CallInviteFrame invite:
+                    await _calls.HandleInviteAsync(connection, invite, connectionAborted);
+                    break;
+                case CallRingingFrame ringing:
+                    await _calls.HandleRingingAsync(connection, ringing, connectionAborted);
+                    break;
+                case CallAcceptFrame accept:
+                    await _calls.HandleAcceptAsync(connection, accept, connectionAborted);
+                    break;
+                case CallConnectedFrame connected:
+                    await _calls.HandleConnectedAsync(connection, connected, connectionAborted);
+                    break;
+                case CallRejectFrame reject:
+                    await _calls.HandleRejectAsync(connection, reject, connectionAborted);
+                    break;
+                case CallCancelFrame cancel:
+                    await _calls.HandleCancelAsync(connection, cancel, connectionAborted);
+                    break;
+                case CallEndFrame end:
+                    await _calls.HandleEndAsync(connection, end, connectionAborted);
+                    break;
+                case CallSdpFrame sdp:
+                    await _calls.HandleSdpAsync(connection, sdp, connectionAborted);
+                    break;
+                case CallIceFrame ice:
+                    await _calls.HandleIceAsync(connection, ice, connectionAborted);
+                    break;
+                default:
+                    _logger.LogDebug(
+                        "WS 通话帧 {FrameType} 未处理，已忽略（连接 {ConnectionId}）",
+                        request.Type,
+                        connection.ConnectionId);
+                    break;
+            }
+        }
+        catch (ApiException exception)
+        {
+            await connection.SendErrorAsync(exception.Code, exception.Message, request.ReqId, connectionAborted);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "通话帧 {FrameType} 处理异常（连接 {ConnectionId}）",
+                request.Type,
+                connection.ConnectionId);
+            await connection.SendErrorAsync(ErrorCodes.InternalError, "服务端内部错误", request.ReqId, connectionAborted);
+        }
+    }
+
+    /// <summary>认证帧里的通话能力：只保留 audio / video，去空白、去重、小写。</summary>
+    private static IReadOnlyList<string> NormalizeCallCapabilities(IReadOnlyList<string>? capabilities)
+    {
+        if (capabilities is null || capabilities.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return capabilities
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim().ToLowerInvariant())
+            .Where(value => value is "audio" or "video")
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     /// <summary>conv.list（M1-07）：按当前连接用户返回会话列表，reqId 原样回传。</summary>

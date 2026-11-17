@@ -163,6 +163,19 @@ public static class FrameCodec
         FrameTypes.FriendChanged => element.Deserialize<FriendChangedFrame>(JsonOptions),
         FrameTypes.Kicked => element.Deserialize<KickedFrame>(JsonOptions),
         FrameTypes.Error => element.Deserialize<ErrorFrame>(JsonOptions),
+        // 通话信令（protocol.md §3.1）：ringing / cancel / end / sdp / ice 双向共用同一 DTO。
+        FrameTypes.CallInvite => element.Deserialize<CallInviteFrame>(JsonOptions),
+        FrameTypes.CallIncoming => element.Deserialize<CallIncomingFrame>(JsonOptions),
+        FrameTypes.CallRinging => element.Deserialize<CallRingingFrame>(JsonOptions),
+        FrameTypes.CallAccept => element.Deserialize<CallAcceptFrame>(JsonOptions),
+        FrameTypes.CallAccepted => element.Deserialize<CallAcceptedFrame>(JsonOptions),
+        FrameTypes.CallConnected => element.Deserialize<CallConnectedFrame>(JsonOptions),
+        FrameTypes.CallReject => element.Deserialize<CallRejectFrame>(JsonOptions),
+        FrameTypes.CallCancel => element.Deserialize<CallCancelFrame>(JsonOptions),
+        FrameTypes.CallEnd => element.Deserialize<CallEndFrame>(JsonOptions),
+        FrameTypes.CallSdp => element.Deserialize<CallSdpFrame>(JsonOptions),
+        FrameTypes.CallIce => element.Deserialize<CallIceFrame>(JsonOptions),
+        FrameTypes.CallState => element.Deserialize<CallStateFrame>(JsonOptions),
         _ => null,
     };
 

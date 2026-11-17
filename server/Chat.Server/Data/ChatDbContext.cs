@@ -44,6 +44,9 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
 
     public DbSet<MessageReaction> MessageReactions => Set<MessageReaction>();
 
+    /// <summary>1:1 通话记录（§3.1；SDP/ICE 不落库）。</summary>
+    public DbSet<Call> Calls => Set<Call>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -64,6 +67,7 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
         ConfigureFavorites(modelBuilder);
         ConfigureBlocks(modelBuilder);
         ConfigureGroupInviteLinks(modelBuilder);
+        ConfigureCalls(modelBuilder);
     }
 
     /// <summary>枚举 ↔ TEXT 小写转换（与 schema.sql 的 CHECK 值域一致）。</summary>
@@ -507,6 +511,45 @@ public sealed class ChatDbContext(DbContextOptions<ChatDbContext> options) : DbC
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(block => block.BlockedUserId).HasDatabaseName("idx_blocks_blocked");
+        });
+    }
+
+    private static void ConfigureCalls(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Call>(entity =>
+        {
+            entity.ToTable("calls", table =>
+            {
+                table.HasCheckConstraint("ck_calls_kind", "kind IN ('audio', 'video')");
+                table.HasCheckConstraint("ck_calls_state", "state IN ('ringing', 'connecting', 'active', 'ended')");
+            });
+
+            entity.HasKey(call => call.Id);
+            entity.Property(call => call.Id).HasColumnName("id");
+            entity.Property(call => call.ConversationId).HasColumnName("conversation_id").IsRequired();
+            entity.Property(call => call.CallerId).HasColumnName("caller_id").IsRequired();
+            entity.Property(call => call.CalleeId).HasColumnName("callee_id").IsRequired();
+            entity.Property(call => call.Kind).HasColumnName("kind").HasConversion(LowercaseEnum<CallKind>());
+            entity.Property(call => call.State).HasColumnName("state").HasConversion(LowercaseEnum<CallState>());
+            entity.Property(call => call.CreatedAt).HasColumnName("created_at");
+            entity.Property(call => call.AnsweredAt).HasColumnName("answered_at");
+            entity.Property(call => call.ConnectedAt).HasColumnName("connected_at");
+            entity.Property(call => call.EndedAt).HasColumnName("ended_at");
+            entity.Property(call => call.EndReason).HasColumnName("end_reason");
+
+            entity.HasOne<Conversation>().WithMany()
+                .HasForeignKey(call => call.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(call => call.CallerId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>().WithMany()
+                .HasForeignKey(call => call.CalleeId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(call => new { call.CalleeId, call.State }).HasDatabaseName("idx_calls_callee_state");
+            entity.HasIndex(call => new { call.ConversationId, call.CreatedAt })
+                .HasDatabaseName("idx_calls_conversation_created");
         });
     }
 }

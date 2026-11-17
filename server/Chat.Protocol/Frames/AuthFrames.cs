@@ -4,7 +4,12 @@ namespace Chat.Protocol.Frames;
 /// <param name="Token">REST 登录返回的 JWT accessToken。</param>
 /// <param name="DeviceId">设备标识，1~128 字符；同一设备重连复用。</param>
 /// <param name="ProtocolVersion">客户端协议版本，缺省视为 1。</param>
-public sealed record AuthFrame(string Token, string DeviceId, int? ProtocolVersion = null) : FrameEnvelope
+/// <param name="CallCapabilities">通话能力（protocol.md §3.1）：audio / video；省略表示不支持通话。</param>
+public sealed record AuthFrame(
+    string Token,
+    string DeviceId,
+    int? ProtocolVersion = null,
+    IReadOnlyList<string>? CallCapabilities = null) : FrameEnvelope
 {
     /// <inheritdoc />
     public override string Type => FrameTypes.Auth;

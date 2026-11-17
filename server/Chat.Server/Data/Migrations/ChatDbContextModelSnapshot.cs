@@ -90,6 +90,75 @@ namespace Chat.Server.Data.Migrations
                     b.ToTable("blocks", (string)null);
                 });
 
+            modelBuilder.Entity("Chat.Server.Data.Entities.Call", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("id");
+
+                    b.Property<long?>("AnsweredAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("answered_at");
+
+                    b.Property<string>("CalleeId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("callee_id");
+
+                    b.Property<string>("CallerId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("caller_id");
+
+                    b.Property<long?>("ConnectedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("connected_at");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EndReason")
+                        .HasColumnType("TEXT")
+                        .HasColumnName("end_reason");
+
+                    b.Property<long?>("EndedAt")
+                        .HasColumnType("INTEGER")
+                        .HasColumnName("ended_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT")
+                        .HasColumnName("state");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CallerId");
+
+                    b.HasIndex("CalleeId", "State")
+                        .HasDatabaseName("idx_calls_callee_state");
+
+                    b.HasIndex("ConversationId", "CreatedAt")
+                        .HasDatabaseName("idx_calls_conversation_created");
+
+                    b.ToTable("calls", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_calls_kind", "kind IN ('audio', 'video')");
+
+                            t.HasCheckConstraint("ck_calls_state", "state IN ('ringing', 'connecting', 'active', 'ended')");
+                        });
+                });
+
             modelBuilder.Entity("Chat.Server.Data.Entities.Conversation", b =>
                 {
                     b.Property<string>("Id")
@@ -740,6 +809,27 @@ namespace Chat.Server.Data.Migrations
                     b.HasOne("Chat.Server.Data.Entities.User", null)
                         .WithMany()
                         .HasForeignKey("BlockerUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Chat.Server.Data.Entities.Call", b =>
+                {
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CalleeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CallerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Chat.Server.Data.Entities.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
