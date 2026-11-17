@@ -22,6 +22,8 @@ const props = withDefaults(
     message: Message | PendingMessage
     self?: boolean
     status?: PendingStatus
+  /** 手动重发进行中：徽标原地保持可见，避免「消失又出现」的闪烁。 */
+  retrying?: boolean
     /** 单聊已读回执（M3-09）：仅自己发出的最新一条展示；群聊不展示。 */
     receipt?: 'read' | 'unread'
     /** 群聊中展示发送者头像与昵称（非自己消息）。 */
@@ -217,14 +219,6 @@ function openActions(position: { x: number; y: number }): void {
   emit('open-actions', messageId, position)
 }
 
-/** U-10：hover 露出的「⋯」入口，复用右键菜单的定位与父级事件链。 */
-function onMoreClick(event: MouseEvent): void {
-  if (props.selectable || isSystem.value || !repliableMessageId()) return
-  const target = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
-  const rect = target?.getBoundingClientRect()
-  openActions(rect ? { x: rect.left + rect.width / 2, y: rect.bottom } : { x: 0, y: 0 })
-}
-
 /** 桌面：右键气泡打开操作菜单（system 消息不提供）。 */
 function onContextMenu(event: MouseEvent): void {
   if (props.selectable) return
@@ -309,8 +303,7 @@ const timeText = computed(() =>
         class="message-bubble"
         :class="{
           'message-bubble--self': self,
-          'message-bubble--sending': status === 'sending',
-          'message-bubble--failed': status === 'failed',
+          'message-bubble--sending': status === 'sending' && !retrying,
           'message-bubble--recalled': recalled,
           'message-bubble--plain': plainBubble,
         }"
@@ -409,28 +402,23 @@ const timeText = computed(() =>
         </template>
         <span v-if="selfMentioned" class="message-row__mention-badge">提到你</span>
         <span v-if="edited" class="message-row__edited">已编辑</span>
-        <span v-if="status === 'sending'" class="message-row__pending">
+        <span v-if="status === 'sending' && !retrying" class="message-row__pending">
           {{ offline ? '等待网络，恢复后自动发送' : '发送中…' }}
         </span>
-        <button
-          v-else-if="status === 'failed'"
-          class="message-row__retry ec-state-retry"
-          type="button"
-          @click="emit('retry')"
-        >
-          发送失败，点击重发
-        </button>
       </div>
     </div>
+    <!-- 发送失败：气泡外侧图标徽标，点击直接重发（不再在页脚写整句提示）。
+         放在 body 之后：自己消息行是 row-reverse，后置节点才会落在气泡左侧。 -->
     <button
-      v-if="!selectable && !recalled"
-      class="message-row__more"
+      v-if="(status === 'failed' || retrying) && !selectable"
+      :class="['message-row__retry', { 'is-retrying': retrying }]"
+      :disabled="retrying"
       type="button"
-      aria-label="消息操作"
-      title="消息操作"
-      @click.stop="onMoreClick"
+      aria-label="发送失败，点击重新发送"
+      title="发送失败，点击重新发送"
+      @click.stop="emit('retry')"
     >
-      <AppIcon name="more" :size="16" />
+      <span class="message-row__retry-dot" aria-hidden="true">!</span>
     </button>
   </div>
 </template>
@@ -589,16 +577,8 @@ const timeText = computed(() =>
   color: var(--ec-text-primary);
 }
 
-.message-bubble--plain.message-bubble--failed {
-  border: none;
-}
-
 .message-bubble--sending {
   opacity: 0.75;
-}
-
-.message-bubble--failed {
-  border-color: var(--ec-danger);
 }
 
 .message-bubble__text {
@@ -676,11 +656,47 @@ const timeText = computed(() =>
   color: var(--ec-brand-600);
 }
 
-/* U-09：尺寸、圆角、hover 与焦点环统一由 .ec-state-retry 提供，这里只保留危险色语义。 */
+/* 发送失败：气泡外侧图标徽标（微信/Telegram 式）。视觉 20px、热区 44px，点击直接重发。 */
 .message-row__retry {
-  color: var(--ec-danger);
-  font-size: var(--ec-font-size-small);
+  flex: none;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  align-self: center;
+  margin-inline: var(--ec-space-1);
+  border: none;
+  background: transparent;
   cursor: pointer;
+}
+
+.message-row__retry-dot {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: var(--ec-radius-full);
+  background: var(--ec-danger);
+  color: var(--ec-text-inverse);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.message-row__retry:hover .message-row__retry-dot {
+  filter: brightness(0.92);
+}
+
+.message-row__retry:focus-visible {
+  border-radius: var(--ec-radius-full);
+  outline: 2px solid var(--ec-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 手动重发进行中：徽标原地留白，避免「消失又出现」的闪烁。 */
+.message-row__retry.is-retrying {
+  cursor: progress;
+  opacity: 0.55;
 }
 
 /* F-09：引用条（气泡内上方），点击跳转被引用消息；pending 本地预览不可点击。 */
@@ -770,50 +786,6 @@ const timeText = computed(() =>
   .message-bubble--self {
     border-radius: var(--ec-radius-bubble-mobile) var(--ec-radius-bubble-mobile)
       var(--ec-radius-bubble-tail-mobile) var(--ec-radius-bubble-mobile);
-  }
-}
-/* U-10：桌面 hover / 键盘 focus 露出轻量操作入口；常驻占位，只切换透明度，
-   不产生布局位移，也不引入鼠标左键长按（仍由 contextmenu 触发）。 */
-.message-row__more {
-  flex: none;
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  align-self: center;
-  margin-inline: var(--ec-space-1);
-  border: none;
-  border-radius: var(--ec-radius-sm);
-  background: var(--ec-surface);
-  color: var(--ec-text-secondary);
-  box-shadow: var(--ec-shadow-sm);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--ec-transition-fast) var(--ec-ease);
-}
-
-.message-row__more:hover {
-  color: var(--ec-brand-600);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .message-row:hover .message-row__more,
-  .message-row:focus-within .message-row__more {
-    opacity: 1;
-  }
-}
-
-.message-row__more:focus-visible {
-  opacity: 1;
-  outline: 2px solid var(--ec-focus-ring);
-  outline-offset: 2px;
-}
-
-@media (hover: none) {
-  .message-row__more {
-    width: 32px;
-    height: 32px;
-    opacity: 1;
   }
 }
 

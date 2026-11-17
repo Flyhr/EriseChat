@@ -88,6 +88,8 @@ export interface PendingMessage {
   content: string | FileContent | VoiceContent
   createdAt: number
   status: PendingStatus
+  /** 手动重发进行中：徽标保持可见（不切回「发送中」），避免被拒时一闪而过的观感。 */
+  retrying?: boolean
   /** 已重试次数（0 = 首次发送，最多 RETRY_DELAYS_MS.length 次重试）。 */
   retries: number
   /** F-09：回复引用目标 messageId（可选；重试/恢复重发都会带上）。 */
@@ -112,6 +114,8 @@ export const useMessagesStore = defineStore('messages', () => {
   const pendingByConversation = ref<Record<string, PendingMessage[]>>({})
   /** 待发记录状态/重试次数变更的版本号：组件 watcher 依赖它感知原地状态变更（如重试耗尽→failed）。 */
   const pendingRevision = ref(0)
+/** 最近一次被服务端拒绝的发送：页面据此提示原因（含重发再次被拒）。 */
+const sendRejection = ref<{ clientMsgId: string; text: string; at: number } | null>(null)
   const hasMoreByConversation = ref<Record<string, boolean>>({})
   const loadedConversations = ref<Record<string, boolean>>({})
   const loadingInitialByConversation = ref<Record<string, boolean>>({})
@@ -833,6 +837,7 @@ export const useMessagesStore = defineStore('messages', () => {
     clearTimers(pending.clientMsgId)
     if (pending.retries >= RETRY_DELAYS_MS.length) {
       pending.status = 'failed'
+      pending.retrying = false
       // 原地变更不会触发依赖 pending 数组的 watcher，显式通知（附件面板据此显示发送失败）。
       pendingRevision.value += 1
       // F-03：落库「失败」状态，刷新后仍显示可重发。
@@ -947,7 +952,10 @@ export const useMessagesStore = defineStore('messages', () => {
   /** 重发失败消息：复用同一 clientMsgId（服务端幂等，不会重复落库）。 */
   function retrySend(conversationId: string, clientMsgId: string): void {
     const pending = findPending(conversationId, clientMsgId)
-    if (!pending || pending.status !== 'failed') return
+    if (!pending || pending.status !== 'failed' || pending.retrying) return
+    // 手动重发保留失败态外观：徽标原地不动，只在服务端受理后消失。
+    // 状态仍置为 sending 以便复用 2s/5s/10s 预算与 ack 超时，视图用 retrying 抑制「发送中」文案。
+    pending.retrying = true
     pending.status = 'sending'
     pending.retries = 0
     pendingRevision.value += 1
@@ -1129,9 +1137,16 @@ export const useMessagesStore = defineStore('messages', () => {
         if (pending) {
           clearTimers(pending.clientMsgId)
           pending.status = 'failed'
+          pending.retrying = false
           pendingRevision.value += 1
           // F-03：服务端明确拒绝，也要把失败状态落库。
           persistPending(pending)
+          // 拒绝原因写进响应式状态，由会话页提示；重发再次被拒时同样更新。
+          sendRejection.value = {
+            clientMsgId: pending.clientMsgId,
+            text: frame.message || '发送被服务端拒绝',
+            at: Date.now(),
+          }
         }
         break
       }
@@ -1285,6 +1300,7 @@ export const useMessagesStore = defineStore('messages', () => {
     messagesOf,
     pendingOf,
     pendingRevision,
+    sendRejection,
     lastMessagePatch,
     hasMoreOf,
     isLoaded,

@@ -708,6 +708,7 @@ onMounted(() => {
         :message="item"
         :self="true"
         :status="item.status"
+        :retrying="item.retrying"
         :offline="offline"
         :mention-names="mentionNames ?? []"
         :self-display-name="selfDisplayName ?? ''"
