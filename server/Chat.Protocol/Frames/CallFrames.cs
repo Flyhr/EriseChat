@@ -21,7 +21,7 @@ public sealed record CallInviteFrame(string CallId, string ConversationId, strin
     public override string Type => FrameTypes.CallInvite;
 }
 
-/// <summary>call.incoming（S→C）：来电推送，只发给声明了该通话类型的被叫连接。</summary>
+/// <summary>call.incoming（S→C）：来电推送；被叫没有可接听的设备时 <see cref="CallSupported"/> 为 false。</summary>
 public sealed record CallIncomingFrame(
     string CallId,
     string ConversationId,
@@ -29,6 +29,9 @@ public sealed record CallIncomingFrame(
     CallPeer Peer,
     long CreatedAt) : CallFrameBase(CallId)
 {
+    /// <summary>本连接能否接听该类型通话；false 时客户端只提示“请在其他设备接听”。</summary>
+    public bool? CallSupported { get; init; }
+
     /// <inheritdoc />
     public override string Type => FrameTypes.CallIncoming;
 }
@@ -120,7 +123,8 @@ public sealed record CallStateFrame(
     CallPeer? Peer = null,
     long? CreatedAt = null,
     long? AnsweredAt = null,
-    long? ConnectedAt = null) : FrameEnvelope
+    long? ConnectedAt = null,
+    string? Direction = null) : FrameEnvelope
 {
     /// <inheritdoc />
     public override string Type => FrameTypes.CallState;

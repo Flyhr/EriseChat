@@ -1,10 +1,14 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Chat.Server.Common.Options;
 using Chat.Server.Common.Security;
 using Chat.Server.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Chat.Server.Api;
 
@@ -21,6 +25,44 @@ public static class CallEndpoints
     {
         var group = app.MapGroup("/api/calls").RequireAuthorization();
         group.MapGet("/", ListAsync);
+        group.MapGet("/ice-servers", IceServers);
+        group.MapGet("/can-call/{conversationId}", CanCallAsync);
+    }
+
+    /// <summary>
+    /// 当前用户能否在此单聊发起通话（客户端据此置灰通话按钮）。
+    /// 条件：好友直接放行；非好友要求双方都发过消息。
+    /// </summary>
+    private static async Task<IResult> CanCallAsync(
+        string conversationId,
+        ClaimsPrincipal principal,
+        Chat.Server.Modules.Calls.CallSessionManager calls,
+        CancellationToken cancellationToken)
+    {
+        var allowed = await calls.CanCallAsync(principal.UserId(), conversationId, cancellationToken);
+        return Results.Json(new CanCallResponse(allowed));
+    }
+
+    /// <summary>
+    /// 下发带短期凭证的 ICE 服务器（protocol.md §3.1）：用户名是 <c>过期时间:用户 ID</c>，
+    /// 凭证是 <c>base64(HMAC-SHA1(密钥, 用户名))</c>，与 coturn 的 <c>static-auth-secret</c> 配套。
+    /// 未配置 TURN 时返回空列表，客户端退回纯 P2P。
+    /// </summary>
+    private static IResult IceServers(ClaimsPrincipal principal, IOptions<CallOptions> options)
+    {
+        var call = options.Value;
+        if (call.TurnUrls.Length == 0 || string.IsNullOrWhiteSpace(call.TurnSharedSecret))
+        {
+            return Results.Json(new IceServersResponse([]));
+        }
+
+        var ttl = Math.Clamp(call.TurnCredentialTtlSeconds, 60, 86_400);
+        var expiresAt = DateTimeOffset.UtcNow.AddSeconds(ttl).ToUnixTimeSeconds();
+        var username = $"{expiresAt}:{principal.UserId()}";
+        var hash = new HMACSHA1(Encoding.UTF8.GetBytes(call.TurnSharedSecret)).ComputeHash(Encoding.UTF8.GetBytes(username));
+        var credential = Convert.ToBase64String(hash);
+
+        return Results.Json(new IceServersResponse([new IceServerDto(call.TurnUrls, username, credential)]));
     }
 
     private static async Task<IResult> ListAsync(
@@ -97,3 +139,9 @@ internal sealed record CallHistoryItem(
     long? DurationSeconds);
 
 internal sealed record CallHistoryResponse(IReadOnlyList<CallHistoryItem> Items);
+
+internal sealed record CanCallResponse(bool Allowed);
+
+internal sealed record IceServerDto(IReadOnlyList<string> Urls, string Username, string Credential);
+
+internal sealed record IceServersResponse(IReadOnlyList<IceServerDto> IceServers);

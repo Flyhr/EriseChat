@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Chat.Protocol;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Errors;
@@ -11,6 +12,7 @@ using Chat.Server.Modules.Messages;
 using Chat.Server.Realtime;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using MessageEntity = Chat.Server.Data.Entities.Message;
 using ProtocolMessage = Chat.Protocol.Frames.Message;
 
 namespace Chat.Server.Modules.Calls;
@@ -121,16 +123,17 @@ public sealed class CallSessionManager
             }
         }
 
-        var calleeConnections = _connections.GetConnections(calleeId)
-            .Where(connection => connection.SupportsCallKind(KindText(kind)))
-            .ToList();
-        if (calleeConnections.Count == 0)
+        if (!await HasCallAccessAsync(callerId, calleeId, conversationId, cancellationToken))
         {
             throw new ApiException(
-                ErrorCodes.CallUnavailable,
-                "对方暂时无法接听（没有可接听的设备）",
-                StatusCodes.Status409Conflict);
+                ErrorCodes.CallForbidden,
+                "双方聊过之后才能发起通话",
+                StatusCodes.Status403Forbidden);
         }
+
+        var kindText = KindText(kind);
+        // 被叫离线也照常振铃：只是不会收到 incoming，满 RingTimeoutSeconds 后按 timeout 结束。
+        var calleeConnections = _connections.GetConnections(calleeId);
 
         if (_activeByUser.ContainsKey(callerId) || _activeByUser.ContainsKey(calleeId))
         {
@@ -159,15 +162,13 @@ public sealed class CallSessionManager
         await InsertAsync(session, cancellationToken);
 
         var callerPeer = await LoadPeerAsync(callerId, cancellationToken);
-        var incoming = new CallIncomingFrame(
-            callId,
-            conversationId,
-            session.KindText,
-            callerPeer,
-            session.CreatedAt);
         foreach (var connection in calleeConnections)
         {
-            await TrySendAsync(connection, incoming, cancellationToken);
+            // Web 与旧客户端没有通话能力：只推提示，不进入来电界面。
+            await TrySendAsync(
+                connection,
+                BuildIncoming(session, callerPeer, connection.SupportsCallKind(kindText)),
+                cancellationToken);
         }
 
         var calleePeer = await LoadPeerAsync(calleeId, cancellationToken);
@@ -175,6 +176,7 @@ public sealed class CallSessionManager
             new CallStateFrame(callId, "ringing", session.KindText, calleePeer, session.CreatedAt)
             {
                 ReqId = request.ReqId,
+                Direction = "outgoing",
             },
             cancellationToken);
 
@@ -212,6 +214,11 @@ public sealed class CallSessionManager
         if (userId != session.CalleeId)
         {
             throw Forbidden();
+        }
+
+        if (!connection.SupportsCallKind(session.KindText))
+        {
+            throw new ApiException(ErrorCodes.CallUnsupported, "当前设备不支持接听通话", StatusCodes.Status400BadRequest);
         }
 
         long answeredAt;
@@ -355,8 +362,29 @@ public sealed class CallSessionManager
             return;
         }
 
+        if (session.State == CallState.Ringing && userId == session.CalleeId)
+        {
+            // 被叫在振铃期内上线：补发来电，主叫侧无感知。
+            var callerPeer = await LoadPeerAsync(session.CallerId, cancellationToken);
+            await TrySendAsync(
+                connection,
+                BuildIncoming(session, callerPeer, connection.SupportsCallKind(session.KindText)),
+                cancellationToken);
+        }
+
         await SendStateAsync(connection, session, cancellationToken);
     }
+
+    private static CallIncomingFrame BuildIncoming(CallSession session, CallPeer callerPeer, bool callSupported) =>
+        new(
+            session.CallId,
+            session.ConversationId,
+            session.KindText,
+            callerPeer,
+            session.CreatedAt)
+        {
+            CallSupported = callSupported ? null : false,
+        };
 
     /// <summary>连接关闭：宽限期后若该用户仍无可用连接则结束通话。</summary>
     public void HandleConnectionClosed(WsConnection connection)
@@ -470,14 +498,12 @@ public sealed class CallSessionManager
         _activeByUser.TryRemove(new KeyValuePair<string, string>(session.CallerId, session.CallId));
         _activeByUser.TryRemove(new KeyValuePair<string, string>(session.CalleeId, session.CallId));
 
+        // 先写记录再广播，避免客户端收到 call.end 后立刻拉消息却还看不到这条记录。
+        await WriteTimelineAsync(session, endedAt, cancellationToken);
+
         var frame = new CallEndFrame(session.CallId, reason);
         await SendToUserAsync(session.CallerId, frame, cancellationToken);
         await SendToUserAsync(session.CalleeId, frame, cancellationToken);
-
-        if (session.ConnectedAt is not null)
-        {
-            await WriteTimelineAsync(session, endedAt, cancellationToken);
-        }
 
         _logger.LogInformation(
             "call.end：{CallId} reason={Reason}，接通={Connected}",
@@ -486,12 +512,11 @@ public sealed class CallSessionManager
             session.ConnectedAt is not null);
     }
 
-    /// <summary>写时间线记录（system + call.completed）并广播 message.new。</summary>
+    /// <summary>写时间线记录（主叫的普通文本消息）并广播 message.new。</summary>
     private async Task WriteTimelineAsync(CallSession session, long endedAt, CancellationToken cancellationToken)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
-        var systemMessages = scope.ServiceProvider.GetRequiredService<SystemMessageWriter>();
         var notifier = scope.ServiceProvider.GetRequiredService<ConversationRealtimeNotifier>();
 
         var conversation = await db.Conversations
@@ -501,24 +526,50 @@ public sealed class CallSessionManager
             return;
         }
 
-        // SeqAllocator 用原生命令，必须在显式事务里执行（同一事务内 seq +1、写消息、更新 last_seq）。
+        // ponytail: 直接插一条主叫的普通文本消息，客户端按普通气泡渲染；seq 仍走 SeqAllocator（需显式事务）。
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var content = new SystemContent(
-            "call.completed",
-            session.CallerId,
-            Text: BuildTimelineText(session, endedAt));
-        var message = await systemMessages.AppendAsync(conversation, session.CallerId, content, cancellationToken);
+        var seq = await SeqAllocator.AllocateAsync(db, conversation.Id, cancellationToken);
+        var entity = new MessageEntity
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            ConversationId = conversation.Id,
+            SenderId = session.CallerId,
+            ClientMsgId = "call-" + Guid.NewGuid().ToString("N"),
+            Seq = seq,
+            MsgType = MessageType.Text,
+            ContentJson = JsonSerializer.Serialize(BuildTimelineText(session, endedAt), Chat.Protocol.Frames.FrameCodec.JsonOptions),
+            FileId = null,
+            ReplyTo = null,
+            CreatedAt = endedAt,
+        };
+
+        db.Messages.Add(entity);
+        conversation.LastSeq = seq;
+        conversation.LastMessageId = entity.Id;
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        notifier.PushNewMessage(message, new[] { session.CallerId, session.CalleeId });
+        notifier.PushNewMessage(ConversationService.ToProtocolMessage(entity), new[] { session.CallerId, session.CalleeId });
     }
 
     private static string BuildTimelineText(CallSession session, long endedAt)
     {
         var kind = session.Kind == CallKind.Audio ? "语音通话" : "视频通话";
-        var connectedAt = session.ConnectedAt ?? endedAt;
-        var seconds = Math.Max(0, (int)Math.Round((endedAt - connectedAt) / 1000.0));
+        if (session.ConnectedAt is null)
+        {
+            var label = session.EndReason switch
+            {
+                "declined" => "已拒绝",
+                "timeout" => "未接听",
+                "failed" => "未接通",
+                "canceled" => "已取消",
+                "disconnected" => "连接中断",
+                _ => "未接通",
+            };
+            return $"{kind} · {label}";
+        }
+
+        var seconds = Math.Max(0, (int)Math.Round((endedAt - session.ConnectedAt.Value) / 1000.0));
         var duration = seconds >= 3600
             ? $"{seconds / 3600}:{seconds % 3600 / 60:00}:{seconds % 60:00}"
             : $"{seconds / 60:00}:{seconds % 60:00}";
@@ -540,7 +591,63 @@ public sealed class CallSessionManager
                 peer,
                 session.CreatedAt,
                 session.AnsweredAt,
-                session.ConnectedAt),
+                session.ConnectedAt,
+                connection.UserId == session.CallerId ? "outgoing" : "incoming"),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// 查询当前用户能否在此单聊发起通话（供客户端决定通话按钮是否可用）。
+    /// 条件与 <see cref="HandleInviteAsync"/> 一致：好友直接放行，否则要求双方都发过消息。
+    /// </summary>
+    public async Task<bool> CanCallAsync(string userId, string conversationId, CancellationToken cancellationToken)
+    {
+        var (calleeId, resolvedConversationId) = await ResolveDirectCounterpartAsync(
+            userId,
+            conversationId,
+            cancellationToken);
+        return await HasCallAccessAsync(userId, calleeId, resolvedConversationId, cancellationToken);
+    }
+
+    /// <summary>
+    /// 通话门槛（2026-11-17 裁决）：好友直接放行；非好友必须双方都发过消息（含历史记录）。
+    /// 通话结束后写的是主叫的文本消息，但只有先满足门槛才可能产生记录，故无需额外排除。
+    /// </summary>
+    private async Task<bool> HasCallAccessAsync(
+        string userId,
+        string peerId,
+        string conversationId,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ChatDbContext>();
+
+        // 好友关系是双向两行，任一方向命中即视为好友（兼容历史数据只有单向行的情况）。
+        var isFriend = await db.Friends.AsNoTracking().AnyAsync(
+            friend =>
+                (friend.OwnerUserId == userId && friend.FriendUserId == peerId)
+                || (friend.OwnerUserId == peerId && friend.FriendUserId == userId),
+            cancellationToken);
+        if (isFriend)
+        {
+            return true;
+        }
+
+        // 双方都发过真实消息才算「聊过」：系统消息（含旧版通话记录）不计入。
+        var sentByMe = await db.Messages.AsNoTracking().AnyAsync(
+            message => message.ConversationId == conversationId
+                && message.SenderId == userId
+                && message.MsgType != MessageType.System,
+            cancellationToken);
+        if (!sentByMe)
+        {
+            return false;
+        }
+
+        return await db.Messages.AsNoTracking().AnyAsync(
+            message => message.ConversationId == conversationId
+                && message.SenderId == peerId
+                && message.MsgType != MessageType.System,
             cancellationToken);
     }
 
