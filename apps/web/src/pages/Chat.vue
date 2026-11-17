@@ -34,6 +34,9 @@ import { enter, type MotionHandle } from '../core/motion'
 import type { MentionCandidateMember } from '../core/mentions'
 import type { MessageActionId } from '../core/messageActions'
 import { createPanelHistoryGuard } from '../core/historyGuard'
+import { isDesktopShell } from '../core/desktop'
+import { isNativeShell } from '../core/externalLink'
+import { useCallStore } from '../stores/call'
 import {
   clearReadingAnchor,
   readReadingAnchor,
@@ -91,6 +94,16 @@ watch(
 const activeConversation = computed(() =>
   activeId.value ? conversations.getById(activeId.value) : undefined,
 )
+
+// 1:1 通话（协议 §3.1）：只有 Windows 壳与 Android 壳声明 callCapabilities，
+// Web 浏览器没有麦克风/摄像头通话能力，入口一并隐藏。
+const call = useCallStore()
+const callEnabled = computed(() => isDesktopShell() || isNativeShell())
+function startCall(kind: 'audio' | 'video'): void {
+  const conversation = activeConversation.value
+  if (!conversation || conversation.type !== 'direct' || call.snapshot) return
+  void call.startCall(conversation.conversationId, kind)
+}
 
 /**
  * 内联搜索点击联系人/陌生人：在第三栏预览资料，不清空搜索、不改变当前会话。
@@ -2246,9 +2259,12 @@ function onWindowDrop(event: DragEvent): void {
           :avatar-file-id="headerAvatarFileId"
           :muted="activeConversation.muted"
           :show-back="true"
+          :call-enabled="callEnabled"
           @open-group="toggleGroupDrawer"
           @open-files="toggleFilesPanel"
           @toggle-mute="toggleMute"
+          @call-audio="startCall('audio')"
+          @call-video="startCall('video')"
           @back="backToList"
           @search="openConversationSearch"
         />

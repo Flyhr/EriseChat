@@ -35,6 +35,9 @@ export type AppIconName =
   | 'mic'
   | 'play'
   | 'pause'
+  // 1:1 通话：语音呼叫 / 视频呼叫。
+  | 'phone'
+  | 'video'
   // F-35：文件消息按扩展名区分类型图标。
   | 'filePdf'
   | 'fileDoc'

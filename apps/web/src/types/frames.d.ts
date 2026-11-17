@@ -7,6 +7,10 @@
 // 协议版本运行时值见 core/config.ts（默认 1，可由 VITE_PROTOCOL_VERSION 覆盖）。
 
 /** 22 个帧 type（protocol.md §3；F-18 新增撤回/编辑 4 个） */
+/** 通话帧 type（protocol.md §3.1，12 个；1:1 语音/视频，仅 Windows 与 Android 壳实现） */
+export type CallKind = 'audio' | 'video'
+export type CallStateText = 'ringing' | 'connecting' | 'active' | 'ended'
+
 export type FrameType =
   | 'auth'
   | 'hello'
@@ -29,6 +33,18 @@ export type FrameType =
   | 'presence'
   | 'friend.changed'
   | 'favorite.changed'
+  | 'call.invite'
+  | 'call.incoming'
+  | 'call.ringing'
+  | 'call.accept'
+  | 'call.accepted'
+  | 'call.connected'
+  | 'call.reject'
+  | 'call.cancel'
+  | 'call.end'
+  | 'call.sdp'
+  | 'call.ice'
+  | 'call.state'
   | 'kicked'
   | 'error'
 
@@ -210,6 +226,8 @@ export interface AuthFrame extends FrameBase {
   token: string
   deviceId: string
   protocolVersion?: number
+  /** 本端可接听的通话类型（§3.1）；Web 与旧客户端省略。 */
+  callCapabilities?: CallKind[]
 }
 
 export interface HelloFrame extends FrameBase {
@@ -456,6 +474,113 @@ export interface ErrorFrame extends FrameBase {
   message: string
 }
 
+// ===== 通话信令（protocol.md §3.1，V0.4 草案） =====
+
+/** 通话对端资料（服务端从 users 读取） */
+export interface CallPeer {
+  userId: string
+  displayName: string
+  avatarFileId?: string | null
+}
+
+/** call.invite：主叫发起，服务端回 call.state(ringing) 并转发 call.incoming */
+export interface CallInviteFrame extends FrameBase {
+  type: 'call.invite'
+  callId: string
+  conversationId: string
+  kind: CallKind
+}
+
+/** call.incoming：被叫收到来电 */
+export interface CallIncomingFrame extends FrameBase {
+  type: 'call.incoming'
+  callId: string
+  conversationId: string
+  kind: CallKind
+  peer: CallPeer
+  createdAt: number
+}
+
+/** call.ringing：被叫回执「已响铃」（服务端转给主叫） */
+export interface CallRingingFrame extends FrameBase {
+  type: 'call.ringing'
+  callId: string
+}
+
+export interface CallAcceptFrame extends FrameBase {
+  type: 'call.accept'
+  callId: string
+}
+
+/** call.accepted：首个接听生效后发给主叫与接听连接 */
+export interface CallAcceptedFrame extends FrameBase {
+  type: 'call.accepted'
+  callId: string
+  peer: CallPeer
+  answeredAt: number
+}
+
+/** call.connected：本端首次收到远端媒体（音频包或视频帧）后发送 */
+export interface CallConnectedFrame extends FrameBase {
+  type: 'call.connected'
+  callId: string
+}
+
+export interface CallRejectFrame extends FrameBase {
+  type: 'call.reject'
+  callId: string
+  reason?: string | null
+}
+
+/** call.cancel：服务端取消（占线/别处已接/主叫取消） */
+export interface CallCancelFrame extends FrameBase {
+  type: 'call.cancel'
+  callId: string
+  reason?: string | null
+}
+
+export interface CallEndFrame extends FrameBase {
+  type: 'call.end'
+  callId: string
+  reason?: string | null
+}
+
+export interface CallSdpPayload {
+  type: 'offer' | 'answer'
+  sdp: string
+}
+
+export interface CallSdpFrame extends FrameBase {
+  type: 'call.sdp'
+  callId: string
+  sdp: CallSdpPayload
+}
+
+export interface CallIcePayload {
+  candidate: string
+  sdpMid?: string | null
+  sdpMLineIndex?: number | null
+  usernameFragment?: string | null
+}
+
+export interface CallIceFrame extends FrameBase {
+  type: 'call.ice'
+  callId: string
+  candidate: CallIcePayload
+}
+
+/** call.state：重连同步与状态变化（无通话时 callId 为 null） */
+export interface CallStateFrame extends FrameBase {
+  type: 'call.state'
+  callId?: string | null
+  state?: CallStateText | null
+  kind?: CallKind | null
+  peer?: CallPeer | null
+  createdAt?: number | null
+  answeredAt?: number | null
+  connectedAt?: number | null
+}
+
 /** 客户端可发送的帧 */
 export type ClientFrame =
   | AuthFrame
@@ -468,6 +593,15 @@ export type ClientFrame =
   | ConvListRequestFrame
   | ReadUpdateFrame
   | TypingClientFrame
+  | CallInviteFrame
+  | CallRingingFrame
+  | CallAcceptFrame
+  | CallConnectedFrame
+  | CallRejectFrame
+  | CallCancelFrame
+  | CallEndFrame
+  | CallSdpFrame
+  | CallIceFrame
 
 /** 服务端可下发的帧 */
 export type ServerFrame =
@@ -487,5 +621,13 @@ export type ServerFrame =
   | PresenceFrame
   | FriendChangedFrame
   | FavoriteChangedFrame
+  | CallIncomingFrame
+  | CallRingingFrame
+  | CallAcceptedFrame
+  | CallCancelFrame
+  | CallEndFrame
+  | CallSdpFrame
+  | CallIceFrame
+  | CallStateFrame
   | KickedFrame
   | ErrorFrame

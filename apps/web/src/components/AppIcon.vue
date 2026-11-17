@@ -27,6 +27,7 @@ import {
   PhPaperclip,
   PhPause,
   PhPencilSimple,
+  PhPhone,
   PhPlay,
   PhPlus,
   PhPushPin,
@@ -36,6 +37,7 @@ import {
   PhStar,
   PhUser,
   PhUsersThree,
+  PhVideoCamera,
   PhX,
 } from '@phosphor-icons/vue'
 import type { AppIconName } from '../core/icons'
@@ -71,6 +73,8 @@ const ICONS: Record<AppIconName, Component> = {
   shield: PhShieldCheck,
   star: PhStar,
   mic: PhMicrophone,
+  phone: PhPhone,
+  video: PhVideoCamera,
   play: PhPlay,
   pause: PhPause,
   filePdf: PhFilePdf,

@@ -45,6 +45,10 @@
          因此 MainActivity 不再重复覆写 onPermissionRequest（否则会替换掉文件选择等默认能力）。 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 1:1 视频通话：摄像头。Capacitor 的 onPermissionRequest 在 WebView 请求
+         VIDEO_CAPTURE 时申请 CAMERA 运行时权限；声明为可选特性，不影响无摄像头设备安装。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- F-29：应用内下载 APK 后调起系统安装器；Android 8+ 需声明该权限，Android 11+ 仍需用户允许「安装未知应用」。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 后台消息提醒：Android 13+ 通知运行时权限；前台服务类型 dataSync 需对应权限。 -->

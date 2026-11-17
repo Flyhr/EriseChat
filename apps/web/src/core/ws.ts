@@ -3,8 +3,10 @@
 // 全项目唯一连接入口：业务代码不得直接 new WebSocket（docs/project-overview.md §10）。
 
 import { config, reconnectDelayMs, resolveWsUrl } from './config'
+import { isDesktopShell } from './desktop'
+import { isNativeShell } from './externalLink'
 import { readStorage, writeStorage } from './safeStorage'
-import type { ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types/frames'
+import type { CallKind, ClientFrame, ErrorFrame, KickedFrame, ServerFrame } from '../types/frames'
 
 /** 连接状态：idle 未连接 / connecting 首次连接中 / authed 认证完成 / reconnecting 退避重连中 / closed 已关闭 */
 export type WsState = 'idle' | 'connecting' | 'authed' | 'reconnecting' | 'closed'
@@ -189,6 +191,7 @@ export class ChatWsClient {
       token: this.authToken,
       deviceId: this.getOrCreateDeviceId(),
       protocolVersion: this.protocolVersion,
+      ...(resolveCallCapabilities().length > 0 ? { callCapabilities: resolveCallCapabilities() } : {}),
     })
   }
 
@@ -404,3 +407,8 @@ export class ChatWsClient {
 
 /** 全局唯一连接实例（docs/project-overview.md §9/§10：业务代码不得绕过本模块直连 WebSocket）。 */
 export const chatWs = new ChatWsClient()
+
+/** 本端可接听的通话类型：只有 Windows 壳与 Android 壳声明，Web 与旧客户端省略（protocol.md §3.1）。 */
+function resolveCallCapabilities(): CallKind[] {
+  return isDesktopShell() || isNativeShell() ? ['audio', 'video'] : []
+}

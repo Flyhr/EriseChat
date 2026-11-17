@@ -5,6 +5,8 @@ import ConnectionBanner from './components/ConnectionBanner.vue'
 import ToastBridge from './components/ToastBridge.vue'
 import MobileTabBar from './components/MobileTabBar.vue'
 import SearchDialog from './components/SearchDialog.vue'
+import IncomingCallDialog from './components/IncomingCallDialog.vue'
+import CallOverlay from './components/CallOverlay.vue'
 import SideNav from './components/SideNav.vue'
 import { chatWs, type WsState } from './core/ws'
 import {
@@ -32,6 +34,7 @@ import { useFriendsStore } from './stores/friends'
 import { usePresenceStore } from './stores/presence'
 import { useSettingsStore } from './stores/settings'
 import { useSearchStore } from './stores/search'
+import { useCallStore } from './stores/call'
 import { useVisualViewport } from './core/useVisualViewport'
 import { NConfigProvider, NMessageProvider } from 'naive-ui'
 import { ecThemeOverridesFor } from './core/theme'
@@ -49,6 +52,7 @@ const friends = useFriendsStore()
 const presence = usePresenceStore()
 const settings = useSettingsStore()
 const search = useSearchStore()
+const call = useCallStore()
 // UI-04 批次3：软键盘适配（只读可视高度，键盘弹出时隐藏底部导航并收紧外壳高度）。
 const { keyboardOpen } = useVisualViewport()
 const wsState = ref<WsState>(chatWs.state)
@@ -160,6 +164,8 @@ function onVisibilityChange(): void {
 }
 
 onMounted(() => {
+  // 通话信令与媒体只在登录后接线（Web 浏览器不上报 callCapabilities，收不到来电）。
+  call.attach()
   presence.subscribeRealtime()
   // F-17：好友的 REST 全量拉取 + friend.changed 增量推送（登录后/重连 authed 时拉取）。
   friends.subscribeRealtime()
@@ -340,6 +346,9 @@ function reconnect(): void {
       <!-- 轻提示由 ToastBridge 经 NMessageProvider 统一渲染。 -->
       <!-- F-11：消息搜索面板（全局单例，左导航/聊天顶栏/移动端列表共用）。 -->
       <SearchDialog />
+      <!-- 1:1 通话（协议 §3.1）：来电弹窗与通话浮层；Web 浏览器不声明通话能力，正常不会出现。 -->
+      <IncomingCallDialog v-if="auth.isLoggedIn" />
+      <CallOverlay v-if="auth.isLoggedIn" />
     </div>
   </NConfigProvider>
 </template>
