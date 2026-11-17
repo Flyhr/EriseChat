@@ -832,6 +832,12 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - `GET /api/calls/can-call/{conversationId}`：返回 `{ "allowed": true|false }`，用于判断当前会话是否满足通话门槛（好友或双方都已发过消息）；未登录 → `UNAUTHORIZED`（401），会话不存在或非成员 → `NOT_FOUND` / `NOT_MEMBER`。
     - 说明：TURN 部署在 tailnet 内（见 `docs/deploy.md` §3.7），上述 ICE 地址只对 tailnet 内设备可达；`protocolVersion` 仍为 1。
 
+21. **用户资料（REST，v1，F-40）**：聊天顶栏点击对方头像或名称进入资料页，需要读取对方昵称、邮箱与好友关系。
+
+    - `GET /api/users/{userId}`：返回 `userId` / `email` / `displayName` / `avatarFileId` / `role` / `status` / `createdAt` / `hasPassword`，互为好友时额外带 `relation: "friend"`。
+    - 可见性：仅「互为好友」或「与当前用户存在共同会话」的用户可读；其他情况（含用户不存在）统一返回 `NOT_FOUND`（404），不区分「不存在」与「无权查看」，避免用于账号枚举。
+    - 搜索结果 `GET /api/users?search=` 仍然不下发他人邮箱（C1a 邮箱收敛）；本接口仅供资料页使用，会话对象之间可见邮箱。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -928,3 +934,4 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（未接通记录与 Web 来电提示） | 2026-11-17 | `call.incoming` 新增可选 `callSupported`（`false` 表示本连接不能接听，只提示「请在客户端接听」）；被叫只有 Web/旧客户端在线时改为正常响铃而非立即 `CALL_UNAVAILABLE`；未接通（timeout / declined / failed）也写时间线；`protocolVersion` 仍为 1 |
 | v1（离线可呼叫与回铃音） | 2026-11-17 | 被叫完全离线不再立即 `CALL_UNAVAILABLE`：照常建立通话并振铃 60 秒，被叫在此期间上线会补发 `call.incoming`；`call.state` 新增可选 `direction`（`outgoing` / `incoming`），主叫重连不再误显示来电界面；客户端新增本地回铃音（仅主叫、无协议影响）；`CALL_UNAVAILABLE` 保留但当前不再触发；`protocolVersion` 仍为 1 |
 | v1（陌生人通话门槛） | 2026-11-17 | 新增通话门槛：好友直接放行；非好友需双方各在该单聊发过至少一条普通消息，否则 `call.invite` 回 `CALL_FORBIDDEN`（403）；新增 `GET /api/calls/can-call/{conversationId}` 供客户端预判并置灰入口；帧格式与 `protocolVersion` 不变 |
+| v1（联系人资料页） | 2026-11-17 | 新增 `GET /api/users/{userId}`（仅互为好友或存在共同会话时可见，含邮箱；不存在与无权查看统一 404）；聊天顶栏头像与名称可点进入资料页，展示邮箱、成为好友时间、拉黑/解除拉黑与头像大图；搜索接口仍不下发他人邮箱；`protocolVersion` 仍为 1 |
