@@ -48,6 +48,12 @@ public static class UserEndpoints
             .RequireAuthorization()
             .Produces<UsersSearchResponse>();
 
+        // 资料页（F-40）：仅好友或同会话成员可见，用于聊天顶栏点击头像/名称后的资料展示。
+        app.MapGet("/api/users/{userId}", GetUserProfileAsync)
+            .WithName("GetUserProfile")
+            .RequireAuthorization()
+            .Produces<MeResponse>();
+
         return app;
     }
 
@@ -218,6 +224,54 @@ public static class UserEndpoints
         user.CreatedAt,
         user.PasswordHash is not null,
         relation);
+
+    /// <summary>资料页（F-40）：按 userId 读取昵称、邮箱与关系；仅好友或同会话成员可见。</summary>
+    private static async Task<IResult> GetUserProfileAsync(
+        string userId,
+        ClaimsPrincipal principal,
+        ChatDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var callerId = principal.UserId();
+        var target = await db.Users.AsNoTracking()
+            .FirstOrDefaultAsync(user => user.Id == userId, cancellationToken);
+        if (target is null)
+        {
+            throw ApiException.NotFound("用户不存在");
+        }
+
+        // Friend 是单向行：互为好友时为两行，任一方向命中即视为好友。
+        var isFriend = await db.Friends.AsNoTracking().AnyAsync(
+            friend => (friend.OwnerUserId == callerId && friend.FriendUserId == userId)
+                || (friend.OwnerUserId == userId && friend.FriendUserId == callerId),
+            cancellationToken);
+
+        var visible = isFriend || await db.ConversationMembers.AsNoTracking()
+            .Where(mine => mine.UserId == callerId)
+            .Join(
+                db.ConversationMembers.AsNoTracking().Where(theirs => theirs.UserId == userId),
+                mine => mine.ConversationId,
+                theirs => theirs.ConversationId,
+                (mine, _) => mine)
+            .AnyAsync(cancellationToken);
+
+        if (!visible)
+        {
+            // 不区分「不存在」与「无可见关系」，避免用该接口枚举账号。
+            throw ApiException.NotFound("用户不存在");
+        }
+
+        return Results.Json(new MeResponse(
+            target.Id,
+            target.Email,
+            target.DisplayName,
+            target.AvatarFileId,
+            target.Role.ToString().ToLowerInvariant(),
+            target.Status.ToString().ToLowerInvariant(),
+            target.CreatedAt,
+            target.PasswordHash is not null,
+            isFriend ? "friend" : null));
+    }
 
     /// <summary>SQLite LIKE 通配符转义（配合 EF.Functions.Like 的 escape 参数 '\'）。</summary>
     private static string EscapeLikePattern(string value) =>
