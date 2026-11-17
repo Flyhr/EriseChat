@@ -1,9 +1,10 @@
-# EriseChat 单容器 Docker Compose 部署（一键部署入口，说明见 docs/deploy.md §3）
+# EriseChat Docker Compose 部署（一键部署入口，说明见 docs/deploy.md §3）
 #
-# 架构约束（AGENTS.md §2.4）：服务端仍是单进程（ASP.NET Core + SQLite + 本地文件卷），
-# 不使用多容器编排；HTTPS 入口走宿主侧 Tailscale Serve（内测）或 Caddy（公网）。
+# 架构约束（AGENTS.md §2.4）：业务仍是单容器（ASP.NET Core + SQLite + 本地文件卷），
+# 仅额外允许一个 coturn 媒体中继容器（TURN 例外），二者都不是微服务拆分；
+# HTTPS 入口走宿主侧 Tailscale Serve（内测）或 Caddy（公网）。
 #
-# 服务器上执行 `sudo bash infra/docker/deploy.sh` 会自动准备目录/.env 并调用本文件；
+# 服务器上执行 `sudo bash infra/docker/deploy.sh` 会自动准备目录/.env/TURN 配置并调用本文件；
 # 手动执行示例：
 #   ERISECHAT_DATA_DIR=/opt/erisechat/data ERISECHAT_ENV_FILE=/opt/erisechat/.env \
 #     docker compose up -d --build
@@ -45,3 +46,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # TURN 媒体中继（AGENTS.md §2.4 的唯一例外）：只服务 tailnet，
+  # 用 host 网络绑定 tailscale 地址，不做公网端口映射（V0.4 裁决）。
+  coturn:
+    image: ${TURN_IMAGE:-coturn/coturn:4.6.3}
+    container_name: erisechat-turn
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${ERISECHAT_TURN_CONFIG:-./coturn/turnserver.conf}:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]

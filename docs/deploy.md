@@ -269,6 +269,35 @@ sudo systemctl reload caddy
 
 ---
 
+### 3.7 TURN 中继（coturn，1:1 音视频必需）
+
+1:1 通话走 WebRTC P2P，跨 NAT 或蜂窝网络时需要 TURN 中继。按 `AGENTS.md` §2.4，部署里只多一个 `coturn` 容器：
+
+- 只服务 tailnet（V0.4 裁决）：`listening-ip` 与 `relay-ip` 都是服务器 tailscale 地址，通话两端都必须安装并登录 Tailscale。
+- 端口：`3478/udp`、`3478/tcp` 与中继 `50000-50100/udp`，均绑定 tailnet 地址；不做公网映射，也不配置 `external-ip`。
+- 配置：`deploy.sh` 按 `infra/docker/turnserver.conf.template` 渲染到 `$ERISECHAT_HOME/coturn/turnserver.conf`（权限 600，属主为容器用户 `nobody`）；密钥写入 `.env` 的 `Call__TurnSharedSecret`，同时追加 `Call__TurnUrls__0/1`。
+
+验证：
+
+```bash
+docker compose ps                 # 应有 erisechat-server 与 erisechat-turn
+docker logs --tail 20 erisechat-turn
+ss -lnup | grep 3478              # 只应出现 tailnet 地址
+```
+
+取凭证后可用镜像自带工具自检（`<token>` 为登录令牌）：
+
+```bash
+curl -s http://127.0.0.1:6580/api/calls/ice-servers -H "Authorization: Bearer <token>"
+docker exec erisechat-turn turnutils_uclient -u '<username>' -w '<credential>' -p 3478 -n 1 -m 1 -y <tailnet-ip>
+```
+
+常见问题：
+
+- `permission denied` 读不到配置：`turnserver.conf` 属主必须是容器运行用户（`nobody`，uid 65534），所在目录需可穿越。
+- 客户端拿不到 relay candidate：确认手机/桌面端 Tailscale 在线，且没有防火墙丢弃 `3478` 与 `50000-50100`。
+- 需要临时回退：`docker compose stop coturn`，`/api/calls/ice-servers` 返回空数组后客户端退回纯 P2P。
+
 ## 4. 配置项（/opt/erisechat/.env）
 
 配置读取顺序：**secrets.json > 环境变量 > appsettings.{Environment}.json > appsettings.json**。

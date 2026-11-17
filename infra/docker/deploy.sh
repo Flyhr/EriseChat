@@ -72,6 +72,37 @@ export APP_VERSION="$VERSION"
 export DOTNET_REGISTRY="${DOTNET_REGISTRY:-mcr.microsoft.com}"
 export NODE_IMAGE="${NODE_IMAGE:-node:24-alpine}"
 
+# --- TURN（coturn，AGENTS.md §2.4 例外）---
+# 只服务 tailnet（V0.4 裁决）：监听 tailscale 地址，不做公网端口映射。
+TURN_IMAGE="${TURN_IMAGE:-coturn/coturn:4.6.3}"
+TURN_LISTEN_IP="${TURN_LISTEN_IP:-$(tailscale ip -4 2>/dev/null | head -1 || true)}"
+[ -n "$TURN_LISTEN_IP" ] || die "未检测到 tailnet 地址：先启动 tailscale，或显式设置 TURN_LISTEN_IP"
+
+turn_secret="$(sed -n 's/^Call__TurnSharedSecret=//p' "$ENV_FILE" | tail -1)"
+if [ -z "$turn_secret" ]; then
+  log "在 $ENV_FILE 追加 TURN 密钥与地址"
+  turn_secret="$(openssl rand -hex 32)"
+  (
+    umask 077
+    cat >> "$ENV_FILE" <<EOF
+
+# --- TURN（coturn）---
+Call__TurnSharedSecret=$turn_secret
+Call__TurnUrls__0=turn:$TURN_LISTEN_IP:3478?transport=udp
+Call__TurnUrls__1=turn:$TURN_LISTEN_IP:3478?transport=tcp
+EOF
+  )
+fi
+
+install -d -m 751 "$HOME_DIR/coturn"
+sed -e "s|__LISTEN_IP__|$TURN_LISTEN_IP|g" -e "s|__SECRET__|$turn_secret|g" \
+  "$ROOT/infra/docker/turnserver.conf.template" > "$HOME_DIR/coturn/turnserver.conf"
+# coturn 容器以 nobody(65534) 运行；文件不可读时它会静默退回默认配置并监听全部网卡。
+chown 65534:65534 "$HOME_DIR/coturn/turnserver.conf"
+chmod 600 "$HOME_DIR/coturn/turnserver.conf"
+export ERISECHAT_TURN_CONFIG="$HOME_DIR/coturn/turnserver.conf"
+export TURN_IMAGE
+
 cd "$ROOT"
 if [ "${SKIP_BUILD:-0}" = "1" ]; then
   log "跳过构建，启动已有镜像 ${APP_VERSION}"

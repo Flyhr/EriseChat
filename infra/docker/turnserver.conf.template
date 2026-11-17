@@ -1,0 +1,32 @@
+# EriseChat TURN 配置模板（AGENTS.md §2.4 的 coturn 例外）。
+#
+# 由 infra/docker/deploy.sh 渲染为 $ERISECHAT_HOME/coturn/turnserver.conf（权限 600，属主为容器运行用户）
+# 后只读挂载进容器：
+#   LISTEN_IP  监听与中继地址（服务器 tailnet IPv4，如 100.115.90.9）
+#   SECRET     static-auth-secret，与服务端 Call__TurnSharedSecret 一致
+#
+# 只服务 tailnet（V0.4 裁决）：不配置 external-ip、不做公网端口映射。
+
+listening-ip=__LISTEN_IP__
+relay-ip=__LISTEN_IP__
+listening-port=3478
+
+# UDP 中继端口区间（与 AGENTS §2.4 白名单一致）
+min-port=50000
+max-port=50100
+
+# 短期凭证校验：用户名 “过期时间:用户 ID”，凭证 base64(HMAC-SHA1(密钥, 用户名))
+use-auth-secret
+static-auth-secret=__SECRET__
+realm=erisechat
+
+fingerprint
+# 禁止把中继指向内网以外的组播/环回，减少被当作开放中继的风险
+no-multicast-peers
+no-cli
+no-tls
+no-dtls
+
+# 日志只到 stdout，交给 docker logs
+log-file=stdout
+simple-log
