@@ -85,9 +85,12 @@ const props = withDefaults(
   },
 )
 
-/** 输入框可见行数（批次 B3）：手机从 1 行起、桌面从 2 行起，统一最多 5 行，超出在框内滚动。
+/** 输入框可见行数（批次 B3）：手机从 1 行起、桌面从 2 行起；手机最多 3 行、桌面最多 5 行，超出在框内滚动。
  *  行高取自 CSS（见 .send-box__input），断点沿用全站 800px。 */
-const TEXTAREA_MAX_ROWS = 5
+function textareaMaxRows(): number {
+  if (typeof window === 'undefined') return 5
+  return window.matchMedia('(max-width: 800px)').matches ? 3 : 5
+}
 
 function textareaMinRows(): number {
   if (typeof window === 'undefined') return 2
@@ -316,14 +319,14 @@ function abandonVoiceInput(): void {
   clearVoicePreview()
 }
 
-/** 依据内容调整 textarea 高度：手机 1 行 / 桌面 2 行起，最多 5 行，超过后改为内部滚动。 */
+/** 依据内容调整 textarea 高度：手机 1 行 / 桌面 2 行起，手机最多 3 行、桌面最多 5 行，超过后改为内部滚动。 */
 function resizeInput(): void {
   const el = input.value
   if (!el) return
   // 行高按实际计算值取，避免主题/字号变化后行数上限失配（'normal' 时退回 21px）。
   const lineHeight = Number.parseFloat(window.getComputedStyle(el).lineHeight) || 21
   const minHeight = lineHeight * textareaMinRows()
-  const maxHeight = lineHeight * TEXTAREA_MAX_ROWS
+  const maxHeight = lineHeight * textareaMaxRows()
   el.style.height = 'auto'
   const contentHeight = el.scrollHeight
   el.style.height = `${Math.min(Math.max(contentHeight, minHeight), maxHeight)}px`
@@ -543,10 +546,15 @@ function submit(): void {
   if (recording.value) return
   const value = text.value.trim()
   if (!value || value.length > MAX_TEXT_LENGTH) return
+  // 移动端点发送时按钮会抢走焦点、软键盘随之收起；记下焦点并在清空后还回输入框。
+  const hadFocus = document.activeElement === input.value
   emit('send', value)
   // 清空后由 watch(text) 回传空串，父组件据此删除草稿（发送成功即清）。
   text.value = ''
-  void nextTick(resizeInput)
+  void nextTick(() => {
+    resizeInput()
+    if (hadFocus) input.value?.focus({ preventScroll: true })
+  })
 }
 
 function pickFile(): void {
@@ -807,7 +815,7 @@ function onInput(): void {
         ref="input"
         v-model="text"
         class="send-box__input"
-        rows="2"
+        rows="1"
         :maxlength="MAX_TEXT_LENGTH"
         :disabled="uploading"
         placeholder="输入消息"
@@ -884,6 +892,7 @@ function onInput(): void {
           type="submit"
           aria-label="发送消息"
           :disabled="uploading || !text.trim()"
+          @pointerdown.prevent
         >
           <AppIcon name="send" :size="18" />
         </button>
@@ -1188,9 +1197,9 @@ function onInput(): void {
   }
 
   .send-box__input {
-    /* 批次 B3：手机输入框从 1 行起（工具栏另占 44px，输入区整体仍可点）。 */
+    /* 批次 B3：手机输入框从 1 行起、最多 3 行（工具栏另占 44px，输入区整体仍可点）。 */
     min-height: calc(var(--ec-line-height-body, 1.5) * 1em);
-    max-height: var(--ec-size-mobile-input-max);
+    max-height: calc(var(--ec-line-height-body, 1.5) * 1em * 3);
   }
 
   /* F-25：移动端候选面板全宽、限制高度，触屏行高 ≥44px。 */
@@ -1214,11 +1223,19 @@ function onInput(): void {
     height: var(--ec-touch-target);
   }
 
-  .send-box__send {
+  .send-box__send:not(.send-box__send--icon) {
     height: var(--ec-size-mobile-send);
     padding: 0 var(--ec-space-4);
     border-radius: var(--ec-radius-full);
     font-size: var(--ec-font-size-secondary);
+  }
+
+  /* 发送按钮是纯图标：不要套用上面的横向内边距，否则 34px 宽减掉左右 16px 会把图标压扁。 */
+  .send-box__send--icon {
+    width: var(--ec-size-mobile-send);
+    height: var(--ec-size-mobile-send);
+    padding: 0;
+    border-radius: var(--ec-radius-full);
   }
 
   /* F-28：移动端录音条与输入区同高，方便单手触达。 */

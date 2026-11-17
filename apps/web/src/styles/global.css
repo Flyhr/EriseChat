@@ -260,3 +260,10 @@ textarea,
   margin-left: var(--ec-space-1);
   color: inherit;
 }
+
+/* 移动端轻提示：Naive UI 的 message 容器默认贴顶，会压到状态栏/刘海；下移一个安全区。 */
+@media (max-width: 800px) {
+  .n-message-container {
+    padding-top: calc(var(--ec-safe-top, 0px) + 12px);
+  }
+}
