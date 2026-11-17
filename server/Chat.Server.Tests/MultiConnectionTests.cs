@@ -3,6 +3,7 @@ using System.Text;
 using Chat.Protocol.Frames;
 using Chat.Server.Common.Options;
 using Chat.Server.Data;
+using Chat.Server.Modules.Calls;
 using Chat.Server.Modules.Messages;
 using Chat.Server.Modules.Realtime;
 using Chat.Server.Realtime;
@@ -266,10 +267,16 @@ public sealed class MultiConnectionTests
         var appOptions = TestSupport.CreateAppOptions();
         appOptions.MaxConnectionsPerUser = maxConnectionsPerUser;
         var presence = new PresenceService(connections, scopeFactory, NullLogger<PresenceService>.Instance);
+        var calls = new CallSessionManager(
+            connections,
+            scopeFactory,
+            Options.Create(new CallOptions()),
+            NullLogger<CallSessionManager>.Instance);
         var handler = new WebSocketConnectionHandler(
             connections,
             presence,
             scopeFactory,
+            calls,
             Options.Create(appOptions),
             NullLoggerFactory.Instance,
             NullLogger<WebSocketConnectionHandler>.Instance);
