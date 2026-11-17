@@ -99,16 +99,17 @@
 
 - 仅 1:1：`conversationId` 必须为单聊且两端均为成员；群会话调用 `call.invite` 回 `CALL_UNSUPPORTED`（400）。
 - 通话能力由客户端在认证时声明，计划增加可选的 `callCapabilities`（`audio` / `video` 数组）。Windows 和 Android 壳按实际支持能力声明，Web 浏览器与旧客户端省略。邀请、接听与信令转发还需核对登录身份、会话权限和参与连接。
-- 可达性：被叫在线连接里没有支持本次类型的连接（只开着 Web、旧客户端、无登录设备），或完全离线 → **立即**返回 `CALL_UNAVAILABLE`（409），不建会话、不响铃 60 秒、不写记录。`call.incoming` 只发给声明了该类型的连接。
-- 每用户同时最多 1 通：已通话时新来电回 `CALL_BUSY`（409）；同一对用户重复 `call.invite` 幂等返回当前状态。
-- 超时：已响铃且被叫 60 秒无应答 → 服务端下发 `call.end`（`reason: timeout`），结果只记入 `calls`。
-- 断线：WS 断开后服务端保留通话 10 秒，重连后以 `call.state` 让客户端恢复或收尾。
-- 隐私：`calls` 保存邀请、接听、媒体接通、结束时间和结果。SDP / ICE 只转发，不落库、不进日志。
-- 接通判定：首个 `call.connected` 到达即落 `connected_at`，后续重复确认不再改库。只有 `accept` 而始终没有媒体时不算接通。
-- 时间线：`connected_at` 有值且通话结束后，在单聊时间线写入一条 `msgType=system`、`content.event=call.completed` 的记录。`sender_id` 取主叫；`content.text` 提供类型与时长，例如「语音通话 · 03:24」，不足 1 小时用 `mm:ss`、满 1 小时用 `h:mm:ss`，连接中断可在同一条记录标明。未接、拒接、不可达与「接了但无媒体」都不写记录。
-- 幂等与同步：服务端在同一个事务内将通话置为结束并分配消息 `seq`、写入时间线记录。重复结束按 `callId` 返回已有结果，提交成功后走现有消息推送和补拉。通话记录沿用系统消息的会话排序和未读规则（被叫侧计 1 条未读，主叫侧不增）。
-- 检索范围：首版通话记录不进消息搜索（搜索仍只覆盖 `text` / `image` / `file`），只在时间线与通话历史可查。
-- 兼容：Web 与旧客户端使用现有系统消息文案显示时间线记录。Windows 与 Android 在收到对应信令时提供通话操作。
+- 通话门槛（2026-11-17 裁决：陌生人不可直接通话）：好友关系直接放行；非好友时，双方必须**各自**在该单聊里发过至少一条普通消息（`msgType != system`，含历史消息），否则 `call.invite` 回 `CALL_FORBIDDEN`（403，「双方聊过之后才能发起通话」）。客户端用 `GET /api/calls/can-call/{conversationId}` 预判并置灰入口。
+- 可达性（2026-11-17 裁决：离线也可呼叫）：被叫**完全离线**时照常建立通话并振铃 60 秒，只是没有连接可推送 `call.incoming`；被叫在振铃期内上线时，服务端补发 `call.incoming`（按该连接能力决定 `callSupported`），主叫无感知。`CALL_UNAVAILABLE` 错误码保留但当前不再触发。
+- Web 与旧客户端：被叫在线但没有支持本次类型的连接时仍按正常流程响铃 60 秒；这些连接会收到 `call.incoming` 且 `callSupported=false`，只应提示「请在 Windows 或 Android 客户端接听」，不得进入来电界面或发送 `call.accept`。
+- 超时：已响铃且被叫 60 秒无应答（含被叫始终离线）→ 服务端下发 `call.end`（`reason: timeout`），并在时间线写「未接听」记录。
+- 断线：WS 断开后服务端保留通话 10 秒，重连后以 `call.state` 让客户端恢复或收尾；客户端在媒体 `disconnected` 时也应先尝试 ICE 重启并等满 10 秒再挂断。
+- 状态同步：`call.state` 携带 `direction`（`outgoing` / `incoming`），主叫重连时据此恢复「正在呼叫」界面，而不是误显示来电界面。
+- 时间线（2026-11-17 裁决：改为用户消息）：通话结束后，服务端以**主叫身份**写一条普通文本消息（`msgType=text`、`senderId=caller_id`），不使用 `msgType=system`，以便在聊天里看出是谁发起的通话。内容为类型与结果：接通时「语音通话 · 03:24」（不足 1 小时 `mm:ss`、满 1 小时 `h:mm:ss`，连接中断追加「· 连接中断」）；未接通时「语音通话 · 已拒绝 / 未接听 / 未接通 / 已取消」。
+- 记录范围：任何结束结果都写一条，含主叫自己取消（「语音通话 · 已取消」）；完全不可达（未建立通话）不写。
+- 幂等与同步：服务端在同一事务内结束通话、分配消息 `seq` 并写入记录；重复结束按 `callId` 返回已有结果，提交后走现有 `message.new` 推送与补拉。记录是普通文本消息，未读与已读沿用普通消息规则。
+- 检索范围：记录为 `text`，会被现有消息搜索命中，无需额外索引。
+- 兼容：Web 与旧客户端把它渲染成主叫发来的一条普通文本消息，无需改动。
 
 错误码见 §5.1（`CALL_BUSY` / `CALL_UNAVAILABLE` / `CALL_NOT_FOUND` / `CALL_FORBIDDEN` / `CALL_UNSUPPORTED`）。
 
@@ -824,6 +825,13 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
     - 关闭时：陌生人对该账号的单聊只能发送 **1 条**消息，对方回复（未撤回）后不再受该限制；`message.send`（WS）与转发进入单聊的 `POST /api/messages/forward` 同受影响。拒绝返回 `FORBIDDEN`（403），文案「对方暂不接受陌生人消息，互加好友后可继续发送」。已落库消息的幂等重试（`clientMsgId` 命中）仍返回原回执，不受限制。
     - 开启时不限制陌生人的单聊发送；已有消息与历史读取、已读/未读、`seq` 连续性均不受影响；开关不推送 WS 帧，客户端重新拉取即可。
 
+20. **通话历史与 ICE 服务器（REST，v1，P1）**：通话只允许 1:1；服务端保存邀请、接听、媒体接通、结束时间与结果，SDP / ICE 只转发不落库。
+
+    - `GET /api/calls`：返回本人作为主叫或被叫的最近 50 条通话，按创建时间倒序：`{ callId, conversationId, kind, state, direction, peer, createdAt, answeredAt, connectedAt, endedAt, endReason, durationSeconds }`；`direction` 为 `outgoing` / `incoming`，`peer` 为对端用户摘要。
+    - `GET /api/calls/ice-servers`：返回 `{ iceServers: [{ urls, username, credential }] }`，凭证为 HMAC-SHA1 短期凭证（`<expires>:<userId>`，有效期 60~86400 秒，默认 3600）；未配置 TURN 时返回空数组。客户端缓存 10 分钟。
+    - `GET /api/calls/can-call/{conversationId}`：返回 `{ "allowed": true|false }`，用于判断当前会话是否满足通话门槛（好友或双方都已发过消息）；未登录 → `UNAUTHORIZED`（401），会话不存在或非成员 → `NOT_FOUND` / `NOT_MEMBER`。
+    - 说明：TURN 部署在 tailnet 内（见 `docs/deploy.md` §3.7），上述 ICE 地址只对 tailnet 内设备可达；`protocolVersion` 仍为 1。
+
 ## 8. 版本与兼容规则
 
 ### 8.1 协议版本
@@ -915,3 +923,8 @@ S→C: {"type":"sync.response","reqId":"s2","hasMore":false,"batches":[{"convers
 | v1（C3 修订：回应同步游标与并发写入） | 2026-11-14 | ① `sync.response` 的每条 batch 都携带 `updatedThrough`；客户端未提供 `updatedAfter` 的会话即使没有新消息/状态变化也返回一条仅含 `updatedThrough` 的**游标初始化** batch，修复空缓存客户端「没有游标就不发 `updatedAfter`」的死循环；② 回应设置/移除的服务端成员与消息状态校验、读取本人回应、写入放进同一 SQLite 写事务（`BEGIN IMMEDIATE`），同账号多端并发设置、替换或删除不再因复合主键冲突返回 500（后到者等待写锁后走幂等/替换分支）；无新帧、不改库表、`protocolVersion` 仍为 1 |
 | v1（隐私设置与陌生人消息限制） | 2026-11-15 | 新增 REST `GET` / `PATCH /api/me/privacy`（字段 `allowStrangerMessages`，默认 false）；`users` 表新增 `allow_stranger_messages INTEGER NOT NULL DEFAULT 0`；关闭时陌生人在对方回复前只能发送 1 条单聊消息，转发进入单聊同受限制（`FORBIDDEN` 403），好友/共同群/群聊不受影响，已落库消息的幂等重试不受影响；无新帧、`protocolVersion` 仍为 1 |
 | v1（1:1 通话信令·实现） | 2026-11-16 | 落地 Windows 与 Android 的 1:1 语音/视频信令（P0）：§3 帧总表并入 12 个 `call.*` 帧（24 → 36）、§3.1 记录状态机与约束、§5.1 新增 `CALL_BUSY` / `CALL_UNAVAILABLE` / `CALL_NOT_FOUND` / `CALL_FORBIDDEN` / `CALL_UNSUPPORTED`；`calls` 表（`id`/`conversation_id`/`caller_id`/`callee_id`/`kind`/`state`/`created_at`/`answered_at`/`connected_at`/`ended_at`/`end_reason`）随 EF 迁移 `AddCalls` 落库，SDP/ICE 只转发不落库；认证帧新增可选 `callCapabilities`；媒体接通且结束后在单聊时间线写 `msgType=system`、`content.event=call.completed` 的记录（`senderId` 取主叫，时长 `mm:ss`/`h:mm:ss`，沿用系统消息未读规则，首版不进搜索）；`protocolVersion` 仍为 1，旧客户端忽略未知帧 |
+| v1（TURN 中继与 ICE 凭证） | 2026-11-17 | 新增 `GET /api/calls/ice-servers`（HMAC-SHA1 短期凭证，与 coturn `static-auth-secret` 配套，有效期 60~86400 秒、默认 3600，未配置 TURN 时返回空数组）；部署侧新增 coturn 中继容器与 `turnserver.conf` 模板（AGENTS §2.4 单容器例外），仅监听 tailnet 地址；`Call` 配置新增 `TurnUrls` / `TurnSharedSecret` / `TurnCredentialTtlSeconds`；帧格式与 `protocolVersion` 不变 |
+| v1（通话记录改为主叫消息） | 2026-11-17 | 通话结束后的时间线记录从 `msgType=system` 改为**主叫发的普通文本消息**（`msgType=text`、`senderId=caller_id`、内容「语音通话 · mm:ss」/ 未接通「已拒绝 / 未接听 / 未接通 / 已取消」），未读与检索沿用普通消息规则；任何结束结果都写（含主叫取消），完全不可达不写；`protocolVersion` 仍为 1 |
+| v1（未接通记录与 Web 来电提示） | 2026-11-17 | `call.incoming` 新增可选 `callSupported`（`false` 表示本连接不能接听，只提示「请在客户端接听」）；被叫只有 Web/旧客户端在线时改为正常响铃而非立即 `CALL_UNAVAILABLE`；未接通（timeout / declined / failed）也写时间线；`protocolVersion` 仍为 1 |
+| v1（离线可呼叫与回铃音） | 2026-11-17 | 被叫完全离线不再立即 `CALL_UNAVAILABLE`：照常建立通话并振铃 60 秒，被叫在此期间上线会补发 `call.incoming`；`call.state` 新增可选 `direction`（`outgoing` / `incoming`），主叫重连不再误显示来电界面；客户端新增本地回铃音（仅主叫、无协议影响）；`CALL_UNAVAILABLE` 保留但当前不再触发；`protocolVersion` 仍为 1 |
+| v1（陌生人通话门槛） | 2026-11-17 | 新增通话门槛：好友直接放行；非好友需双方各在该单聊发过至少一条普通消息，否则 `call.invite` 回 `CALL_FORBIDDEN`（403）；新增 `GET /api/calls/can-call/{conversationId}` 供客户端预判并置灰入口；帧格式与 `protocolVersion` 不变 |
