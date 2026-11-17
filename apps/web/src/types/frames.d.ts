@@ -499,6 +499,8 @@ export interface CallIncomingFrame extends FrameBase {
   kind: CallKind
   peer: CallPeer
   createdAt: number
+  /** false 表示本设备不支持接听，只能提示“请在其他设备接听”。 */
+  callSupported?: boolean
 }
 
 /** call.ringing：被叫回执「已响铃」（服务端转给主叫） */
@@ -579,6 +581,8 @@ export interface CallStateFrame extends FrameBase {
   createdAt?: number | null
   answeredAt?: number | null
   connectedAt?: number | null
+  /** 本端在主被叫中的角色：主叫重连时据此恢复呼叫界面而不是来电界面 */
+  direction?: 'outgoing' | 'incoming' | null
 }
 
 /** 客户端可发送的帧 */

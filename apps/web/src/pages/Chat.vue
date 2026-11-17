@@ -15,6 +15,7 @@ import MessageActionMenu from '../components/MessageActionMenu.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
+import { callsApi } from '../api/calls'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
 import { messagesApi } from '../api/messages'
@@ -99,9 +100,34 @@ const activeConversation = computed(() =>
 // Web 浏览器没有麦克风/摄像头通话能力，入口一并隐藏。
 const call = useCallStore()
 const callEnabled = computed(() => isDesktopShell() || isNativeShell())
+
+// 通话门槛（2026-11-17 裁决）：好友直接放行；非好友必须双方都发过消息（含历史记录）。
+// 未满足时入口置灰但仍可点，点击给提示；服务端在 call.invite 时还会再校验一次。
+const callAllowed = ref(false)
+let callAccessToken = 0
+
+async function refreshCallAllowed(): Promise<void> {
+  const conversation = activeConversation.value
+  if (!callEnabled.value || !conversation || conversation.type !== 'direct') {
+    callAllowed.value = false
+    return
+  }
+  const token = ++callAccessToken
+  try {
+    const result = await callsApi.canCall(conversation.conversationId)
+    if (token === callAccessToken) callAllowed.value = result.allowed
+  } catch {
+    if (token === callAccessToken) callAllowed.value = false
+  }
+}
+
 function startCall(kind: 'audio' | 'video'): void {
   const conversation = activeConversation.value
   if (!conversation || conversation.type !== 'direct' || call.snapshot) return
+  if (!callAllowed.value) {
+    showToast('双方聊过之后才能发起通话', 'info')
+    return
+  }
   void call.startCall(conversation.conversationId, kind)
 }
 
@@ -223,6 +249,13 @@ watch(listFilter, (filter) => {
     // 仅影响返回恢复。
   }
 })
+// 服务端拒收（含重发再次被拒）：提示具体原因，避免只看到徽标以为没反应。
+watch(
+  () => messages.sendRejection,
+  (rejection) => {
+    if (rejection) showToast(rejection.text, 'error')
+  },
+)
 watch(
   () => route.query.group,
   (group) => {
@@ -253,6 +286,21 @@ function openConversationSearch(): void {
 // 当前会话的消息缓存（已落库事实消息 + 乐观发送中的本地消息）与历史分页状态。
 const activeMessages = computed(() =>
   activeId.value ? messages.messagesOf(activeId.value) : [],
+)
+
+// 通话门槛随会话切换与消息变化刷新：对方回复一条即可解锁（服务端按双方都发过消息判定）。
+watch(
+  () => activeConversation.value?.conversationId,
+  () => {
+    void refreshCallAllowed()
+  },
+  { immediate: true },
+)
+watch(
+  () => activeMessages.value[activeMessages.value.length - 1]?.messageId,
+  () => {
+    void refreshCallAllowed()
+  },
 )
 const activePending = computed(() =>
   activeId.value ? messages.pendingOf(activeId.value) : [],
@@ -2228,6 +2276,13 @@ function onWindowDrop(event: DragEvent): void {
       @drop="onDrop"
     >
       <NoticeBar v-if="pageNotice" :text="pageNotice" action-label="知道了" @action="pageNotice = ''" />
+      <NoticeBar
+        v-if="call.remoteRing && !call.snapshot"
+        :text="call.remoteRingText"
+        tone="warning"
+        action-label="知道了"
+        @action="call.dismissRemoteRing()"
+      />
 
       <template v-if="previewUser">
         <div class="chat-page__profile">
@@ -2260,6 +2315,7 @@ function onWindowDrop(event: DragEvent): void {
           :muted="activeConversation.muted"
           :show-back="true"
           :call-enabled="callEnabled"
+          :call-allowed="callAllowed"
           @open-group="toggleGroupDrawer"
           @open-files="toggleFilesPanel"
           @toggle-mute="toggleMute"

@@ -23,8 +23,10 @@ const props = withDefaults(
     muted?: boolean
     /** 是否显示 1:1 语音/视频入口（仅 Windows/Android 壳的单聊，Web 浏览器不声明通话能力）。 */
     callEnabled?: boolean
+    /** 当前会话是否已满足通话门槛（好友或双方都发过消息）；不满足时按钮置灰但仍可点，用提示告知原因。 */
+    callAllowed?: boolean
   }>(),
-  { showBack: false, avatarFileId: null, muted: false, callEnabled: false },
+  { showBack: false, avatarFileId: null, muted: false, callEnabled: false, callAllowed: true },
 )
 
 const emit = defineEmits<{
@@ -143,9 +145,14 @@ defineExpose({ moreButtonEl: moreButton })
       <button
         v-if="callEnabled && !isGroup"
         type="button"
-        class="ec-chat-header__action ec-chat-header__icon-button"
+        :class="[
+          'ec-chat-header__action',
+          'ec-chat-header__icon-button',
+          { 'ec-chat-header__action--disabled': !callAllowed },
+        ]"
+        :aria-disabled="!callAllowed"
+        :title="callAllowed ? '语音通话' : '双方聊过之后才能发起通话'"
         aria-label="发起语音通话"
-        title="语音通话"
         @click="emit('call-audio')"
       >
         <AppIcon name="phone" />
@@ -153,9 +160,14 @@ defineExpose({ moreButtonEl: moreButton })
       <button
         v-if="callEnabled && !isGroup"
         type="button"
-        class="ec-chat-header__action ec-chat-header__icon-button"
+        :class="[
+          'ec-chat-header__action',
+          'ec-chat-header__icon-button',
+          { 'ec-chat-header__action--disabled': !callAllowed },
+        ]"
+        :aria-disabled="!callAllowed"
+        :title="callAllowed ? '视频通话' : '双方聊过之后才能发起通话'"
         aria-label="发起视频通话"
-        title="视频通话"
         @click="emit('call-video')"
       >
         <AppIcon name="video" />
@@ -330,6 +342,12 @@ defineExpose({ moreButtonEl: moreButton })
 .ec-chat-header__action:focus-visible {
   outline: var(--ec-focus-width) solid var(--ec-focus-ring);
   outline-offset: var(--ec-focus-offset);
+}
+
+/* 未满足通话门槛：置灰但仍可点，客户端用 toast 说明原因（隐藏入口会让人找不到通话）。 */
+.ec-chat-header__action--disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 /* 「更多」菜单：相对触发按钮定位；阴影只用于浮层（批次 B1 规则）。 */

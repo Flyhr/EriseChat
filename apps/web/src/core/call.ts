@@ -10,6 +10,8 @@ export interface CallSnapshot {
   conversationId: string
   kind: CallKind
   phase: CallPhase
+  /** 本端是主叫还是被叫；重连同步时按服务端 call.state.direction 恢复。 */
+  direction: 'outgoing' | 'incoming'
   peer: CallPeer | null
   createdAt: number
   answeredAt: number | null
@@ -23,6 +25,10 @@ export interface CallMediaSignals {
   onIce: (candidate: RTCIceCandidateInit) => void
   /** 通话结束（本地或远端发起），参数为 end.cancel 的 reason。 */
   onEnded: (reason: string) => void
+  /** 本端不能接听（Web/旧客户端）时的来电提示。 */
+  onUnsupportedIncoming?: (info: { peer: CallPeer; kind: CallKind }) => void
+  /** 上面那通来电被主叫取消/超时结束。 */
+  onUnsupportedIncomingEnded?: () => void
 }
 
 /** 通话状态变化的监听器签名。 */
@@ -33,6 +39,8 @@ class CallClient {
   private readonly listeners = new Set<CallChangeListener>()
   private media: CallMediaSignals | null = null
   private attached = false
+  /** 只用于提示“请在其他设备接听”的来电 ID（本端不接听，不建快照）。 */
+  private unsupportedCallId: string | null = null
 
   /** 当前通话快照（无通话为 null）。 */
   get current(): CallSnapshot | null {
@@ -67,12 +75,13 @@ class CallClient {
       conversationId,
       kind,
       phase: 'outgoing',
+      direction: 'outgoing',
       peer: null,
       createdAt: Date.now(),
       answeredAt: null,
       connectedAt: null,
     }
-    chatWs.send({ type: 'call.invite', callId, conversationId, kind })
+    chatWs.send({ type: 'call.invite', reqId: callId, callId, conversationId, kind })
     this.emit()
     return callId
   }
@@ -137,6 +146,14 @@ class CallClient {
           kind: CallKind
           peer: CallPeer
           createdAt: number
+          callSupported?: boolean
+        }
+        // Web 与旧客户端不能接听：只提示“请在其他设备接听”，不进入来电状态。
+        if (incoming.callSupported === false) {
+          if (this.snapshot) return
+          this.unsupportedCallId = incoming.callId
+          this.media?.onUnsupportedIncoming?.({ peer: incoming.peer, kind: incoming.kind })
+          break
         }
         if (this.snapshot) return
         this.snapshot = {
@@ -144,6 +161,7 @@ class CallClient {
           conversationId: incoming.conversationId,
           kind: incoming.kind,
           phase: 'incoming',
+          direction: 'incoming',
           peer: incoming.peer,
           createdAt: incoming.createdAt,
           answeredAt: null,
@@ -161,20 +179,34 @@ class CallClient {
           createdAt?: number | null
           answeredAt?: number | null
           connectedAt?: number | null
+          direction?: 'outgoing' | 'incoming' | null
         }
         if (!state.callId) {
           if (this.snapshot) {
             this.clear('sync')
           }
+          if (this.unsupportedCallId) {
+            this.unsupportedCallId = null
+            this.media?.onUnsupportedIncomingEnded?.()
+          }
           break
         }
         if (!this.snapshot) {
-          // 重连后恢复进行中的通话：按服务端状态重建快照（振铃态视为来电）。
+          // 重连后恢复进行中的通话：按服务端状态重建快照（按 direction 区分主被叫）。
+          const direction = state.direction ?? 'incoming'
           this.snapshot = {
             callId: state.callId,
             conversationId: '',
             kind: state.kind ?? 'audio',
-            phase: state.state === 'ringing' ? 'incoming' : state.state === 'active' ? 'active' : 'connecting',
+            phase:
+              state.state === 'ringing'
+                ? direction === 'outgoing'
+                  ? 'outgoing'
+                  : 'incoming'
+                : state.state === 'active'
+                  ? 'active'
+                  : 'connecting',
+            direction,
             peer: state.peer ?? null,
             createdAt: state.createdAt ?? Date.now(),
             answeredAt: state.answeredAt ?? null,
@@ -218,8 +250,20 @@ class CallClient {
       case 'call.cancel':
       case 'call.end': {
         const ended = frame as { callId: string; reason?: string | null }
+        if (ended.callId === this.unsupportedCallId) {
+          this.unsupportedCallId = null
+          this.media?.onUnsupportedIncomingEnded?.()
+          return
+        }
         if (!this.snapshot || this.snapshot.callId !== ended.callId) return
         this.clear(ended.reason ?? (typed.type === 'call.end' ? 'completed' : 'canceled'))
+        break
+      }
+      case 'error': {
+        // 服务端拒绝呼叫（忙、不可达、被拉黑等）：reqId 即 callId，收到后就地收场。
+        const error = frame as { code?: string; reqId?: string | null }
+        if (!this.snapshot || !error.reqId || this.snapshot.callId !== error.reqId) return
+        this.clear(`error:${error.code ?? 'UNKNOWN'}`)
         break
       }
       default:
