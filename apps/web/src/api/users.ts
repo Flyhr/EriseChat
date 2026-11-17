@@ -37,6 +37,9 @@ export const usersApi = {
    */
   search: (search: string) => http.get<SearchUsersResponse>('/users', { query: { search } }),
 
+  /** 资料页：按 userId 读取对方资料（GET /api/users/{userId}；仅好友或同会话成员可见，含邮箱）。 */
+  profile: (userId: string) => http.get<UserProfile>(`/users/${encodeURIComponent(userId)}`),
+
   /** 读取隐私设置（GET /api/me/privacy）。 */
   privacy: () => http.get<PrivacySettings>('/me/privacy'),
 

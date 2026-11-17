@@ -35,7 +35,7 @@ const props = defineProps<{
   blocked?: boolean
   /** 拉黑/解除拉黑请求进行中。 */
   blockBusy?: boolean
-  /** 是否展示拉黑入口（聊天页的资料预览不提供拉黑操作）。 */
+  /** 是否展示拉黑入口（Boolean prop 缺省会被 Vue 转成 false，需要显示时必须显式传 true）。 */
   showBlock?: boolean
 }>()
 
@@ -45,10 +45,22 @@ const emit = defineEmits<{
   'update-friend': [payload: { userId: string; remark?: string; groupName?: string }]
   'remove-friend': [friend: Friend]
   'toggle-block': [user: ContactUser]
+  'preview-avatar': []
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.presence))
 const displayName = computed(() => props.friend?.remark?.trim() || props.user?.displayName || '')
+
+/** 成为好友的日期（本地化显示；无好友关系时不显示）。 */
+const friendSinceText = computed(() => {
+  const createdAt = props.friend?.createdAt
+  if (!createdAt) return ''
+  return new Date(createdAt).toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+})
 
 const remark = ref('')
 const groupName = ref('')
@@ -101,17 +113,29 @@ function saveFriend(): void {
 <template>
   <div class="contact-profile">
     <div v-if="user" class="contact-profile__card">
-      <Avatar
-        :display-name="displayName"
-        :avatar-file-id="user.avatarFileId ?? undefined"
-        :size="64"
-      />
+      <button
+        type="button"
+        class="contact-profile__avatar-button"
+        aria-label="查看头像大图"
+        title="查看头像大图"
+        @click="emit('preview-avatar')"
+      >
+        <Avatar
+          :display-name="displayName"
+          :avatar-file-id="user.avatarFileId ?? undefined"
+          :size="64"
+        />
+      </button>
       <h3 class="contact-profile__name">{{ displayName }}</h3>
       <p class="contact-profile__presence">
         <PresenceDot :online="presence" />
         <span>{{ presenceText }}</span>
       </p>
-      <p v-if="user.email" class="contact-profile__email">{{ user.email }}</p>
+      <p v-if="user.email" class="contact-profile__email">
+        <span class="contact-profile__email-label">邮箱</span>
+        <span class="contact-profile__email-value">{{ user.email }}</span>
+      </p>
+      <p v-if="friendSinceText" class="contact-profile__meta">成为好友 · {{ friendSinceText }}</p>
 
       <div class="contact-profile__actions">
         <button
@@ -234,11 +258,44 @@ function saveFriend(): void {
   font-size: var(--ec-font-size-secondary);
 }
 
-.contact-profile__email {
+.contact-profile__avatar-button {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  border-radius: var(--ec-radius-full, 999px);
+  background: none;
+  cursor: zoom-in;
+}
+
+.contact-profile__avatar-button:focus-visible {
+  outline: 2px solid var(--ec-focus-ring);
+  outline-offset: 3px;
+}
+
+.contact-profile__meta {
   margin: 0;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.contact-profile__email {
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  gap: var(--ec-space-2);
   color: var(--ec-text-secondary);
   font-size: var(--ec-font-size-body);
   word-break: break-all;
+}
+
+.contact-profile__email-label {
+  flex: none;
+  color: var(--ec-text-tertiary);
+  font-size: var(--ec-font-size-small);
+}
+
+.contact-profile__email-value {
+  min-width: 0;
 }
 
 .contact-profile__actions {

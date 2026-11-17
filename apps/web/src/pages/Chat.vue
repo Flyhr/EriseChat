@@ -15,7 +15,9 @@ import MessageActionMenu from '../components/MessageActionMenu.vue'
 import MessageList from '../components/MessageList.vue'
 import NoticeBar from '../components/NoticeBar.vue'
 import SendBox from '../components/SendBox.vue'
+import { blocksApi } from '../api/blocks'
 import { callsApi } from '../api/calls'
+import { usersApi } from '../api/users'
 import { conversationsApi } from '../api/conversations'
 import { filesApi } from '../api/files'
 import { messagesApi } from '../api/messages'
@@ -61,7 +63,7 @@ import { useFavoritesStore } from '../stores/favorites'
 import { useFriendsStore } from '../stores/friends'
 import { useSearchStore } from '../stores/search'
 import type { UserProfile } from '../api/users'
-import type { Conversation, Message } from '../types/frames'
+import type { Conversation, Friend, Message } from '../types/frames'
 
 // 聊天主页面（M2-04 会话列表 + M2-05 消息流 + M3-08 群聊）：左侧会话列表，右侧消息流与发送框。
 // 规则：页面只做编排，状态走 stores/，连接走 core/ws.ts，不直接 new WebSocket / fetch。
@@ -145,6 +147,40 @@ const previewPresence = computed(() => presence.stateOf(previewUser.value?.userI
 const previewRelation = computed<'friend' | 'outgoing' | 'incoming' | null>(() =>
   previewFriend.value ? 'friend' : previewUser.value?.relation ?? null,
 )
+/** 资料页：保存好友备注与分组（与联系人页共用 friends store，避免两套逻辑）。 */
+const savingPeerFriend = ref(false)
+async function savePeerFriend(payload: { userId: string; remark?: string; groupName?: string }): Promise<void> {
+  if (savingPeerFriend.value) return
+  savingPeerFriend.value = true
+  try {
+    await friends.updateFriend(payload.userId, { remark: payload.remark, groupName: payload.groupName })
+    showToast('好友备注已保存', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    savingPeerFriend.value = false
+  }
+}
+/** 资料页：删除好友前二次确认，确认后解除关系但保留聊天记录。 */
+const removingPeerFriend = ref<Friend | null>(null)
+const removingPeerBusy = ref(false)
+function askRemovePeerFriend(friend: Friend): void {
+  removingPeerFriend.value = friend
+}
+async function confirmRemovePeerFriend(): Promise<void> {
+  const friend = removingPeerFriend.value
+  if (!friend || removingPeerBusy.value) return
+  removingPeerBusy.value = true
+  try {
+    await friends.removeFriend(friend.userId)
+    removingPeerFriend.value = null
+    showToast('已删除好友', 'success')
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    removingPeerBusy.value = false
+  }
+}
 const isGroup = computed(() => activeConversation.value?.type === 'group')
 /** F-25：群聊 @ 成员候选（单聊为空 = 不启用候选面板）；角色用于候选行小字。 */
 const mentionCandidates = computed<MentionCandidateMember[]>(() => {
@@ -1447,6 +1483,96 @@ function closeUserPreview(): void {
   previewUser.value = null
 }
 
+/**
+ * 顶部头像/名称点击：进入对方资料页（单聊）。
+ * 先用会话成员里的昵称与头像兜底，再补拉完整资料（含邮箱）替换。
+ */
+async function openPeerProfile(): Promise<void> {
+  const member = otherMemberOf(activeConversation.value, selfUserId.value)
+  if (!member) return
+  void friends.ensureLoaded().catch(() => undefined)
+  previewUser.value = {
+    userId: member.userId,
+    displayName: member.displayName,
+    avatarFileId: member.avatarFileId,
+    role: 'user',
+    status: 'active',
+    createdAt: 0,
+  }
+  try {
+    const profile = await usersApi.profile(member.userId)
+    if (previewUser.value?.userId === member.userId) previewUser.value = profile
+  } catch {
+    // 拉取失败时保留会话内的昵称与头像，邮箱留空。
+  }
+}
+
+/** 资料页的拉黑状态：随预览对象切换刷新（搜索预览与聊天资料页共用）。 */
+const peerBlocked = ref(false)
+const peerBlockBusy = ref(false)
+
+async function refreshPeerBlocked(): Promise<void> {
+  const userId = previewUser.value?.userId
+  if (!userId) return
+  try {
+    const { blocks } = await blocksApi.list()
+    if (previewUser.value?.userId === userId) {
+      peerBlocked.value = blocks.some((item) => item.userId === userId)
+    }
+  } catch {
+    // 拉黑状态仅用于按钮展示，失败时保持原值。
+  }
+}
+
+watch(
+  () => previewUser.value?.userId,
+  (userId) => {
+    if (userId) void refreshPeerBlocked()
+    else peerBlocked.value = false
+  },
+)
+
+async function togglePeerBlock(): Promise<void> {
+  const user = previewUser.value
+  if (!user || peerBlockBusy.value) return
+  peerBlockBusy.value = true
+  try {
+    if (peerBlocked.value) {
+      await blocksApi.unblock(user.userId)
+      peerBlocked.value = false
+      showToast('已解除拉黑')
+    } else {
+      await blocksApi.block(user.userId)
+      peerBlocked.value = true
+      showToast('已拉黑')
+    }
+  } catch (error) {
+    showToast(friendlyError(error), 'error')
+  } finally {
+    peerBlockBusy.value = false
+  }
+}
+
+/** 资料页点头像：全屏预览对方头像（复用会话图片预览组件）。 */
+const avatarPreview = ref<{ items: { messageId: string; name: string; url: string | null }[]; index: number } | null>(null)
+
+async function openAvatarPreview(): Promise<void> {
+  const user = previewUser.value
+  if (!user?.avatarFileId) return
+  const fileId = user.avatarFileId
+  const item = { messageId: `avatar-${user.userId}`, name: user.displayName, url: null as string | null }
+  avatarPreview.value = { items: [item], index: 0 }
+  try {
+    const url = await getOrLoadBlobUrl(fileId, () => filesApi.downloadBlob(fileId))
+    if (previewUser.value?.avatarFileId === fileId) {
+      avatarPreview.value = { items: [{ ...item, url }], index: 0 }
+    }
+  } catch {
+    avatarPreview.value = null
+    showToast('头像加载失败', 'error')
+  }
+}
+
 /** 资料预览里明确点「发送消息」才创建单聊并进入会话。 */
 async function startPreviewChat(user: { userId: string }): Promise<void> {
   try {
@@ -2298,9 +2424,17 @@ function onWindowDrop(event: DragEvent): void {
             :presence="previewPresence"
             :friend="previewFriend"
             :relation="previewRelation"
-            :show-block="false"
+            :saving="savingPeerFriend"
+            :removing="removingPeerBusy"
+            :blocked="peerBlocked"
+            :block-busy="peerBlockBusy"
+            :show-block="true"
             @start-chat="startPreviewChat"
             @send-request="requestPreviewFriend"
+            @update-friend="savePeerFriend"
+            @remove-friend="askRemovePeerFriend"
+            @toggle-block="togglePeerBlock"
+            @preview-avatar="openAvatarPreview"
           />
         </div>
       </template>
@@ -2321,6 +2455,7 @@ function onWindowDrop(event: DragEvent): void {
           @toggle-mute="toggleMute"
           @call-audio="startCall('audio')"
           @call-video="startCall('video')"
+          @open-profile="openPeerProfile"
           @back="backToList"
           @search="openConversationSearch"
         />
@@ -2535,6 +2670,13 @@ function onWindowDrop(event: DragEvent): void {
       @close="closePreview"
       @update:index="onPreviewIndex"
     />
+    <ImagePreview
+      v-if="avatarPreview"
+      :open="true"
+      :items="avatarPreview.items"
+      :index="avatarPreview.index"
+      @close="avatarPreview = null"
+    />
     <MessageActionMenu
       :open="Boolean(actionMenu)"
       :message="actionMenuMessage"
@@ -2594,6 +2736,16 @@ function onWindowDrop(event: DragEvent): void {
       :batch-id="forwardBatchId"
       @close="onForwardClose"
       @forwarded="onForwarded"
+    />
+    <AppDialog
+      :open="Boolean(removingPeerFriend)"
+      :title="`删除好友 ${removingPeerFriend ? friends.displayNameOf(removingPeerFriend.userId) : ''}`"
+      message="删除后将解除好友关系，聊天记录仍会保留。确定删除？"
+      tone="danger"
+      confirm-text="删除"
+      :busy="removingPeerBusy"
+      @cancel="removingPeerFriend = null"
+      @confirm="confirmRemovePeerFriend"
     />
   </main>
 </template>

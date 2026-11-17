@@ -37,6 +37,7 @@ const emit = defineEmits<{
   search: []
   'call-audio': []
   'call-video': []
+  'open-profile': []
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.peerPresence))
@@ -120,24 +121,34 @@ defineExpose({ moreButtonEl: moreButton })
         <AppIcon name="back" />
       </button>
 
-      <!-- UI-D P2：头像常驻（单聊用彩色首字母回退），在线状态改为标题下方副标题。 -->
-      <Avatar
-        :display-name="title"
-        :avatar-file-id="avatarFileId ?? undefined"
-        :size="36"
-        class="ec-chat-header__avatar"
-      />
+      <!-- UI-D P2：头像常驻（单聊用彩色首字母回退），在线状态改为标题下方副标题。
+           单聊时头像与名称整体可点，进入对方资料页；群聊沿用右上角「群资料」。 -->
+      <component
+        :is="isGroup ? 'div' : 'button'"
+        :class="['ec-chat-header__profile', { 'ec-chat-header__profile--static': isGroup }]"
+        :type="isGroup ? undefined : 'button'"
+        :aria-label="isGroup ? undefined : '查看对方资料'"
+        :title="isGroup ? undefined : '查看对方资料'"
+        @click="isGroup ? undefined : emit('open-profile')"
+      >
+        <Avatar
+          :display-name="title"
+          :avatar-file-id="avatarFileId ?? undefined"
+          :size="36"
+          class="ec-chat-header__avatar"
+        />
 
-      <div class="ec-chat-header__identity">
-        <h2 class="ec-chat-header__title" :title="title">{{ title }}</h2>
-        <p class="ec-chat-header__subtitle">
-          <template v-if="!isGroup">
-            <PresenceDot :online="peerPresence" />
-            <span>{{ presenceText }}</span>
-          </template>
-          <span v-else>{{ memberCount }} 人</span>
-        </p>
-      </div>
+        <div class="ec-chat-header__identity">
+          <h2 class="ec-chat-header__title" :title="title">{{ title }}</h2>
+          <p class="ec-chat-header__subtitle">
+            <template v-if="!isGroup">
+              <PresenceDot :online="peerPresence" />
+              <span>{{ presenceText }}</span>
+            </template>
+            <span v-else>{{ memberCount }} 人</span>
+          </p>
+        </div>
+      </component>
     </div>
 
     <div class="ec-chat-header__actions">
@@ -242,6 +253,34 @@ defineExpose({ moreButtonEl: moreButton })
 
 <style scoped>
 /* UI-D P2：标题 + 状态副标题两行结构；原有横向状态样式保留给窄屏降级。 */
+.ec-chat-header__profile {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--ec-space-2);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ec-chat-header__profile--static {
+  cursor: default;
+}
+
+.ec-chat-header__profile:focus-visible {
+  outline: 2px solid var(--ec-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--ec-radius-panel);
+}
+
+.ec-chat-header__profile:hover .ec-chat-header__title {
+  color: var(--ec-brand-600);
+}
+
 .ec-chat-header__identity {
   display: flex;
   flex-direction: column;
