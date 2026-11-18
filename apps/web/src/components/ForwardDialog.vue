@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import AppDialog from './AppDialog.vue'
 import Avatar from './Avatar.vue'
 import EmptyState from './EmptyState.vue'
-import { otherMemberOf } from '../core/conversationTitle'
+import { conversationTitle, otherMemberOf } from '../core/conversationTitle'
 import { filterForwardTargets, forwardPreviewOf } from '../core/forward'
 import { resolveApiBase } from '../core/config'
 import { friendlyError } from '../core/errorMessages'
@@ -42,6 +42,8 @@ const props = defineProps<{
   selfUserId: string
   /** 由父组件在开始新一批时递增；关闭/重新打开同一批不会重置幂等键与失败项。 */
   batchId: number
+  /** 好友备注取值：非空时优先作为目标会话标题。 */
+  remarkOf?: (userId: string) => string | undefined
 }>()
 
 const emit = defineEmits<{
@@ -55,6 +57,15 @@ const conversations = useConversationsStore()
 function avatarOf(conversation: Conversation): string | undefined {
   if (conversation.type === 'group') return conversation.avatarFileId ?? undefined
   return otherMemberOf(conversation, props.selfUserId)?.avatarFileId
+}
+/** 目标会话标题：单聊优先好友备注。 */
+function titleOf(conversation: Conversation): string {
+  return conversationTitle(conversation, props.selfUserId, { groupStyle: 'plain', remarkOf: props.remarkOf })
+}
+/** 头像首字母/配色用账号昵称（群聊用群名），不随备注变化。 */
+function avatarNameOf(conversation: Conversation): string {
+  if (conversation.type === 'group') return conversation.title
+  return otherMemberOf(conversation, props.selfUserId)?.displayName ?? conversation.title
 }
 const messagesStore = useMessagesStore()
 
@@ -300,11 +311,12 @@ async function confirmForward(): Promise<void> {
           @click="selectedId = conversation.conversationId"
         >
           <Avatar
-            :display-name="conversation.title"
+            :display-name="titleOf(conversation)"
+            :seed="avatarNameOf(conversation)"
             :size="32"
             :avatar-file-id="avatarOf(conversation)"
           />
-          <span class="forward-dialog__title">{{ conversation.title }}</span>
+          <span class="forward-dialog__title">{{ titleOf(conversation) }}</span>
           <span class="forward-dialog__type">{{ conversation.type === 'group' ? '群聊' : '单聊' }}</span>
         </button>
       </div>

@@ -224,9 +224,14 @@ const activeTitle = computed(() =>
     ? conversationTitle(activeConversation.value, selfUserId.value, {
         groupStyle: 'plain',
         fallback: '单聊会话',
+        remarkOf: remarkOfFriend,
       })
     : '',
 )
+/** 好友备注取值（userId → 备注），用于会话列表/顶栏/转发弹窗的「备注优先」标题。 */
+function remarkOfFriend(userId: string): string | undefined {
+  return friends.displayNameOf(userId) || undefined
+}
 
 // 页内提示（M3-08：被移出/退出群聊等）；不引第三方 toast。
 const pageNotice = ref('')
@@ -1315,6 +1320,11 @@ const headerAvatarFileId = computed(() => {
   return conversation.members.find((member) => member.userId === peerId)?.avatarFileId ?? null
 })
 
+/** 顶栏头像首字母/配色的取值：单聊用对端账号原昵称，好友备注改名不影响头像。 */
+const headerAvatarName = computed(() =>
+  isGroup.value ? '' : otherMemberOf(activeConversation.value, selfUserId.value)?.displayName ?? '',
+)
+
 /** 当前会话「输入中」提示（M3-09）：单聊「对方正在输入…」、群聊「X 正在输入…」/多人。 */
 const typingText = computed(() => {
   const conversation = activeConversation.value
@@ -2388,6 +2398,7 @@ function onWindowDrop(event: DragEvent): void {
       :active-id="activeId"
       :loading="conversations.loading"
       :filter="listFilter"
+      :remark-of="remarkOfFriend"
       @select="selectConversation"
       @select-user="openUserPreview"
       @update:filter="changeListFilter"
@@ -2446,6 +2457,7 @@ function onWindowDrop(event: DragEvent): void {
           :member-count="memberCount"
           :peer-presence="peerPresence"
           :avatar-file-id="headerAvatarFileId"
+          :avatar-name="headerAvatarName"
           :muted="activeConversation.muted"
           :show-back="true"
           :call-enabled="callEnabled"
@@ -2734,6 +2746,7 @@ function onWindowDrop(event: DragEvent): void {
       :messages="forwardMessages"
       :self-user-id="selfUserId"
       :batch-id="forwardBatchId"
+      :remark-of="remarkOfFriend"
       @close="onForwardClose"
       @forwarded="onForwarded"
     />

@@ -25,8 +25,10 @@ const props = withDefaults(
     callEnabled?: boolean
     /** 当前会话是否已满足通话门槛（好友或双方都发过消息）；不满足时按钮置灰但仍可点，用提示告知原因。 */
     callAllowed?: boolean
+    /** 单聊对端账号原昵称：备注改名时头像首字母/配色不跟着变（群聊留空用标题）。 */
+    avatarName?: string
   }>(),
-  { showBack: false, avatarFileId: null, muted: false, callEnabled: false, callAllowed: true },
+  { showBack: false, avatarFileId: null, muted: false, callEnabled: false, callAllowed: true, avatarName: '' },
 )
 
 const emit = defineEmits<{
@@ -133,6 +135,7 @@ defineExpose({ moreButtonEl: moreButton })
       >
         <Avatar
           :display-name="title"
+          :seed="avatarName || title"
           :avatar-file-id="avatarFileId ?? undefined"
           :size="36"
           class="ec-chat-header__avatar"

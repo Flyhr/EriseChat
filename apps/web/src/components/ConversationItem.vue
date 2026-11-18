@@ -24,6 +24,8 @@ const props = defineProps<{
   active?: boolean
   /** 未读条数（0 或未传时不展示角标；会话被选中时由父组件传 0） */
   unread?: number
+  /** 好友备注取值：返回非空时优先作为会话标题显示。 */
+  remarkOf?: (userId: string) => string | undefined
 }>()
 
 const emit = defineEmits<{
@@ -43,12 +45,19 @@ const otherMember = computed(() => {
 })
 
 const title = computed(() =>
-  conversationTitle(props.conversation, props.selfUserId, { fallback: '单聊会话' }),
+  conversationTitle(props.conversation, props.selfUserId, {
+    fallback: '单聊会话',
+    remarkOf: props.remarkOf,
+  }),
 )
 
 // F-23：群聊优先展示群头像；单聊仍展示对方个人头像。
 const avatarFileId = computed(
   () => otherMember.value?.avatarFileId ?? groupAvatarFileIdOf(props.conversation),
+)
+/** 头像首字母/配色固定用账号原昵称（群聊用群名），不随好友备注变化。 */
+const avatarName = computed(() =>
+  props.conversation.type === 'group' ? title.value : otherMember.value?.displayName ?? title.value,
 )
 
 // UI-D P2：单聊头像右下在线点。未知状态不显示（v1 无初始查询，不能把「未知」画成离线）。
@@ -215,7 +224,7 @@ function formatTime(timestamp: number): string {
       @click="emit('select', conversation.conversationId)"
     >
       <span class="conversation-item__avatar">
-        <Avatar :display-name="title" :avatar-file-id="avatarFileId ?? undefined" :size="44" />
+        <Avatar :display-name="title" :seed="avatarName" :avatar-file-id="avatarFileId ?? undefined" :size="44" />
         <span v-if="peerOnline" class="conversation-item__online" role="img" aria-label="在线" />
       </span>
       <span class="conversation-item__body">

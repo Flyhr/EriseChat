@@ -27,6 +27,8 @@ const props = withDefaults(
     showRelationActions?: boolean
     /** 当前选中用户（联系人页右侧资料区）。 */
     activeUserId?: string
+    /** 好友备注取值：非空时优先作为会话行标题。 */
+    remarkOf?: (userId: string) => string | undefined
   }>(),
   { showConversations: false, showRelationActions: false, activeUserId: '' },
 )
@@ -79,7 +81,7 @@ const showEmpty = computed(
 const emptyText = '没有匹配结果'
 
 function conversationName(conversation: Conversation): string {
-  return conversationTitle(conversation, props.selfUserId, { groupStyle: 'plain' })
+  return conversationTitle(conversation, props.selfUserId, { groupStyle: 'plain', remarkOf: props.remarkOf })
 }
 
 function conversationAvatar(conversation: Conversation): string | undefined {

@@ -49,7 +49,12 @@ const emit = defineEmits<{
 }>()
 
 const presenceText = computed(() => presenceLabelOf(props.presence))
+// 备注优先作为标题（与会话列表/顶栏一致）；设置了备注时在下方补一行原昵称。
 const displayName = computed(() => props.friend?.remark?.trim() || props.user?.displayName || '')
+const nicknameText = computed(() => {
+  const nickname = props.user?.displayName?.trim() ?? ''
+  return nickname && props.friend?.remark?.trim() ? nickname : ''
+})
 
 /** 成为好友的日期（本地化显示；无好友关系时不显示）。 */
 const friendSinceText = computed(() => {
@@ -122,11 +127,16 @@ function saveFriend(): void {
       >
         <Avatar
           :display-name="displayName"
+          :seed="user.displayName"
           :avatar-file-id="user.avatarFileId ?? undefined"
           :size="64"
         />
       </button>
       <h3 class="contact-profile__name">{{ displayName }}</h3>
+      <p v-if="nicknameText" class="contact-profile__remark">
+        <span class="contact-profile__remark-label">昵称</span>
+        <span class="contact-profile__remark-value">{{ nicknameText }}</span>
+      </p>
       <p class="contact-profile__presence">
         <PresenceDot :online="presence" />
         <span>{{ presenceText }}</span>
@@ -276,6 +286,22 @@ function saveFriend(): void {
   margin: 0;
   color: var(--ec-text-tertiary);
   font-size: var(--ec-font-size-small);
+}
+
+/* 备注单独一行展示（标题始终是账号昵称）。 */
+.contact-profile__remark {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ec-space-2);
+  margin: 0;
+  color: var(--ec-text-secondary);
+  font-size: var(--ec-font-size-small);
+  word-break: break-word;
+}
+
+.contact-profile__remark-label {
+  flex: none;
+  color: var(--ec-text-tertiary);
 }
 
 .contact-profile__email {

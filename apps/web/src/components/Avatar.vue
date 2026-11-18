@@ -13,6 +13,8 @@ const props = defineProps<{
   size?: number
   avatarFileId?: string
   avatarUrl?: string
+  /** 稳定标识（如账号原昵称）：备注改名后仍沿用同一首字母与配色，避免头像跟着变。 */
+  seed?: string
 }>()
 
 // 主题无关的固定色板：与 --ec-* 主题变量解耦，切换主题时头像辨识色保持一致。
@@ -34,10 +36,11 @@ function toneOf(name: string): { bg: string; fg: string } {
   return AVATAR_TONES[Math.abs(hash) % AVATAR_TONES.length]
 }
 
-const initial = computed(() => props.displayName.trim().charAt(0).toUpperCase() || '?')
+const seedName = computed(() => props.seed?.trim() || props.displayName)
+const initial = computed(() => seedName.value.trim().charAt(0).toUpperCase() || '?')
 const dimension = computed(() => `${props.size ?? 40}px`)
 const fontSize = computed(() => `${Math.max(12, Math.round((props.size ?? 40) * 0.42))}px`)
-const tone = computed(() => toneOf(props.displayName))
+const tone = computed(() => toneOf(seedName.value))
 
 /** 内部加载到的 object URL（仅 avatarFileId 路径使用）。 */
 const loadedUrl = ref<string | null>(null)

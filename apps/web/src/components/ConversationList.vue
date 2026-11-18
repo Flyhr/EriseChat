@@ -27,6 +27,8 @@ const props = defineProps<{
   activeId: string | null
   loading: boolean
   filter: ConversationFilter
+  /** 好友备注取值：非空时优先作为单聊会话标题。 */
+  remarkOf?: (userId: string) => string | undefined
 }>()
 
 const emit = defineEmits<{
@@ -260,6 +262,7 @@ async function onUpdateSettings(payload: {
           :self-user-id="selfUserId"
           :active="conversation.conversationId === activeId"
           :unread="unreadOf(conversation.conversationId)"
+          :remark-of="remarkOf"
           @select="emit('select', $event)"
           @update-settings="onUpdateSettings"
         />
@@ -278,6 +281,7 @@ async function onUpdateSettings(payload: {
       :strangers="strangerMatches"
       :messages="messageMatches"
       :self-user-id="selfUserId"
+      :remark-of="remarkOf"
       show-conversations
       @update:category="setCategory"
       @select-conversation="selectSearchConversation"
